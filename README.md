@@ -1,2 +1,1 @@
-# Sanchari
-a travel app
+
