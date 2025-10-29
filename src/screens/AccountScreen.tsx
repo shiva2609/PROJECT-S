@@ -1,10 +1,23 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useDispatch } from 'react-redux';
+import { logout } from '../store';
 import { colors } from '../utils/colors';
+import { AUTH_USER_KEY } from '../utils/constants';
 
 export default function AccountScreen() {
+  const dispatch = useDispatch();
+
   const onLogout = async () => {
-    Alert.alert('Logged out', 'Implement Firebase sign-out and Redux reset later.');
+    // clear persisted user and reset redux state
+    try {
+      await AsyncStorage.removeItem(AUTH_USER_KEY);
+    } catch (e) {
+      // ignore
+    }
+    dispatch(logout());
+    Alert.alert('Logged out', 'You have been logged out.');
   };
 
   return (

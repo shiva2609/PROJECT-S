@@ -1,35 +1,166 @@
-import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors } from '../../utils/colors';
-import { ONBOARDING_DONE_KEY } from '../../utils/constants';
+import React from "react";
+import { StyleSheet, Text, View, Pressable, ImageBackground } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useNavigation } from "@react-navigation/native";
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Color, Padding, Height, FontFamily } from "../../GlobalStyles";
 
-export default function OnboardingScreen3({ navigation }: any) {
-  const onGetStarted = async () => {
-    await AsyncStorage.setItem(ONBOARDING_DONE_KEY, '1');
-    navigation.replace('AuthLogin');
-  };
+type RootStackParamList = {
+  Onboarding1: undefined;
+  Onboarding2: undefined;
+  Onboarding3: undefined;
+  Onboarding4: undefined;
+  AuthLogin: undefined;
+  AuthSignup: undefined;
+};
+
+const OnboardingScreen3 = () => {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   return (
-    <View style={styles.container}>
-      <Image source={{ uri: 'https://images.unsplash.com/photo-1519882782034-7b3cc52c3f36?w=1200' }} style={styles.image} />
-      <Text style={styles.title}>Share Your Journey</Text>
-      <Text style={styles.sub}>Post photos, videos, and tips to inspire other travelers.</Text>
-      <View style={styles.actions}>
-        <TouchableOpacity onPress={onGetStarted} style={styles.next}>
-          <Text style={styles.nextText}>Get Started</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+      <ImageBackground 
+        source={require('../assets/images/onboard3.jpeg')}
+        style={styles.imageBackground}
+        resizeMode="cover"
+      >
+        {/* Back button */}
+        <View style={styles.backButtonContainer}>
+          <Pressable 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backButtonText}>Back</Text>
+          </Pressable>
+        </View>
+
+        {/* Bottom Content */}
+        <View style={styles.bottomContainer}>
+          <View style={styles.textContainer}>
+            <Text style={styles.title}>{`Connect &\nBe Inspired`}</Text>
+            <Text style={styles.subtitle}>
+              Find your vibe, get real-time experiences, and plan trips together.
+            </Text>
+          </View>
+
+          {/* Progress dots */}
+          <View style={styles.dotsContainer}>
+            <View style={[styles.dot, styles.inactiveDot]} />
+            <View style={[styles.dot, styles.inactiveDot]} />
+            <View style={[styles.dot, styles.activeDot]} />
+            <View style={[styles.dot, styles.inactiveDot]} />
+          </View>
+
+          {/* Navigation buttons */}
+          <View style={styles.buttonRow}>
+            <Pressable 
+              onPress={() => navigation.navigate('Onboarding4')}
+            >
+              <Text style={styles.skipText}>Skip</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.nextButton}
+              onPress={() => navigation.navigate('Onboarding4')}
+            >
+              <Text style={styles.nextText}>Next</Text>
+            </Pressable>
+          </View>
+        </View>
+      </ImageBackground>
+    </SafeAreaView>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, backgroundColor: colors.surface },
-  image: { width: '100%', height: 300, borderRadius: 16, marginTop: 24 },
-  title: { fontSize: 28, fontWeight: '700', color: colors.text, marginTop: 24 },
-  sub: { color: colors.mutedText, marginTop: 8 },
-  actions: { marginTop: 24, alignItems: 'flex-end' },
-  next: { backgroundColor: colors.primary, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
-  nextText: { color: 'white', fontWeight: '700' },
+  container: {
+    flex: 1,
+    backgroundColor: Color.colorWhite,
+  },
+  imageBackground: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  backButtonContainer: {
+    padding: Padding.padding_36,
+    marginTop: 20,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  backButtonText: {
+    color: Color.colorWhite,
+    fontSize: 16,
+    fontFamily: FontFamily.poppinsSemiBold,
+  },
+  bottomContainer: {
+    backgroundColor: Color.colorWhite,
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
+    paddingHorizontal: Padding.padding_36,
+    paddingVertical: 40,
+    minHeight: 320,
+  },
+  textContainer: {
+    marginBottom: 24,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "700",
+    fontFamily: FontFamily.poppinsBold,
+    color: Color.colorOrangered,
+    marginBottom: 12,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: Color.colorGray100,
+    fontFamily: FontFamily.poppinsRegular,
+    width: "90%",
+  },
+  dotsContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 30,
+  },
+  dot: {
+    width: 27,
+    height: Height.height_5,
+    borderRadius: 5,
+    backgroundColor: Color.colorWhitesmoke,
+  },
+  activeDot: {
+    backgroundColor: Color.colorOrangered,
+  },
+  inactiveDot: {
+    backgroundColor: Color.colorWhitesmoke,
+  },
+  buttonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  skipText: {
+    fontSize: 16,
+    fontFamily: FontFamily.poppinsSemiBold,
+    color: Color.colorDarkgray,
+  },
+  nextButton: {
+    backgroundColor: Color.colorOrangered,
+    borderRadius: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  nextText: {
+    color: Color.colorWhite,
+    fontSize: 15,
+    fontFamily: FontFamily.poppinsMedium,
+  },
 });
+
+export default OnboardingScreen3;

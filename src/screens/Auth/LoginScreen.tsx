@@ -4,6 +4,8 @@ import { colors } from '../../utils/colors';
 import { mockLogin } from '../../api/mockAuth';
 import { useDispatch } from 'react-redux';
 import { setUser } from '../../store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AUTH_USER_KEY } from '../../utils/constants';
 
 export default function LoginScreen({ navigation }: any) {
   const [email, setEmail] = useState('test@sanchari.app');
@@ -18,6 +20,12 @@ export default function LoginScreen({ navigation }: any) {
       dispatch(
         setUser({ id: user.uid, email: user.email, displayName: user.name, photoURL: user.photoURL })
       );
+      // persist user so splash screen can detect logged-in state
+      try {
+        await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify({ id: user.uid, email: user.email }));
+      } catch (e) {
+        // ignore storage errors
+      }
       navigation.replace('MainTabs');
     } catch (e: any) {
       Alert.alert('Login failed', e?.message || 'Please try again');

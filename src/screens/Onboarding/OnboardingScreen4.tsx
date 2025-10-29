@@ -1,20 +1,11 @@
 import React from "react";
-import {
-  StyleSheet,
-  Text,
-  View,
-  Pressable,
-  ImageBackground,
-} from "react-native";
+import { StyleSheet, Text, View, Pressable, ImageBackground } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import {
-  Color,
-  Padding,
-  Height,
-  FontFamily,
-} from "../../GlobalStyles";
+import { Color, Padding, Height, FontFamily } from "../../GlobalStyles";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ONBOARDING_DONE_KEY } from '../../utils/constants';
 
 type RootStackParamList = {
   Onboarding1: undefined;
@@ -25,47 +16,57 @@ type RootStackParamList = {
   AuthSignup: undefined;
 };
 
-const OnboardingScreen1 = () => {
+const OnboardingScreen4 = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      {/* Background Image */}
-      <ImageBackground
-        source={require("../assets/images/onboard1.jpeg")}
+      <ImageBackground 
+        source={require('../assets/images/onboard4.jpeg')}
         style={styles.imageBackground}
         resizeMode="cover"
       >
-        {/* Top spacer to match other onboarding screens (aligns image content) */}
-        <View style={styles.backButtonContainer} />
-        {/* Overlay content at bottom */}
-  <View style={styles.bottomContainer}>
+        {/* Back button */}
+        <View style={styles.backButtonContainer}>
+          <Pressable 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backButtonText}>Back</Text>
+          </Pressable>
+        </View>
+
+        {/* Bottom Content */}
+        <View style={styles.bottomContainer}>
           <View style={styles.textContainer}>
-            <Text style={styles.title}>{'Explore beyond\nthe maps'}</Text>
+            <Text style={styles.title}>{`Your All-in-One\nTravel Partner.`}</Text>
             <Text style={styles.subtitle}>
-              Find places that inspire not just destinations.
+              Plan, Discover, and book your next adventure, all in one place.
             </Text>
           </View>
 
           {/* Progress dots */}
           <View style={styles.dotsContainer}>
+            <View style={[styles.dot, styles.inactiveDot]} />
+            <View style={[styles.dot, styles.inactiveDot]} />
+            <View style={[styles.dot, styles.inactiveDot]} />
             <View style={[styles.dot, styles.activeDot]} />
-            <View style={styles.dot} />
-            <View style={styles.dot} />
-            <View style={styles.dot} />
           </View>
 
-          {/* Buttons */}
-          <View style={styles.buttonRow}>
-            <Pressable onPress={() => navigation.navigate("Onboarding4")}>
-              <Text style={styles.skipText}>Skip</Text>
-            </Pressable>
-
+          {/* Action buttons - single primary (Login). Mark onboarding done then go to Login screen */}
+          <View style={[styles.buttonRow, styles.singleButtonRow]}>
             <Pressable
-              style={styles.nextButton}
-              onPress={() => navigation.navigate("Onboarding2")}
+              style={styles.button}
+              onPress={async () => {
+                try {
+                  await AsyncStorage.setItem(ONBOARDING_DONE_KEY, 'true');
+                } catch (e) {
+                  // ignore
+                }
+                navigation.navigate('AuthLogin');
+              }}
             >
-              <Text style={styles.nextText}>Next</Text>
+              <Text style={styles.buttonText}>Login</Text>
             </Pressable>
           </View>
         </View>
@@ -73,6 +74,7 @@ const OnboardingScreen1 = () => {
     </SafeAreaView>
   );
 };
+
 
 const styles = StyleSheet.create({
   container: {
@@ -82,11 +84,23 @@ const styles = StyleSheet.create({
   imageBackground: {
     flex: 1,
     justifyContent: "space-between",
-    // keep full-bleed image to the top like other onboarding screens
   },
   backButtonContainer: {
     padding: Padding.padding_36,
     marginTop: 20,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  backButtonText: {
+    color: Color.colorWhite,
+    fontSize: 16,
+    fontFamily: FontFamily.poppinsSemiBold,
   },
   bottomContainer: {
     backgroundColor: Color.colorWhite,
@@ -127,27 +141,35 @@ const styles = StyleSheet.create({
   activeDot: {
     backgroundColor: Color.colorOrangered,
   },
+  inactiveDot: {
+    backgroundColor: Color.colorWhitesmoke,
+  },
   buttonRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 12,
   },
-  skipText: {
-    fontSize: 16,
-    fontFamily: FontFamily.poppinsSemiBold,
-    color: Color.colorDarkgray,
+  singleButtonRow: {
+    justifyContent: 'center',
+    paddingHorizontal: 12,
   },
-  nextButton: {
+  button: {
+    flex: 1,
     backgroundColor: Color.colorOrangered,
     borderRadius: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  nextText: {
+  getStartedButton: {
+    backgroundColor: Color.colorOrangered,
+  },
+  buttonText: {
     color: Color.colorWhite,
     fontSize: 15,
     fontFamily: FontFamily.poppinsMedium,
   },
 });
 
-export default OnboardingScreen1;
+export default OnboardingScreen4;
