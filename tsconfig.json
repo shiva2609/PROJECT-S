@@ -7,7 +7,15 @@
     },
     "strict": true,
     "noImplicitAny": true,
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "types": ["node", "react", "react-native"],
+    "allowJs": true,
+    "esModuleInterop": true,
+    "jsx": "react-native",
+    "lib": ["ES6", "DOM", "ESNext"],
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "skipLibCheck": true
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["**/node_modules", "**/Pods"]

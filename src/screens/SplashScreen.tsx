@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { ONBOARDING_DONE_KEY } from '../utils/constants';
+import { ONBOARDING_DONE_KEY, AUTH_USER_KEY } from '../utils/constants';
 import { colors } from '../utils/colors';
 
 type Props = {
@@ -27,11 +27,31 @@ export default function SplashScreen({ navigation }: Props) {
         useNativeDriver: true,
       }),
     ]).start(async () => {
-      const done = await AsyncStorage.getItem(ONBOARDING_DONE_KEY);
-      if (done) {
+      try {
+        const done = await AsyncStorage.getItem(ONBOARDING_DONE_KEY);
+        const userJson = await AsyncStorage.getItem(AUTH_USER_KEY);
+        // debug logs (remove in production)
+        // eslint-disable-next-line no-console
+        console.log('Splash: onboarding flag=', done, ' persisted user=', userJson);
+
+        const onboardingDone = done === 'true';
+
+        // If there's no persisted user, always start from onboarding (even if onboarding flag exists)
+        if (!userJson) {
+          navigation.replace('Onboarding1');
+          return;
+        }
+
+        // If user exists, ensure onboarding completed; otherwise show onboarding
+        if (!onboardingDone) {
+          navigation.replace('Onboarding1');
+          return;
+        }
+
+        // User is present and onboarding completed -> main app
+        navigation.replace('MainTabs');
+      } catch (e) {
         navigation.replace('AuthLogin');
-      } else {
-        navigation.replace('Onboarding1');
       }
     });
   }, [navigation, scale]);
