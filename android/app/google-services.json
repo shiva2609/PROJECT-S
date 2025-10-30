@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "893206677174",
+    "project_id": "sanchari-truetraveller",
+    "storage_bucket": "sanchari-truetraveller.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:893206677174:android:281783f1dabf4f4b5f8817",
+        "android_client_info": {
+          "package_name": "com.sanchari"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDCIh3_QXhfjY_RYj8zGY5DCUkYcCLFXx8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
