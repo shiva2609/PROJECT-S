@@ -2000,7 +2000,7 @@
     prompts "^2.4.2"
     semver "^7.5.2"
 
-"@react-native-firebase/app@^23.4.1":
+"@react-native-firebase/app@^23.5.0":
   version "23.5.0"
   resolved "https://registry.yarnpkg.com/@react-native-firebase/app/-/app-23.5.0.tgz#b84540b1822e510dfd3c3890e8ca10b2655759fe"
   integrity sha512-TOlm6V6fbILwgFP37QZM9Y0nfAW6zqNGVIWlMlepQB6b/BzzFMrCl1FiyknqD5l7i1jgdFQrqX1WH6ZO4ePa/g==
