@@ -6,8 +6,10 @@ export const COLLECTIONS = {
   trips: 'trips',
 };
 
-export const ONBOARDING_DONE_KEY = 'onboarding_done_v1';
+// No onboarding or travel select persistence anymore!
+// export const ONBOARDING_DONE_KEY = 'onboarding_done_v1';
 export const AUTH_USER_KEY = 'auth_user_v1';
+// export const TRAVEL_SELECT_DONE_KEY = 'travel_select_done_v1';
 
 export const DUMMY = {
   destinations: [
