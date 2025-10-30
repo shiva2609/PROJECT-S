@@ -10,6 +10,10 @@ import OnboardingScreen3 from '../screens/Onboarding/OnboardingScreen3';
 import OnboardingScreen4 from '../screens/Onboarding/OnboardingScreen4';
 import LoginScreen from '../screens/Auth/LoginScreen';
 import SignupScreen from '../screens/Auth/SignupScreen';
+import TravelPlanSelectScreen from '../screens/travel/TravelPlanSelectScreen';
+import ForgotPasswordScreen from '../screens/Auth/ForgotPasswordScreen';
+import ChangePasswordScreen from '../screens/Auth/ChangePasswordScreen';
+import PasswordChangedScreen from '../screens/Auth/PasswordChangedScreen';
 import HomeScreen from '../screens/HomeScreen';
 import ExploreScreen from '../screens/ExploreScreen';
 import CreatePostScreen from '../screens/CreatePostScreen';
@@ -58,25 +62,21 @@ export default function AppNavigator() {
     <NavigationContainer theme={{ ...DefaultTheme, colors: { ...DefaultTheme.colors, background: colors.background } }}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Splash" component={SplashScreen} />
-
-        {/* Onboarding group with smoother horizontal transitions */}
-        <Stack.Group
-          screenOptions={{
-            cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
-            transitionSpec: {
-              open: { animation: 'timing', config: { duration: 350 } },
-              close: { animation: 'timing', config: { duration: 300 } },
-            },
-          }}
-        >
+        <Stack.Group>
           <Stack.Screen name="Onboarding1" component={OnboardingScreen1} />
           <Stack.Screen name="Onboarding2" component={OnboardingScreen2} />
           <Stack.Screen name="Onboarding3" component={OnboardingScreen3} />
           <Stack.Screen name="Onboarding4" component={OnboardingScreen4} />
         </Stack.Group>
-
+        {/* Auth flow */}
         <Stack.Screen name="AuthLogin" component={LoginScreen} />
         <Stack.Screen name="AuthSignup" component={SignupScreen} />
+        <Stack.Screen name="AuthForgotPassword" component={ForgotPasswordScreen} />
+        <Stack.Screen name="AuthChangePassword" component={ChangePasswordScreen} />
+        <Stack.Screen name="AuthPasswordChanged" component={PasswordChangedScreen} />
+        {/* Travel Plan Select before Home */}
+        <Stack.Screen name="TravelPlanSelect" component={TravelPlanSelectScreen} />
+        {/* Main app tabs (home) */}
         <Stack.Screen name="MainTabs" component={Tabs} />
         <Stack.Screen name="Account" component={AccountScreen} />
       </Stack.Navigator>

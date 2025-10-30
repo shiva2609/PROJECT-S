@@ -19,9 +19,6 @@ target 'Sanchari' do
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
-  # Firebase pods are auto-linked by RNFirebase
-  pod 'react-native-config', :path => '../node_modules/react-native-config'
-
   post_install do |installer|
     react_native_post_install(
       installer,

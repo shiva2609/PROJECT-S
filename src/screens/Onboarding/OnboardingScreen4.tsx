@@ -4,8 +4,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Color, Padding, Height, FontFamily } from "../../GlobalStyles";
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ONBOARDING_DONE_KEY } from '../../utils/constants';
 
 type RootStackParamList = {
   Onboarding1: undefined;
@@ -57,12 +55,7 @@ const OnboardingScreen4 = () => {
           <View style={[styles.buttonRow, styles.singleButtonRow]}>
             <Pressable
               style={styles.button}
-              onPress={async () => {
-                try {
-                  await AsyncStorage.setItem(ONBOARDING_DONE_KEY, 'true');
-                } catch (e) {
-                  // ignore
-                }
+              onPress={() => {
                 navigation.navigate('AuthLogin');
               }}
             >
