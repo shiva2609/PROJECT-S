@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, Dimensions, ImageBackground } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, Dimensions, ImageBackground, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../utils/colors';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TRAVEL_SELECT_DONE_KEY } from '../../utils/constants';
+import { auth, firestore } from '../../api/firebaseConfig';
+import { useSelector } from 'react-redux';
+import { RootState } from '../../store';
 
 type TravelOption = {
   id: string;
@@ -36,6 +37,8 @@ const DEFAULT_OPTIONS: TravelOption[] = [
 
 export default function TravelPlanSelectScreen({ navigation }: any) {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const currentUser = useSelector((state: RootState) => state.user.currentUser);
 
   const data = useMemo(() => DEFAULT_OPTIONS, []);
 
@@ -44,6 +47,100 @@ export default function TravelPlanSelectScreen({ navigation }: any) {
   };
 
   const selectedCount = Object.values(selected).filter(Boolean).length;
+
+  const handleNext = async () => {
+    if (selectedCount === 0) return;
+    
+    const selectedTypes = Object.keys(selected).filter((key) => selected[key]);
+    
+    // Get current user from Firebase Auth
+    const user = auth().currentUser;
+    if (!user) {
+      Alert.alert('Error', 'User not found. Please login again.');
+      navigation.replace('AuthLogin');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      console.log('📝 Saving travel plan for user:', user.uid, 'Selected types:', selectedTypes);
+      
+      // Ensure user document exists before updating
+      const userDocRef = firestore().collection('users').doc(user.uid);
+      let userDoc;
+      let existingData: any;
+      
+      try {
+        userDoc = await userDocRef.get();
+        existingData = userDoc.data();
+      } catch (firestoreError: any) {
+        console.error('❌ Firestore Error - Failed to read user document:', {
+          code: firestoreError?.code,
+          message: firestoreError?.message,
+          uid: user.uid,
+        });
+        throw new Error('Failed to read user data. Please try again.');
+      }
+
+      // If document doesn't exist, create it with all required fields
+      if (!existingData) {
+        console.log('📝 User document not found, creating it...');
+        const now = new Date().toISOString();
+        const newUserData = {
+          username: user.displayName || '',
+          email: user.email || '',
+          role: 'traveler',
+          travelPlan: selectedTypes,
+          createdAt: now,
+          updatedAt: now,
+        };
+        try {
+          await userDocRef.set(newUserData, { merge: true });
+          console.log('✅ User document created with travel plan');
+        } catch (firestoreError: any) {
+          console.error('❌ Firestore Error - Failed to create user document:', {
+            code: firestoreError?.code,
+            message: firestoreError?.message,
+            uid: user.uid,
+            travelPlan: selectedTypes,
+          });
+          throw new Error('Failed to save travel preferences. Please try again.');
+        }
+      } else {
+        // Update only travelPlan and updatedAt (merge to preserve other fields)
+        const updatedAt = new Date().toISOString();
+        try {
+          await userDocRef.set(
+            {
+              travelPlan: selectedTypes,
+              updatedAt,
+            },
+            { merge: true }
+          );
+          console.log('✅ Travel plan updated:', selectedTypes);
+        } catch (firestoreError: any) {
+          console.error('❌ Firestore Error - Failed to save travel plan:', {
+            code: firestoreError?.code,
+            message: firestoreError?.message,
+            uid: user.uid,
+            travelPlan: selectedTypes,
+          });
+          throw new Error('Failed to save travel preferences. Please try again.');
+        }
+      }
+      
+      navigation.replace('MainTabs');
+    } catch (error: any) {
+      console.error('❌ Failed to save travel plan:', {
+        code: error?.code,
+        message: error?.message,
+        error: error,
+      });
+      Alert.alert('Error', error?.message || 'Failed to save travel preferences. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const renderItem = ({ item }: { item: TravelOption }) => {
     const isActive = !!selected[item.id];
@@ -97,13 +194,15 @@ export default function TravelPlanSelectScreen({ navigation }: any) {
 
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          style={[styles.nextBtn, selectedCount === 0 && styles.nextBtnDisabled]}
-          disabled={selectedCount === 0}
-          onPress={() => {
-            navigation.replace('MainTabs');
-          }}
+          style={[styles.nextBtn, (selectedCount === 0 || saving) && styles.nextBtnDisabled]}
+          disabled={selectedCount === 0 || saving}
+          onPress={handleNext}
         >
-          <Text style={styles.nextText}>Next</Text>
+          {saving ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.nextText}>Next</Text>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>

@@ -3,15 +3,23 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../utils/colors';
 
-export default function PasswordChangedScreen({ navigation }: any) {
+export default function PasswordChangedScreen({ navigation, route }: any) {
+  // Check if this is from password reset email (forgot password flow)
+  const isResetEmailSent = route?.params?.isResetEmailSent === true;
+
+  const title = isResetEmailSent ? 'Reset Email Sent!' : 'Password Changed!';
+  const subtitle = isResetEmailSent
+    ? 'We\'ve sent a password reset link to your email address. Please check your inbox and follow the instructions.'
+    : 'Your password has been changed successfully.';
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <View style={styles.badge}>
           <Text style={styles.check}>✓</Text>
         </View>
-        <Text style={styles.title}>Password Changed!</Text>
-        <Text style={styles.subtitle}>Your password has been changed successfully.</Text>
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
 
         <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.replace('AuthLogin')}>
           <Text style={styles.primaryBtnText}>Back to Login</Text>

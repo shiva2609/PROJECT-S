@@ -1,4 +1,4 @@
-export type MockUser = {
+/*export type MockUser = {
   uid: string;
   name: string;
   email: string;
@@ -17,3 +17,4 @@ export const mockSignup = async (email: string, _password: string): Promise<Mock
   await new Promise((r) => setTimeout(r, 400));
   return { uid: 'user_new', name: 'New Traveler', email, photoURL: undefined };
 };
+*/
