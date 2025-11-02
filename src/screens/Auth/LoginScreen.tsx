@@ -7,6 +7,7 @@ import { useDispatch } from 'react-redux';
 import { setUser } from '../../store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_USER_KEY } from '../../utils/constants';
+import { FontFamily } from '../../GlobalStyles';
 
 export default function LoginScreen({ navigation }: any) {
   const [username, setUsername] = useState('');
@@ -229,9 +230,9 @@ export default function LoginScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  headerArea: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 8 },
-  welcomeTop: { fontSize: 24, fontWeight: '700', color: colors.primary },
-  welcomeBrand: { fontSize: 40, fontWeight: '800', color: colors.primary },
+  headerArea: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 8},
+  welcomeTop: { fontSize: 30, fontWeight: '600', fontFamily: FontFamily.poppinsBold, color: colors.primary, marginBottom: -4, lineHeight: 32, },
+  welcomeBrand: { fontSize: 40, fontWeight: '600', fontFamily: FontFamily.poppinsExtraBold, color: colors.primary, },
   form: { paddingHorizontal: 24, paddingTop: 12 },
   input: {
     backgroundColor: colors.background,
@@ -242,6 +243,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     color: colors.text,
+    fontFamily: FontFamily.poppinsRegular,
   },
   forgotRow: { alignItems: 'flex-end', marginTop: 8 },
   primaryBtn: {
@@ -251,11 +253,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 18,
   },
-  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  primaryBtnText: { color: '#fff', fontFamily: FontFamily.poppinsBold, fontSize: 16 },
   bottomRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 28 },
-  muted: { color: colors.mutedText },
-  linkText: { color: colors.mutedText },
-  linkStrong: { color: colors.primary, fontWeight: '700' },
+  muted: { color: colors.mutedText, fontFamily: FontFamily.poppinsRegular },
+  linkText: { color: colors.mutedText, fontFamily: FontFamily.poppinsRegular },
+  linkStrong: { color: colors.primary, fontFamily: FontFamily.poppinsBold },
 });
 
 

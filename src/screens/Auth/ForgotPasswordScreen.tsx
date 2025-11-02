@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../utils/colors';
 import { auth, firestore } from '../../api/firebaseConfig';
+import { FontFamily } from '../../GlobalStyles';
 
 export default function ForgotPasswordScreen({ navigation }: any) {
   const [identifier, setIdentifier] = useState('');
@@ -156,8 +157,8 @@ export default function ForgotPasswordScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   content: { paddingHorizontal: 24, paddingTop: 24 },
-  title: { fontSize: 26, fontWeight: '800', color: colors.text, marginBottom: 10 },
-  subtitle: { fontSize: 14, color: colors.mutedText, marginBottom: 18, lineHeight: 20 },
+  title: { fontSize: 35, fontWeight: '600', fontFamily: FontFamily.poppinsExtraBold,  color: colors.primary,  },
+  subtitle: { fontSize: 14, color: colors.mutedText, marginBottom: 18, lineHeight: 20, fontFamily: FontFamily.poppinsRegular, },
   input: {
     backgroundColor: colors.background,
     borderRadius: 14,
@@ -167,6 +168,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     color: colors.text,
+    fontFamily: FontFamily.poppinsRegular,
   },
   primaryBtn: {
     backgroundColor: colors.primary,
@@ -178,10 +180,10 @@ const styles = StyleSheet.create({
   primaryBtnDisabled: {
     opacity: 0.6,
   },
-  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16, fontFamily: FontFamily.poppinsBold,  },
   bottomRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
-  muted: { color: colors.mutedText },
-  linkStrong: { color: colors.primary, fontWeight: '700' },
+  muted: { color: colors.mutedText, fontFamily: FontFamily.poppinsRegular, },
+  linkStrong: { color: colors.primary, fontFamily: FontFamily.poppinsBold, },
 });
 
  

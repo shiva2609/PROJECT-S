@@ -7,6 +7,7 @@ import { useDispatch } from 'react-redux';
 import { setUser } from '../../store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_USER_KEY } from '../../utils/constants';
+import { FontFamily } from '../../GlobalStyles';
 
 interface FormState {
   username: string;
@@ -321,7 +322,8 @@ export default function SignupScreen({ navigation }: any) {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Hello! Register to get started</Text>
+        <Text style={styles.welcometitle}>Welocome to Sanchari!</Text>
+        <Text style={styles.title}>Register to get started</Text>
 
         <TextInput
           placeholder="Username"
@@ -332,11 +334,11 @@ export default function SignupScreen({ navigation }: any) {
           onChangeText={(text) => setForm(prev => ({ ...prev, username: text }))}
         />
         {validation.username === 'available' ? (
-          <Text style={styles.validText}>✅ Username available</Text>
+          <Text style={styles.validText}> Username available</Text>
         ) : validation.username === 'taken' ? (
-          <Text style={styles.errorText}>❌ Username not available</Text>
+          <Text style={styles.errorText}> Username not available</Text>
         ) : validation.username === 'invalid' ? (
-          <Text style={styles.errorText}>❌ Username cannot contain @</Text>
+          <Text style={styles.errorText}> Username cannot contain @</Text>
         ) : validation.username === 'checking' ? (
           <Text style={styles.mutedSmall}>Checking availability…</Text>
         ) : null}
@@ -351,9 +353,9 @@ export default function SignupScreen({ navigation }: any) {
           onChangeText={(text) => setForm(prev => ({ ...prev, email: text }))}
         />
         {validation.email === 'valid' ? (
-          <Text style={styles.validText}>✅ Valid email</Text>
+          <Text style={styles.validText}> Valid email</Text>
         ) : validation.email === 'invalid' ? (
-          <Text style={styles.errorText}>⚠️ Please enter a valid email address.</Text>
+          <Text style={styles.errorText}> Please enter a valid email address.</Text>
         ) : null}
 
         <TextInput
@@ -365,9 +367,9 @@ export default function SignupScreen({ navigation }: any) {
           onChangeText={(text) => setForm(prev => ({ ...prev, password: text }))}
         />
         {validation.password === 'invalid' ? (
-          <Text style={styles.errorText}>❌ Password must be 8 alphanumeric characters</Text>
+          <Text style={styles.errorText}> Password must be 8 alphanumeric characters</Text>
         ) : validation.password === 'valid' ? (
-          <Text style={styles.validText}>✅ Strong password</Text>
+          <Text style={styles.validText}> Strong password</Text>
         ) : null}
 
         <TextInput
@@ -379,9 +381,9 @@ export default function SignupScreen({ navigation }: any) {
           onChangeText={(text) => setForm(prev => ({ ...prev, confirmPassword: text }))}
         />
         {validation.confirmPassword === 'mismatch' ? (
-          <Text style={styles.errorText}>❌ Passwords do not match</Text>
+          <Text style={styles.errorText}> Passwords do not match</Text>
         ) : validation.confirmPassword === 'match' ? (
-          <Text style={styles.validText}>✅ Passwords match</Text>
+          <Text style={styles.validText}> Passwords match</Text>
         ) : null}
 
         <TouchableOpacity
@@ -406,7 +408,8 @@ export default function SignupScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   scroll: { paddingHorizontal: 24, paddingVertical: 24 },
-  title: { fontSize: 26, fontWeight: '800', color: colors.text, marginBottom: 16 },
+  welcometitle: { fontSize: 30, fontWeight: '600', fontFamily: FontFamily.poppinsExtraBold, color: colors.primary,marginBottom: 16  },
+  title: { fontSize: 24, fontFamily: FontFamily.poppinsBold, color: colors.primary, },
   input: {
     backgroundColor: colors.background,
     borderRadius: 14,
@@ -416,6 +419,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     color: colors.text,
+    fontFamily: FontFamily.poppinsRegular,
   },
   primaryBtn: {
     backgroundColor: colors.primary,
@@ -427,11 +431,11 @@ const styles = StyleSheet.create({
   primaryBtnDisabled: {
     opacity: 0.6,
   },
-  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  primaryBtnText: { color: '#fff', fontFamily: FontFamily.poppinsBold, fontSize: 16 },
   bottomRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
-  muted: { color: colors.mutedText },
-  linkStrong: { color: colors.primary, fontWeight: '700' },
-  validText: { color: '#4CAF50', fontSize: 12, marginTop: 4, marginLeft: 4 },
-  errorText: { color: '#F44336', fontSize: 12, marginTop: 4, marginLeft: 4 },
-  mutedSmall: { color: colors.mutedText, fontSize: 12, marginTop: 4, marginLeft: 4 },
+  muted: { color: colors.mutedText, fontFamily: FontFamily.poppinsRegular },
+  linkStrong: { color: colors.primary, fontFamily: FontFamily.poppinsBold },
+  validText: { color: '#4CAF50', fontSize: 12, marginTop: 4, marginLeft: 4, fontFamily: FontFamily.poppinsRegular },
+  errorText: { color: '#F44336', fontSize: 12, marginTop: 4, marginLeft: 4, fontFamily: FontFamily.poppinsRegular },
+  mutedSmall: { color: colors.mutedText, fontSize: 12, marginTop: 4, marginLeft: 4, fontFamily: FontFamily.poppinsRegular },
 });

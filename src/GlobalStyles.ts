@@ -29,6 +29,7 @@ export const FontFamily = {
   poppinsSemiBold: "Poppins-SemiBold",
   poppinsMedium: "Poppins-Medium",
   poppinsRegular: "Poppins-Regular",
+  poppinsExtraBold: "Poppins-ExtraBold",
 };
 
 /* 📏 Font Sizes */

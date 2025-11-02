@@ -9,6 +9,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { BlurView } from "@react-native-community/blur";
+import Icon from "react-native-vector-icons/Feather";
 import {
   Color,
   Padding,
@@ -36,10 +38,27 @@ const OnboardingScreen1 = () => {
         style={styles.imageBackground}
         resizeMode="cover"
       >
-        {/* Top spacer to match other onboarding screens (aligns image content) */}
-        <View style={styles.backButtonContainer} />
+        {/* Blur overlay */}
+        <BlurView
+          style={styles.blurOverlay}
+          blurType="light"
+          blurAmount={5}
+          reducedTransparencyFallbackColor="rgba(255, 255, 255, 0.7)"
+        />
+        
+        {/* Back button */}
+        <View style={styles.backButtonContainer}>
+          <Pressable 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="arrow-left" size={20} color={Color.colorWhite} />
+            <Text style={styles.backButtonText}>Back</Text>
+          </Pressable>
+        </View>
+        
         {/* Overlay content at bottom */}
-  <View style={styles.bottomContainer}>
+        <View style={styles.bottomContainer}>
           <View style={styles.textContainer}>
             <Text style={styles.title}>{'Explore beyond\nthe maps'}</Text>
             <Text style={styles.subtitle}>
@@ -82,27 +101,46 @@ const styles = StyleSheet.create({
   imageBackground: {
     flex: 1,
     justifyContent: "space-between",
-    // keep full-bleed image to the top like other onboarding screens
+  },
+  blurOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    bottom: 800,
+    right: 0,
   },
   backButtonContainer: {
-    padding: Padding.padding_36,
-    marginTop: 20,
+    paddingTop: 50,
+    paddingHorizontal: Padding.padding_36,
+    zIndex: 1,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+  },
+  backButtonText: {
+    color: Color.colorWhite,
+    fontSize: 16,
+    fontFamily: FontFamily.poppinsSemiBold,
+    marginLeft: 4,
   },
   bottomContainer: {
     backgroundColor: Color.colorWhite,
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
     paddingHorizontal: Padding.padding_36,
-    paddingVertical: 40,
-    minHeight: 320,
+    paddingTop: 40,
+    paddingBottom: 20,
+    minHeight: 300,
   },
   textContainer: {
     marginBottom: 24,
   },
   title: {
     fontSize: 28,
-    fontWeight: "700",
-    fontFamily: FontFamily.poppinsBold,
+    fontWeight: "600",
+    fontFamily: FontFamily.poppinsExtraBold,
     color: Color.colorOrangered,
     marginBottom: 12,
   },
@@ -131,6 +169,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    marginTop: 0,
   },
   skipText: {
     fontSize: 16,
