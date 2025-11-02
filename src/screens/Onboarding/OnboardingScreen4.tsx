@@ -3,6 +3,8 @@ import { StyleSheet, Text, View, Pressable, ImageBackground } from "react-native
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { BlurView } from "@react-native-community/blur";
+import Icon from "react-native-vector-icons/Feather";
 import { Color, Padding, Height, FontFamily } from "../../GlobalStyles";
 
 type RootStackParamList = {
@@ -24,12 +26,21 @@ const OnboardingScreen4 = () => {
         style={styles.imageBackground}
         resizeMode="cover"
       >
+        {/* Blur overlay */}
+        <BlurView
+          style={styles.blurOverlay}
+          blurType="light"
+          blurAmount={5}
+          reducedTransparencyFallbackColor="rgba(255, 255, 255, 0.7)"
+        />
+        
         {/* Back button */}
         <View style={styles.backButtonContainer}>
           <Pressable 
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
+            <Icon name="arrow-left" size={20} color={Color.colorWhite} />
             <Text style={styles.backButtonText}>Back</Text>
           </Pressable>
         </View>
@@ -78,40 +89,48 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "space-between",
   },
+  blurOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    bottom: 800,
+    right: 0,
+  },
   backButtonContainer: {
-    padding: Padding.padding_36,
-    marginTop: 20,
+    paddingTop: 50,
+    paddingHorizontal: Padding.padding_36,
+    zIndex: 1,
   },
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
+    alignSelf: 'flex-start',
   },
   backButtonText: {
     color: Color.colorWhite,
     fontSize: 16,
     fontFamily: FontFamily.poppinsSemiBold,
+    marginLeft: 4,
   },
   bottomContainer: {
     backgroundColor: Color.colorWhite,
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
     paddingHorizontal: Padding.padding_36,
-    paddingVertical: 40,
-    minHeight: 320,
+    paddingTop: 40,
+    paddingBottom: 20,
+    minHeight: 300,
   },
   textContainer: {
     marginBottom: 24,
   },
   title: {
     fontSize: 28,
-    fontWeight: "700",
-    fontFamily: FontFamily.poppinsBold,
+    fontWeight: "600",
+    fontFamily: FontFamily.poppinsExtraBold,
     color: Color.colorOrangered,
     marginBottom: 12,
+    lineHeight: 35,
   },
   subtitle: {
     fontSize: 14,
@@ -142,6 +161,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
+    marginTop: 0,
   },
   singleButtonRow: {
     justifyContent: 'center',
