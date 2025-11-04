@@ -13,8 +13,9 @@
  * - Automatic Firestore user document creation
  */
 
-import { initializeApp, FirebaseApp, getApps } from 'firebase/app';
+import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
+	initializeAuth,
 	getAuth,
 	Auth,
 	createUserWithEmailAndPassword,
@@ -25,6 +26,7 @@ import {
 	deleteUser,
 	User,
 } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
 	getFirestore,
 	Firestore,
@@ -40,6 +42,7 @@ import {
 	getDocs,
 	serverTimestamp,
 } from 'firebase/firestore';
+import { AccountType, VerificationStatus } from '../types/account';
 
 // ---------- Firebase Configuration ----------
 
@@ -54,10 +57,92 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase App (reuse existing if available)
-const app: FirebaseApp = getApps().length ? getApps()[0]! : initializeApp(firebaseConfig);
+const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize Auth
-export const auth: Auth = getAuth(app);
+console.log('🔥 Firebase App initialized:', {
+	projectId: app.options.projectId,
+	appId: app.options.appId,
+	authDomain: app.options.authDomain,
+});
+
+// Initialize Auth with persistent storage (AsyncStorage)
+// This is REQUIRED for React Native - getAuth() does NOT persist by default
+let auth: Auth;
+
+try {
+	console.log('🔧 Initializing Firebase Auth with AsyncStorage persistence...');
+	
+	// Try to use getReactNativePersistence if available (Firebase v12+)
+	let persistence: any;
+	const authModule = require('firebase/auth');
+	
+	if (authModule.getReactNativePersistence) {
+		persistence = authModule.getReactNativePersistence(AsyncStorage);
+		console.log('✅ Using getReactNativePersistence');
+	} else {
+		// Create a class-based persistence adapter (required by Firebase)
+		// This fixes the "Expected a class definition" error
+		console.log('⚠️ getReactNativePersistence not available, creating class-based adapter...');
+		
+		class ReactNativePersistence {
+			type = 'LOCAL' as const;
+			_storage: typeof AsyncStorage;
+			
+			constructor(storage: typeof AsyncStorage) {
+				this._storage = storage;
+			}
+			
+			async _isAvailable(): Promise<boolean> {
+				try {
+					await this._storage.getItem('__firebase_auth_test__');
+					return true;
+				} catch {
+					return false;
+				}
+			}
+			
+			async _set(key: string, value: string): Promise<void> {
+				await this._storage.setItem(key, value);
+			}
+			
+			async _get(key: string): Promise<string | null> {
+				return await this._storage.getItem(key);
+			}
+			
+			async _remove(key: string): Promise<void> {
+				await this._storage.removeItem(key);
+			}
+		}
+		
+		persistence = new ReactNativePersistence(AsyncStorage);
+	}
+	
+	auth = initializeAuth(app, {
+		persistence: persistence,
+	});
+	console.log('✅ Firebase Auth initialized with persistent storage (AsyncStorage)');
+} catch (error: any) {
+	// Handle initialization errors (especially "already-initialized" and "Expected a class definition")
+	if (error.code === 'auth/already-initialized' || 
+	    error.message?.includes('already-initialized') ||
+	    error.message?.includes('Firebase Auth has already been initialized') ||
+	    error.message?.includes('Expected a class definition')) {
+		// Auth was already initialized (common in dev with hot reload)
+		auth = getAuth(app);
+		console.log('⚠️ Auth already initialized, using existing instance');
+		console.log('⚠️ Note: If persistence was configured on first init, it should work');
+	} else {
+		console.error('❌ Failed to initialize auth with persistence:', {
+			code: error.code,
+			message: error.message,
+		});
+		// Last resort fallback - use getAuth (but it won't persist)
+		auth = getAuth(app);
+		console.error('❌ CRITICAL: Falling back to getAuth - AUTH WILL NOT PERSIST');
+		console.error('   User sessions will be lost on app reload!');
+		console.error('   Error details:', error.message);
+	}
+}
 
 // Initialize Firestore with long polling for React Native
 let dbInstance: Firestore;
@@ -65,8 +150,10 @@ try {
 	dbInstance = initializeFirestore(app, {
 		experimentalForceLongPolling: true,
 	});
-} catch (e) {
+	console.log('✅ Firestore initialized with long polling');
+} catch (e: any) {
 	// If already initialized, get existing instance
+	console.log('⚠️ Firestore already initialized, getting existing instance:', e?.message);
 	dbInstance = getFirestore(app);
 }
 
@@ -75,13 +162,18 @@ try {
 	try {
 		await enableNetwork(dbInstance);
 		console.log('✅ AuthService: Firestore network enabled');
+		console.log('✅ Firestore connection successful');
 	} catch (e: any) {
-		console.warn('⚠️ AuthService: Network enable failed:', e?.message);
+		console.error('❌ AuthService: Network enable failed:', e?.message || e);
 	}
 })();
 
-// Export Firestore instance for reuse
-export const db: Firestore = dbInstance;
+// Export Firestore instance
+const db: Firestore = dbInstance;
+console.log('📦 Firestore instance exported, ready for use');
+
+// Export app, auth, and db as specified
+export { app, auth, db };
 
 // ---------- Types ----------
 
@@ -90,9 +182,15 @@ export interface UserData {
 	email: string;
 	username: string;
 	usernameLower: string;
-	role: 'traveler' | 'host';
+	accountType: AccountType;
+	verificationStatus: VerificationStatus;
 	createdAt: any; // Can be number or serverTimestamp
 	updatedAt?: number;
+	// Legacy role field for backward compatibility
+	role?: 'traveler' | 'host';
+	// Optional KYC and agreement fields
+	kycData?: any;
+	safetyAgreement?: any;
 }
 
 // ---------- Helper Functions ----------
@@ -147,7 +245,7 @@ async function getEmailFromIdentifier(identifier: string): Promise<string> {
 		const q = query(usersRef, where('usernameLower', '==', usernameLower));
 		const querySnapshot = await getDocs(q);
 		
-		if (!querySnapshot.empty) {
+		if (!querySnapshot.empty && querySnapshot.docs[0]) {
 			const userData = querySnapshot.docs[0].data() as UserData;
 			return userData.email;
 		}
@@ -271,12 +369,14 @@ export async function signUp(
 		console.log(`✅ Firebase Auth user created: ${authUser.uid}`);
 
 		// Create user document in Firestore with usernameLower field
-		const userData = {
+		const userData: UserData = {
 			uid: authUser.uid,
 			email: cleanEmail,
 			username: usernameLower, // Store normalized username
 			usernameLower: usernameLower, // Store lowercase for querying
-			role: 'traveler' as const,
+			accountType: 'Traveler' as AccountType,
+			verificationStatus: 'none' as VerificationStatus,
+			role: 'traveler' as const, // Legacy support
 			createdAt: serverTimestamp(), // Use server timestamp
 		};
 

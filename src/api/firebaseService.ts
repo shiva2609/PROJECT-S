@@ -1,13 +1,14 @@
 import { initializeApp, FirebaseApp, getApps } from 'firebase/app';
 import {
-	getAuth,
 	createUserWithEmailAndPassword,
 	signInWithEmailAndPassword,
 	updateProfile,
 	User as FirebaseUser,
 } from 'firebase/auth';
+import { auth } from './authService';
 import {
     initializeFirestore,
+    getFirestore,
     enableNetwork,
     doc,
     setDoc,
@@ -25,8 +26,11 @@ import {
 	getStorage,
 	ref as storageRef,
 	uploadBytes,
+	uploadBytesResumable,
 	getDownloadURL,
 } from 'firebase/storage';
+import rnfbStorage from '@react-native-firebase/storage';
+import { Platform } from 'react-native';
 
 // ---------- Types ----------
 
@@ -101,27 +105,37 @@ const firebaseConfig = {
     measurementId: "G-5N4YWHGJSL"
 };
 
+// Reuse Firebase app if already initialized (should match authService.ts)
 const app: FirebaseApp = getApps().length ? getApps()[0]! : initializeApp(firebaseConfig);
-const authInstance = getAuth(app);
-const dbInstance: Firestore = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-});
+// Use the persistent auth instance from authService.ts
 
+// Initialize Firestore (with error handling for already-initialized case)
+let dbInstance: Firestore;
+try {
+  dbInstance = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
+  });
+  console.log('✅ FirebaseService: Firestore initialized');
+} catch (e: any) {
+    // If already initialized, get existing instance
+    console.log('⚠️ FirebaseService: Firestore already initialized, getting existing');
+    dbInstance = getFirestore(app);
+  }
 
+// Ensure network is enabled
 (async () => {
   try {
     await enableNetwork(dbInstance);
-    console.log("✅ Firestore network enabled");
+    console.log("✅ FirebaseService: Firestore network enabled");
   } catch (e: any) {
-    console.log("⚠️ Firestore enableNetwork failed:", e?.message || e);
+    console.error("❌ FirebaseService: Network enable failed:", e?.message || e);
   }
 })();
 
 const storageInstance = getStorage(app);
 
-function auth() {
-    return authInstance;
-}
+// Use the persistent auth instance from authService.ts
+// No need for a wrapper function, just export auth directly if needed
 
 function db() {
     return dbInstance;
@@ -177,7 +191,7 @@ export async function signUpWithUsernamePassword(params: {
 
 	const email = synthesizeEmailFromUsername(cleanUsername);
 	console.log('📝 Creating Firebase Auth user with email:', email);
-	const cred = await createUserWithEmailAndPassword(auth(), email, password);
+	const cred = await createUserWithEmailAndPassword(auth, email, password);
 	const user = cred.user;
 	console.log('✅ Firebase Auth user created:', user.uid);
 	
@@ -212,7 +226,7 @@ export async function signInWithUsernamePassword(username: string, password: str
 	const cleanUsername = username.trim().toLowerCase();
 	if (!cleanUsername) throw new Error('Username required');
 	const email = synthesizeEmailFromUsername(cleanUsername);
-	const cred = await signInWithEmailAndPassword(auth(), email, password);
+	const cred = await signInWithEmailAndPassword(auth, email, password);
     const profileSnap = await withRetry(() => getDoc(doc(db(), 'users', cred.user.uid)));
 	return { authUser: cred.user, profile: profileSnap.exists() ? (profileSnap.data() as UserProfile) : null };
 }
@@ -246,14 +260,187 @@ export async function saveUserTravelPlan(uid: string, planData: { selectedTypes:
 
 // ---------- Storage ----------
 
-export async function uploadImageAsync(params: { uri: string; path: string }): Promise<string> {
-	const { uri, path } = params;
-	// In React Native, fetch the file and upload as blob
-	const res = await fetch(uri);
-	const blob = await res.blob();
-    const r = storageRef(storage(), path);
-    await uploadBytes(r, blob);
-    return await getDownloadURL(r);
+// Helper function to convert base64 string to blob
+function base64ToBlob(base64: string, mimeType: string = 'image/jpeg'): Blob {
+	try {
+		// Remove data URL prefix if present (e.g., "data:image/jpeg;base64,...")
+		let cleanBase64 = base64.trim();
+		if (cleanBase64.includes(',')) {
+			cleanBase64 = cleanBase64.split(',')[1];
+		}
+		
+		// Decode base64 to binary
+		const byteCharacters = atob(cleanBase64);
+		const byteNumbers = new Array(byteCharacters.length);
+		for (let i = 0; i < byteCharacters.length; i++) {
+			byteNumbers[i] = byteCharacters.charCodeAt(i);
+		}
+		const byteArray = new Uint8Array(byteNumbers);
+		return new Blob([byteArray], { type: mimeType });
+	} catch (error: any) {
+		console.error('❌ Error converting base64 to blob:', error);
+		throw new Error(`Failed to convert base64 to blob: ${error.message}`);
+	}
+}
+
+// Helper function to read file as base64 (React Native compatible)
+// Uses XMLHttpRequest with arraybuffer which works better in React Native
+async function readFileAsBase64(uri: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		console.log('📖 Starting file read for:', uri.substring(0, 60) + '...');
+		
+		// Try different URI formats for React Native compatibility
+		const urisToTry: string[] = [uri];
+		if (Platform.OS === 'android') {
+			if (uri.startsWith('file:///')) {
+				// Android often has triple slash
+				urisToTry.push(uri);
+				urisToTry.push(uri.replace('file:///', 'file://'));
+				urisToTry.push(uri.replace('file:///', ''));
+			} else if (uri.startsWith('file://')) {
+				urisToTry.push(uri.replace('file://', ''));
+			}
+		}
+		
+		let attempts = 0;
+		const maxAttempts = urisToTry.length;
+		
+		function tryNextUri() {
+			if (attempts >= maxAttempts) {
+				reject(new Error('All URI format attempts failed'));
+				return;
+			}
+			
+			const testUri = urisToTry[attempts++];
+			console.log(`📤 Attempt ${attempts}/${maxAttempts}: Trying URI format...`);
+			
+			const xhr = new XMLHttpRequest();
+			xhr.open('GET', testUri, true);
+			xhr.responseType = 'arraybuffer';
+			
+			xhr.onload = function() {
+				console.log(`📊 XHR status for URI ${attempts}:`, xhr.status);
+				if (xhr.status === 200 || xhr.status === 0) {
+					try {
+						const arrayBuffer = xhr.response;
+						if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+							if (attempts < maxAttempts) {
+								console.log('⚠️ Empty response, trying next URI format...');
+								tryNextUri();
+							} else {
+								reject(new Error('Empty file response'));
+							}
+							return;
+						}
+						
+						console.log('✅ Got arraybuffer, size:', arrayBuffer.byteLength);
+						const bytes = new Uint8Array(arrayBuffer);
+						
+						// Convert to base64 in chunks to avoid stack overflow
+						let binary = '';
+						const chunkSize = 8192;
+						for (let i = 0; i < bytes.byteLength; i += chunkSize) {
+							const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.byteLength));
+							binary += String.fromCharCode.apply(null, Array.from(chunk) as any);
+						}
+						
+						const base64 = btoa(binary);
+						console.log('✅ Converted to base64, length:', base64.length);
+						resolve(base64);
+					} catch (e: any) {
+						console.error('❌ Error converting to base64:', e);
+						if (attempts < maxAttempts) {
+							tryNextUri();
+						} else {
+							reject(new Error(`Failed to convert to base64: ${e.message}`));
+						}
+					}
+				} else {
+					if (attempts < maxAttempts) {
+						console.log(`⚠️ XHR status ${xhr.status}, trying next URI format...`);
+						tryNextUri();
+					} else {
+						reject(new Error(`XHR status: ${xhr.status}`));
+					}
+				}
+			};
+			
+			xhr.onerror = function(e) {
+				console.error(`❌ XHR error for attempt ${attempts}:`, e);
+				if (attempts < maxAttempts) {
+					console.log('⚠️ XHR error, trying next URI format...');
+					tryNextUri();
+				} else {
+					reject(new Error('Failed to read file - XHR error'));
+				}
+			};
+			
+			xhr.ontimeout = function() {
+				console.error(`⏱️ XHR timeout for attempt ${attempts}`);
+				if (attempts < maxAttempts) {
+					tryNextUri();
+				} else {
+					reject(new Error('Timeout reading file'));
+				}
+			};
+			
+			xhr.timeout = 30000;
+			
+			try {
+				xhr.send(null);
+			} catch (sendError: any) {
+				console.error(`❌ Failed to send XHR for attempt ${attempts}:`, sendError.message);
+				if (attempts < maxAttempts) {
+					tryNextUri();
+				} else {
+					reject(new Error(`Failed to send XHR request: ${sendError.message}`));
+				}
+			}
+		}
+		
+		tryNextUri();
+	});
+}
+
+// Native-first image upload supporting two call styles:
+// 1) Legacy: uploadImageAsync({ uri, path })
+// 2) New:    uploadImageAsync(imageAsset, userId)
+export async function uploadImageAsync(
+  arg1: { uri: string; path: string } | any,
+  userId?: string,
+): Promise<string> {
+  try {
+    // New signature: (imageAsset, userId)
+    if (userId && arg1 && typeof arg1 === 'object' && 'uri' in arg1 && !('path' in arg1)) {
+      const image: any = arg1;
+      if (!image?.uri) throw new Error('No image URI found');
+      const fileName = `${userId}_${Date.now()}.jpg`;
+      const reference = rnfbStorage().ref(`posts/${fileName}`);
+      const pathToFile = Platform.OS === 'ios' ? String(image.uri).replace('file://', '') : String(image.uri);
+      console.log('🚀 Uploading to Firebase Storage (new signature):', pathToFile);
+      await reference.putFile(pathToFile);
+      const downloadURL = await reference.getDownloadURL();
+      console.log('✅ File uploaded! URL:', downloadURL);
+      return downloadURL;
+    }
+
+    // Legacy signature: ({ uri, path })
+    if (arg1 && typeof arg1 === 'object' && 'uri' in arg1 && 'path' in arg1) {
+      const { uri, path } = arg1 as { uri: string; path: string };
+      const reference = rnfbStorage().ref(path);
+      const uploadUri = Platform.OS === 'ios' ? uri.replace('file://', '') : uri;
+      console.log('🚀 Uploading to Firebase Storage (legacy signature):', uploadUri);
+      await reference.putFile(uploadUri);
+      const downloadURL = await reference.getDownloadURL();
+      console.log('✅ File uploaded! URL:', downloadURL);
+      return downloadURL;
+    }
+
+    throw new Error('Invalid parameters for uploadImageAsync');
+  } catch (error) {
+    console.error('🔥 Upload failed:', error);
+    throw error;
+  }
 }
 
 // ---------- Posts ----------
@@ -414,7 +601,7 @@ export async function isUsernameAvailable(username: string): Promise<boolean> {
 }
 
 export async function getCurrentUserProfile(): Promise<UserProfile | null> {
-	const user = auth().currentUser;
+	const user = auth.currentUser;
 	if (!user) return null;
     const snap = await withRetry(() => getDoc(doc(db(), 'users', user.uid)));
 	return snap.exists() ? (snap.data() as UserProfile) : null;
