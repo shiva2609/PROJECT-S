@@ -33,6 +33,12 @@ import AccountScreen from '../screens/AccountScreen';
 import AdminVerificationScreen from '../screens/AdminVerificationScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import RoleUpgradeScreen from '../screens/RoleUpgradeScreen';
+// KYC Verification Screens
+import HostVerification from '../screens/kyc/HostVerification';
+import AgencyVerification from '../screens/kyc/AgencyVerification';
+import StayHostVerification from '../screens/kyc/StayHostVerification';
+import CreatorVerification from '../screens/kyc/CreatorVerification';
+import AccountChangeFlowScreen from '../screens/kyc/AccountChangeFlowScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -134,6 +140,48 @@ export default function AppNavigator() {
         <Stack.Screen name="Account" component={AccountScreen} />
         <Stack.Screen name="AdminVerification" component={AdminVerificationScreen} />
         <Stack.Screen name="RoleUpgrade" component={RoleUpgradeScreen} />
+        
+        {/* KYC Verification Screens */}
+        <Stack.Screen 
+          name="HostVerification" 
+          component={HostVerification}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="AgencyVerification" 
+          component={AgencyVerification}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="StayHostVerification" 
+          component={StayHostVerification}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="CreatorVerification" 
+          component={CreatorVerification}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="AccountChangeFlow" 
+          component={AccountChangeFlowScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

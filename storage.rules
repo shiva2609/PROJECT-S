@@ -1,0 +1,54 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user is the owner
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Helper function to check if user is superAdmin
+    function isSuperAdmin() {
+      return isAuthenticated() && 
+             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.accountType == 'superAdmin';
+    }
+    
+    // Verification documents
+    match /verification_docs/{userId}/{requestId}/{fileName} {
+      // Allow read if user is owner or superAdmin
+      allow read: if isOwner(userId) || isSuperAdmin();
+      
+      // Allow write (upload) only for own documents
+      allow write: if isOwner(userId) &&
+                     // Validate file size (10MB max)
+                     request.resource.size < 10 * 1024 * 1024 &&
+                     // Validate file type
+                     request.resource.contentType.matches('image/.*') ||
+                     request.resource.contentType == 'application/pdf';
+      
+      // Allow delete only for own documents or superAdmin
+      allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+    
+    // User profile images
+    match /profile_images/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) &&
+                     request.resource.size < 5 * 1024 * 1024 &&
+                     request.resource.contentType.matches('image/.*');
+      allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+    
+    // Deny all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

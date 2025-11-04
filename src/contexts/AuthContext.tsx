@@ -14,12 +14,14 @@ interface AuthContextType {
   user: FirebaseAuthTypes.User | null;
   loading: boolean;
   initialized: boolean;
+  needsKYCVerification?: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   initialized: false,
+  needsKYCVerification: false,
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -32,6 +34,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<FirebaseAuthTypes.User | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
+  
+  // Auto-redirect to KYC verification if needed
+  // Note: This requires navigation to be available, so it's best used in a component
+  // that has access to navigation. For now, we'll just track the state.
+  // The actual redirect should be handled in your app's navigation component.
 
   useEffect(() => {
     console.log('🔐 AuthContext: Setting up persistent Firebase auth state listener');

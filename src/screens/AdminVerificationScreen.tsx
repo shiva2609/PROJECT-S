@@ -2,6 +2,7 @@
  * Admin Verification Screen
  * 
  * Allows superAdmin to review and approve/reject account upgrade requests
+ * Updated to work with new upgrade_requests collection structure
  */
 
 import React, { useState, useEffect } from 'react';
@@ -14,34 +15,36 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  Image,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../utils/colors';
 import { auth, db } from '../api/authService';
-import { collection, query, where, getDocs, doc, updateDoc, orderBy, collectionGroup, getDoc, arrayUnion, deleteField } from 'firebase/firestore';
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  updateDoc,
+  orderBy,
+  getDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
 import { AccountType, ACCOUNT_TYPE_METADATA } from '../types/account';
-import { VERIFICATION_TEMPLATES, VERIFICATION_LABELS } from '../constants/verificationTemplates';
+import { UpgradeRequest } from '../types/kyc';
 import Icon from 'react-native-vector-icons/Ionicons';
-
-interface UpgradeRequest {
-  id: string;
-  uid: string;
-  requestedAccountType: AccountType;
-  currentAccountType: AccountType;
-  kycData: any;
-  safetyAgreement: any;
-  status: 'pending' | 'verified' | 'rejected';
-  createdAt: number;
-  reviewedAt?: number;
-  reviewedBy?: string;
-  rejectionReason?: string;
-}
 
 export default function AdminVerificationScreen({ navigation }: any) {
   const [requests, setRequests] = useState<UpgradeRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<UpgradeRequest | null>(null);
+  const [rejectModalVisible, setRejectModalVisible] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
 
   useEffect(() => {
     loadRequests();
@@ -49,28 +52,25 @@ export default function AdminVerificationScreen({ navigation }: any) {
 
   const loadRequests = async () => {
     try {
-      // Read all pendingVerifications entries across users with status == 'pending'
-      const q = query(collectionGroup(db, 'pendingVerifications'), where('status', '==', 'pending'));
+      // Load pending upgrade requests from upgrade_requests collection
+      const q = query(
+        collection(db, 'upgrade_requests'),
+        where('status', '==', 'pending'),
+        orderBy('createdAt', 'desc')
+      );
       const snapshot = await getDocs(q);
-      const reqs: UpgradeRequest[] = [] as any;
-      snapshot.forEach((d) => {
-        const parent = d.ref.parent.parent; // users/{uid}
-        const uid = parent?.id || '';
-        const data: any = d.data();
-        const requestedAccountType = d.id as any; // document id is role key
+      const reqs: UpgradeRequest[] = [];
+      
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
         reqs.push({
-          id: d.id + ':' + uid,
-          uid,
-          requestedAccountType,
-          currentAccountType: 'Traveler' as any,
-          kycData: {},
-          safetyAgreement: {},
-          status: 'pending',
-          createdAt: data?.submittedAt || Date.now(),
-        });
+          ...data,
+          requestId: docSnap.id,
+        } as UpgradeRequest);
       });
+      
       setRequests(reqs);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading requests:', error);
       Alert.alert('Error', 'Failed to load upgrade requests');
     } finally {
@@ -88,39 +88,35 @@ export default function AdminVerificationScreen({ navigation }: any) {
 
     Alert.alert(
       'Approve Request',
-      `Are you sure you want to approve this upgrade to ${ACCOUNT_TYPE_METADATA[request.requestedAccountType].displayName}?`,
+      `Are you sure you want to approve this upgrade from ${ACCOUNT_TYPE_METADATA[request.fromRole]?.displayName} to ${ACCOUNT_TYPE_METADATA[request.toRole]?.displayName}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Approve',
           onPress: async () => {
-            setProcessingId(request.id);
+            setProcessingId(request.requestId);
             try {
-              // Load current role to push into previousTypes when switching
-              const userRef = doc(db, 'users', request.uid);
-              const userSnap = await getDoc(userRef);
-              const currentType = (userSnap.exists() ? (userSnap.data() as any).accountType : 'Traveler') as any;
+              // Update upgrade request status to approved
+              const requestRef = doc(db, 'upgrade_requests', request.requestId);
+              await updateDoc(requestRef, {
+                status: 'approved',
+                reviewedBy: user.uid,
+                reviewedAt: serverTimestamp(),
+              });
 
-              // Update user document to new role and append previousTypes
+              // The Cloud Function will handle updating the user's accountType
+              // But we can also update the pendingAccountChange status here
+              const userRef = doc(db, 'users', request.uid);
               await updateDoc(userRef, {
-                accountType: request.requestedAccountType,
-                verificationStatus: 'verified',
-                roleStatus: 'approved',
-                previousTypes: arrayUnion(currentType),
-                pendingRole: deleteField(),
+                'pendingAccountChange.status': 'approved',
+                'pendingAccountChange.approvedAt': serverTimestamp(),
                 updatedAt: Date.now(),
               });
 
-              Alert.alert('Success', 'Upgrade request approved successfully');
-
-              // If using upgrade_requests collection, update it as well when structured that way
-              try {
-                await updateDoc(doc(db, 'upgrade_requests', request.uid), {
-                  status: 'approved',
-                });
-              } catch {}
+              Alert.alert('Success', 'Upgrade request approved. User account type will be updated.');
               loadRequests();
             } catch (error: any) {
+              console.error('Error approving request:', error);
               Alert.alert('Error', error.message || 'Failed to approve request');
             } finally {
               setProcessingId(null);
@@ -132,45 +128,102 @@ export default function AdminVerificationScreen({ navigation }: any) {
   };
 
   const handleReject = async (request: UpgradeRequest) => {
-    Alert.prompt(
-      'Reject Request',
-      'Enter rejection reason (optional):',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reject',
-          onPress: async (reason) => {
-            const user = auth.currentUser;
-            if (!user) return;
+    setSelectedRequest(request);
+    setRejectReason('');
+    setRejectModalVisible(true);
+  };
 
-            setProcessingId(request.id);
-            try {
-              // Update user document
-              await updateDoc(doc(db, 'users', request.uid), {
-                verificationStatus: 'rejected',
-                updatedAt: Date.now(),
-              });
+  const confirmReject = async () => {
+    if (!selectedRequest) return;
 
-              // Update upgrade request
-              await updateDoc(doc(db, 'upgradeRequests', request.id), {
-                status: 'rejected',
-                reviewedAt: Date.now(),
-                reviewedBy: user.uid,
-                rejectionReason: reason || 'Rejected by admin',
-              });
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert('Error', 'You must be logged in');
+      return;
+    }
 
-              Alert.alert('Success', 'Upgrade request rejected');
-              loadRequests();
-            } catch (error: any) {
-              Alert.alert('Error', error.message || 'Failed to reject request');
-            } finally {
-              setProcessingId(null);
-            }
-          },
-        },
-      ],
-      'plain-text'
-    );
+    setProcessingId(selectedRequest.requestId);
+    try {
+      // Update upgrade request status to rejected
+      const requestRef = doc(db, 'upgrade_requests', selectedRequest.requestId);
+      await updateDoc(requestRef, {
+        status: 'rejected',
+        reviewedBy: user.uid,
+        reviewedAt: serverTimestamp(),
+        adminComment: rejectReason || 'Rejected by admin',
+      });
+
+      // Update user's pendingAccountChange status
+      const userRef = doc(db, 'users', selectedRequest.uid);
+      await updateDoc(userRef, {
+        'pendingAccountChange.status': 'rejected',
+        'pendingAccountChange.rejectedAt': serverTimestamp(),
+        'pendingAccountChange.adminComment': rejectReason || 'Rejected by admin',
+        updatedAt: Date.now(),
+      });
+
+      Alert.alert('Success', 'Upgrade request rejected');
+      setRejectModalVisible(false);
+      setSelectedRequest(null);
+      setRejectReason('');
+      loadRequests();
+    } catch (error: any) {
+      console.error('Error rejecting request:', error);
+      Alert.alert('Error', error.message || 'Failed to reject request');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const formatDate = (timestamp: any) => {
+    if (!timestamp) return 'N/A';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+  };
+
+  const renderStepData = (request: UpgradeRequest) => {
+    if (!request.stepData) return null;
+
+    return Object.entries(request.stepData).map(([stepKey, stepData]) => {
+      const step = request.requiredSteps.find((s) => s.key === stepKey);
+      if (!step) return null;
+
+      return (
+        <View key={stepKey} style={styles.stepSection}>
+          <Text style={styles.stepTitle}>{step.label}</Text>
+          
+          {/* Form Data */}
+          {stepData.formData && (
+            <View style={styles.formDataContainer}>
+              {Object.entries(stepData.formData).map(([fieldKey, value]) => {
+                const field = step.fields?.find((f) => f.key === fieldKey);
+                return (
+                  <View key={fieldKey} style={styles.formField}>
+                    <Text style={styles.formLabel}>{field?.label || fieldKey}:</Text>
+                    <Text style={styles.formValue}>{String(value)}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Uploaded Document */}
+          {stepData.uploadedDoc && (
+            <View style={styles.docContainer}>
+              <Text style={styles.docLabel}>Document:</Text>
+              <Image
+                source={{ uri: stepData.uploadedDoc.url }}
+                style={styles.docImage}
+                resizeMode="contain"
+              />
+              {stepData.uploadedDoc.fileName && (
+                <Text style={styles.docFileName}>{stepData.uploadedDoc.fileName}</Text>
+              )}
+            </View>
+          )}
+        </View>
+      );
+    });
   };
 
   if (loading) {
@@ -197,10 +250,13 @@ export default function AdminVerificationScreen({ navigation }: any) {
         style={styles.scrollView}
         contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => {
-            setRefreshing(true);
-            loadRequests();
-          }} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadRequests();
+            }}
+          />
         }
       >
         {requests.length === 0 ? (
@@ -210,62 +266,53 @@ export default function AdminVerificationScreen({ navigation }: any) {
           </View>
         ) : (
           requests.map((request) => {
-            const requestedMetadata = ACCOUNT_TYPE_METADATA[request.requestedAccountType];
-            const isProcessing = processingId === request.id;
+            const fromMetadata = ACCOUNT_TYPE_METADATA[request.fromRole];
+            const toMetadata = ACCOUNT_TYPE_METADATA[request.toRole];
+            const isProcessing = processingId === request.requestId;
 
             return (
-              <View key={request.id} style={styles.requestCard}>
+              <View key={request.requestId} style={styles.requestCard}>
                 <View style={styles.requestHeader}>
-                  <View style={[styles.typeBadge, { backgroundColor: requestedMetadata.color }]}>
-                    <Text style={styles.typeBadgeText}>{requestedMetadata.tag}</Text>
+                  <View style={styles.typeBadges}>
+                    <View style={[styles.typeBadge, { backgroundColor: fromMetadata?.color || colors.mutedText }]}>
+                      <Text style={styles.typeBadgeText}>{fromMetadata?.tag || request.fromRole}</Text>
+                    </View>
+                    <Icon name="arrow-forward" size={16} color={colors.mutedText} />
+                    <View style={[styles.typeBadge, { backgroundColor: toMetadata?.color || colors.primary }]}>
+                      <Text style={styles.typeBadgeText}>{toMetadata?.tag || request.toRole}</Text>
+                    </View>
                   </View>
                   <Text style={styles.timeText}>
-                    {new Date(request.createdAt).toLocaleDateString()}
+                    {formatDate(request.createdAt)}
                   </Text>
                 </View>
 
                 <View style={styles.infoSection}>
-                  <Text style={styles.infoLabel}>Requested Account Type:</Text>
-                  <Text style={styles.infoValue}>{requestedMetadata.displayName}</Text>
+                  <Text style={styles.infoLabel}>User ID:</Text>
+                  <Text style={styles.infoValue}>{request.uid}</Text>
                 </View>
 
-                {/* Required Documents based on template */}
                 <View style={styles.infoSection}>
-                  <Text style={styles.infoLabel}>Required Documents:</Text>
-                  <View style={{ marginTop: 6, gap: 6 }}>
-                    {(VERIFICATION_TEMPLATES[request.requestedAccountType] || []).map((k) => (
-                      <Text key={k} style={{ color: '#6B7280', fontSize: 13 }}>• {VERIFICATION_LABELS[k] || k}</Text>
-                    ))}
-                  </View>
+                  <Text style={styles.infoLabel}>From:</Text>
+                  <Text style={styles.infoValue}>{fromMetadata?.displayName || request.fromRole}</Text>
                 </View>
 
-                {request.kycData && (
-                  <>
-                    <View style={styles.infoSection}>
-                      <Text style={styles.infoLabel}>Name:</Text>
-                      <Text style={styles.infoValue}>{request.kycData.fullName}</Text>
-                    </View>
-                    <View style={styles.infoSection}>
-                      <Text style={styles.infoLabel}>ID Type:</Text>
-                      <Text style={styles.infoValue}>{request.kycData.idType.toUpperCase()}</Text>
-                    </View>
-                    <View style={styles.infoSection}>
-                      <Text style={styles.infoLabel}>ID Number:</Text>
-                      <Text style={styles.infoValue}>{request.kycData.idNumber}</Text>
-                    </View>
-                    {request.kycData.businessName && (
-                      <View style={styles.infoSection}>
-                        <Text style={styles.infoLabel}>Business Name:</Text>
-                        <Text style={styles.infoValue}>{request.kycData.businessName}</Text>
-                      </View>
-                    )}
-                    {request.kycData.registrationNumber && (
-                      <View style={styles.infoSection}>
-                        <Text style={styles.infoLabel}>Registration:</Text>
-                        <Text style={styles.infoValue}>{request.kycData.registrationNumber}</Text>
-                      </View>
-                    )}
-                  </>
+                <View style={styles.infoSection}>
+                  <Text style={styles.infoLabel}>To:</Text>
+                  <Text style={styles.infoValue}>{toMetadata?.displayName || request.toRole}</Text>
+                </View>
+
+                <View style={styles.infoSection}>
+                  <Text style={styles.infoLabel}>Required Steps:</Text>
+                  <Text style={styles.infoValue}>{request.requiredSteps?.length || 0} steps</Text>
+                </View>
+
+                {/* Step Data */}
+                {request.stepData && Object.keys(request.stepData).length > 0 && (
+                  <View style={styles.stepsContainer}>
+                    <Text style={styles.stepsTitle}>Verification Details:</Text>
+                    {renderStepData(request)}
+                  </View>
                 )}
 
                 <View style={styles.actionButtons}>
@@ -291,6 +338,59 @@ export default function AdminVerificationScreen({ navigation }: any) {
           })
         )}
       </ScrollView>
+
+      {/* Reject Modal */}
+      <Modal
+        visible={rejectModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setRejectModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Reject Request</Text>
+              <TouchableOpacity onPress={() => setRejectModalVisible(false)}>
+                <Icon name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Please provide a reason for rejection (optional):
+            </Text>
+
+            <TextInput
+              style={styles.rejectInput}
+              placeholder="Rejection reason..."
+              value={rejectReason}
+              onChangeText={setRejectReason}
+              multiline
+              numberOfLines={4}
+              placeholderTextColor={colors.mutedText}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setRejectModalVisible(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.confirmRejectButton]}
+                onPress={confirmReject}
+                disabled={!!processingId}
+              >
+                {processingId ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <Text style={styles.confirmRejectButtonText}>Confirm Reject</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -351,6 +451,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  typeBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   typeBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -377,6 +482,72 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.text,
+  },
+  stepsContainer: {
+    marginTop: 16,
+    padding: 12,
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  stepsTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 12,
+  },
+  stepSection: {
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  stepTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  formDataContainer: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  formField: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  formLabel: {
+    fontSize: 13,
+    color: colors.mutedText,
+    flex: 1,
+  },
+  formValue: {
+    fontSize: 13,
+    color: colors.text,
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'right',
+  },
+  docContainer: {
+    marginTop: 8,
+  },
+  docLabel: {
+    fontSize: 13,
+    color: colors.mutedText,
+    marginBottom: 8,
+  },
+  docImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    backgroundColor: colors.background,
+  },
+  docFileName: {
+    fontSize: 11,
+    color: colors.mutedText,
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   actionButtons: {
     flexDirection: 'row',
@@ -408,7 +579,7 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 12,
     borderRadius: 12,
-    backgroundColor: colors.success,
+    backgroundColor: colors.success || '#10B981',
   },
   approveButtonText: {
     color: 'white',
@@ -418,9 +589,74 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.6,
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: colors.mutedText,
+    marginBottom: 16,
+  },
+  rejectInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: colors.text,
+    minHeight: 100,
+    textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButton: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  cancelButtonText: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  confirmRejectButton: {
+    backgroundColor: colors.danger,
+  },
+  confirmRejectButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
-
-
-
-
-

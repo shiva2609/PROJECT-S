@@ -42,6 +42,7 @@ import {
 	getDocs,
 	serverTimestamp,
 } from 'firebase/firestore';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 import { AccountType, VerificationStatus } from '../types/account';
 
 // ---------- Firebase Configuration ----------
@@ -168,12 +169,16 @@ try {
 	}
 })();
 
+// Initialize Firebase Storage
+const storage = getStorage(app);
+console.log('✅ Firebase Storage initialized');
+
 // Export Firestore instance
 const db: Firestore = dbInstance;
 console.log('📦 Firestore instance exported, ready for use');
 
 // Export app, auth, and db as specified
-export { app, auth, db };
+export { app, auth, db, storage };
 
 // ---------- Types ----------
 

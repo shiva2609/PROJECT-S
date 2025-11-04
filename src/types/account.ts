@@ -38,6 +38,26 @@ export interface SafetyAgreement {
   version: string;
 }
 
+export interface VerificationDocs {
+  idProof?: string;
+  businessLicense?: string;
+  propertyProof?: string;
+  socialLink?: string;
+  pan?: string;
+  license?: string;
+  vehicleDocuments?: string;
+  commercialLicense?: string;
+  eventPermit?: string;
+  activityLicense?: string;
+  legalForm?: string;
+}
+
+export interface PreviousKYC {
+  type: AccountType;
+  verifiedAt?: any; // Timestamp
+  kycStatus: 'not_required' | 'pending' | 'verified' | 'rejected';
+}
+
 export interface UserAccountData {
   uid: string;
   email: string;
@@ -45,7 +65,7 @@ export interface UserAccountData {
   usernameLower: string;
   accountType: AccountType;
   verificationStatus: VerificationStatus;
-  kycStatus?: 'none' | 'pending' | 'approved' | 'denied';
+  kycStatus?: 'not_required' | 'pending' | 'approved' | 'denied' | 'verified' | 'rejected';
   verification?: Partial<Record<
     | 'kyc'
     | 'license'
@@ -59,9 +79,12 @@ export interface UserAccountData {
     | 'socialVerification',
     'pending' | 'approved' | 'denied'
   >>;
+  verificationDocs?: VerificationDocs;
   previousTypes?: AccountType[];
+  previousKYC?: PreviousKYC;
   kycData?: KYCData;
   safetyAgreement?: SafetyAgreement;
+  verifiedAt?: any; // Timestamp
   createdAt: any; // Timestamp
   updatedAt?: number;
   // Legacy support
