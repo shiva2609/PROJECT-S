@@ -7,8 +7,10 @@ import {
   createNativeStackNavigator,} from '@react-navigation/native-stack';
 import {TransitionPresets} from '@react-navigation/stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { View, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { colors } from '../utils/colors';
+import { useAuth } from '../contexts/AuthContext';
 
 // Screens
 import SplashScreen from '../screens/SplashScreen';
@@ -24,10 +26,19 @@ import PasswordChangedScreen from '../screens/Auth/PasswordChangedScreen';
 import TravelPlanSelectScreen from '../screens/travel/TravelPlanSelectScreen';
 import HomeScreen from '../screens/HomeScreen';
 import ExploreScreen from '../screens/ExploreScreen';
-import CreatePostScreen from '../screens/CreatePostScreen';
+import CreateScreen from '../screens/CreateScreen';
 import TripsScreen from '../screens/TripsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AccountScreen from '../screens/AccountScreen';
+import AdminVerificationScreen from '../screens/AdminVerificationScreen';
+import DashboardScreen from '../screens/DashboardScreen';
+import RoleUpgradeScreen from '../screens/RoleUpgradeScreen';
+// KYC Verification Screens
+import HostVerification from '../screens/kyc/HostVerification';
+import AgencyVerification from '../screens/kyc/AgencyVerification';
+import StayHostVerification from '../screens/kyc/StayHostVerification';
+import CreatorVerification from '../screens/kyc/CreatorVerification';
+import AccountChangeFlowScreen from '../screens/kyc/AccountChangeFlowScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -61,7 +72,7 @@ function Tabs() {
     >
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Explore" component={ExploreScreen} />
-      <Tab.Screen name="Create" component={CreatePostScreen} />
+      <Tab.Screen name="Create" component={CreateScreen} />
       <Tab.Screen name="Trips" component={TripsScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
@@ -69,6 +80,17 @@ function Tabs() {
 }
 
 export default function AppNavigator() {
+  const { initialized, loading } = useAuth();
+
+  // Wait for Firebase Auth to initialize before rendering routes
+  if (!initialized || loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer
       theme={{
@@ -113,7 +135,53 @@ export default function AppNavigator() {
 
         {/* Main Tabs */}
         <Stack.Screen name="MainTabs" component={Tabs} />
+        <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="Dashboard" component={DashboardScreen} />
         <Stack.Screen name="Account" component={AccountScreen} />
+        <Stack.Screen name="AdminVerification" component={AdminVerificationScreen} />
+        <Stack.Screen name="RoleUpgrade" component={RoleUpgradeScreen} />
+        
+        {/* KYC Verification Screens */}
+        <Stack.Screen 
+          name="HostVerification" 
+          component={HostVerification}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="AgencyVerification" 
+          component={AgencyVerification}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="StayHostVerification" 
+          component={StayHostVerification}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="CreatorVerification" 
+          component={CreatorVerification}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="AccountChangeFlow" 
+          component={AccountChangeFlowScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );
