@@ -38,7 +38,7 @@
    - Go to https://console.firebase.google.com/
    - Select project: **sanchari-truetraveller** (Project ID: 893206677174)
    - If iOS app doesn't exist: Click "Add app" → Select iOS
-   - Use bundle identifier: `org.reactjs.native.example.Sanchari`
+   - Use bundle identifier: `com.sanchari` (updated to match Android)
    - Download the `GoogleService-Info.plist` file
 
 2. **Place the file:**
@@ -56,7 +56,7 @@
 
 ## 📋 Current iOS Configuration
 
-- **Bundle Identifier:** `org.reactjs.native.example.Sanchari`
+- **Bundle Identifier:** `com.sanchari` (updated to match Android)
 - **Deployment Target:** iOS 15.1
 - **Swift Version:** 5.0
 - **Build System:** New Architecture enabled
@@ -97,7 +97,8 @@ Once `GoogleService-Info.plist` is added, you can test by:
 ## Summary of Changes
 
 ### Files Modified:
-1. `ios/Sanchari/AppDelegate.swift` - Added Firebase initialization
+1. `ios/Sanchari/AppDelegate.swift` - Firebase initialization (already configured)
+2. `ios/Sanchari.xcodeproj/project.pbxproj` - Updated bundle identifier to `com.sanchari`
 
 ### Files Created:
 1. `ios/GOOGLESERVICE-INFO-SETUP.md` - Detailed setup instructions
