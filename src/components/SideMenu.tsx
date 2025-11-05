@@ -1,24 +1,199 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Pressable } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Pressable, ScrollView, Image } from 'react-native';
 import { MotiView } from 'moti';
 import { BlurView } from '@react-native-community/blur';
 import { Colors } from '../theme/colors';
 import { Fonts } from '../theme/fonts';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { AccountType, VerificationStatus, getAccountTypeMetadata, UserAccountData } from '../types/account';
+import { useAuth } from '../contexts/AuthContext';
+import { db } from '../api/authService';
+import { doc, getDoc } from 'firebase/firestore';
+import { signOut } from '../api/authService';
+import { useDispatch } from 'react-redux';
+import { logout } from '../store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AUTH_USER_KEY } from '../utils/constants';
 
 const { width } = Dimensions.get('window');
+const MENU_WIDTH = width * 0.75;
 
 interface SideMenuProps {
   visible: boolean;
   onClose: () => void;
   onNavigate: (route: string) => void;
-  name: string;
-  role: string;
-  isAdmin: boolean;
+  navigation?: any;
 }
 
-export default function SideMenu({ visible, onClose, onNavigate, name, role, isAdmin }: SideMenuProps) {
+interface MenuItemData {
+  label: string;
+  icon: string;
+  route: string;
+  onPress?: () => void;
+}
+
+interface MenuGroupProps {
+  title: string;
+  items: MenuItemData[];
+}
+
+interface ProfileMiniCardProps {
+  userData: (UserAccountData & { photoURL?: string }) | null;
+  displayName: string;
+}
+
+// Profile Mini Card Component
+const ProfileMiniCard = ({ userData, displayName }: ProfileMiniCardProps) => {
+  const accountType = (userData?.accountType || 'Traveler') as AccountType;
+  const verificationStatus = (userData?.verificationStatus || 'none') as VerificationStatus;
+  const isVerified = verificationStatus === 'verified';
+  const meta = getAccountTypeMetadata(accountType);
+
+  return (
+    <View style={styles.profileCard}>
+      <View style={styles.profileHeader}>
+        <View style={styles.avatarContainer}>
+          {userData?.photoURL ? (
+            <Image source={{ uri: userData.photoURL }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+              <Icon name="person" size={32} color={Colors.brand.primary} />
+            </View>
+          )}
+          {isVerified && (
+            <View style={styles.verifiedBadge}>
+              <Icon name="checkmark-circle" size={20} color={Colors.accent.green} />
+            </View>
+          )}
+        </View>
+        <View style={styles.profileInfo}>
+          <Text style={styles.profileName} numberOfLines={1}>
+            {userData?.username || displayName || 'Traveler'}
+          </Text>
+          <View style={styles.roleBadgeContainer}>
+            <View style={[styles.roleBadge, { backgroundColor: meta.color + '20' }]}>
+              <Text style={[styles.roleBadgeText, { color: meta.color }]}>
+                {meta.displayName}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+// Menu Group Component
+const MenuGroup = ({ title, items }: MenuGroupProps) => {
+  if (!items || items.length === 0) return null;
+
+  return (
+    <View style={styles.menuGroup}>
+      <Text style={styles.groupTitle}>{title}</Text>
+      {items.map((item, index) => (
+        <MenuItem
+          key={index}
+          icon={item.icon}
+          label={item.label}
+          onPress={item.onPress || (() => {})}
+        />
+      ))}
+    </View>
+  );
+};
+
+// Menu Item Component
+const MenuItem = ({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) => (
+  <TouchableOpacity 
+    activeOpacity={0.6} 
+    onPress={onPress} 
+    style={styles.menuItem}
+  >
+    <Icon name={icon} size={22} color={Colors.brand.secondary} style={styles.menuIcon} />
+    <Text style={styles.menuLabel}>{label}</Text>
+    <Icon name="chevron-forward" size={18} color={Colors.black.qua} />
+  </TouchableOpacity>
+);
+
+export default function SideMenu({ visible, onClose, onNavigate, navigation }: SideMenuProps) {
+  const { user } = useAuth();
+  const dispatch = useDispatch();
+  const [userData, setUserData] = useState<(UserAccountData & { photoURL?: string }) | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (visible && user) {
+      loadUserData();
+    }
+  }, [visible, user]);
+
+  const loadUserData = async () => {
+    try {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (userDoc.exists()) {
+        setUserData(userDoc.data() as UserAccountData & { photoURL?: string });
+      }
+    } catch (error) {
+      console.error('Error loading user data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      await AsyncStorage.removeItem(AUTH_USER_KEY);
+      dispatch(logout());
+      
+      if (navigation) {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Onboarding1' }],
+        });
+      }
+      onClose();
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  const accountType = (userData?.accountType || 'Traveler') as AccountType;
+  const isSuperAdmin = accountType === 'superAdmin';
+  const isTraveler = accountType === 'Traveler';
+  const showDashboard = !isTraveler;
+  const showUpgrade = !isSuperAdmin;
+
+  // Menu Groups Configuration
+  const tripsItems: MenuItemData[] = [
+    { label: 'My Trips', icon: 'airplane-outline', route: 'Trips' },
+    { label: 'Saved Trips', icon: 'bookmark-outline', route: 'SavedTrips' },
+    { label: 'Itinerary Builder', icon: 'map-outline', route: 'ItineraryBuilder' },
+  ];
+
+  const toolsItems: MenuItemData[] = [
+    ...(showDashboard ? [{ label: 'Dashboard', icon: 'grid-outline', route: 'Dashboard' } as MenuItemData] : []),
+    { label: "Sanchari's Near You", icon: 'location-outline', route: 'NearYou' },
+  ];
+
+  const rewardsItems: MenuItemData[] = [
+    { label: 'Explorer Points Wallet', icon: 'wallet-outline', route: 'PointsWallet' },
+  ];
+
+  const settingsItems: MenuItemData[] = [
+    { label: 'Account Settings', icon: 'settings-outline', route: 'Account' },
+    ...(showUpgrade ? [{ label: 'Upgrade Account', icon: 'arrow-up-circle-outline', route: 'RoleUpgrade' } as MenuItemData] : []),
+    { label: 'Logout', icon: 'log-out-outline', route: '', onPress: handleLogout },
+  ];
+
   if (!visible) return null;
+
+  const displayName = userData?.username || user?.email?.split('@')[0] || 'Traveler';
 
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -29,62 +204,98 @@ export default function SideMenu({ visible, onClose, onNavigate, name, role, isA
 
       {/* Sliding Menu */}
       <MotiView
-        from={{ translateX: -width }}
+        from={{ translateX: -MENU_WIDTH }}
         animate={{ translateX: 0 }}
-        exit={{ translateX: -width }}
+        exit={{ translateX: -MENU_WIDTH }}
         transition={{ type: 'timing', duration: 320 }}
         style={styles.menuContainer}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.avatar}>
-            <Icon name="person-circle-outline" size={58} color={Colors.brand.primary} />
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Profile Mini Card */}
+          <ProfileMiniCard userData={userData} displayName={displayName} />
+
+          {/* Divider */}
+          <View style={styles.divider} />
+
+          {/* Trips Group */}
+          <MenuGroup 
+            title="Trips" 
+            items={tripsItems.map(item => ({
+              ...item,
+              onPress: () => {
+                onClose();
+                onNavigate(item.route);
+              },
+            }))}
+          />
+
+          {/* Divider */}
+          <View style={styles.divider} />
+
+          {/* Tools Group */}
+          <MenuGroup 
+            title="Tools" 
+            items={toolsItems.map(item => ({
+              ...item,
+              onPress: () => {
+                onClose();
+                onNavigate(item.route);
+              },
+            }))}
+          />
+
+          {/* Divider */}
+          <View style={styles.divider} />
+
+          {/* Rewards Group */}
+          <MenuGroup 
+            title="Rewards" 
+            items={rewardsItems.map(item => ({
+              ...item,
+              onPress: () => {
+                onClose();
+                onNavigate(item.route);
+              },
+            }))}
+          />
+
+          {/* Divider */}
+          <View style={styles.divider} />
+
+          {/* Settings Group */}
+          <MenuGroup 
+            title="Settings" 
+            items={settingsItems.map(item => ({
+              ...item,
+              onPress: item.onPress || (() => {
+                onClose();
+                if (item.route) {
+                  onNavigate(item.route);
+                }
+              }),
+            }))}
+          />
+
+          {/* Version Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.versionText}>v1.0.0</Text>
           </View>
-          <View>
-            <Text style={styles.name}>{name}</Text>
-            <Text style={styles.role}>{role}</Text>
-          </View>
-        </View>
-
-        {/* Divider */}
-        <View style={styles.divider} />
-
-        {/* Navigation Links */}
-        <View style={styles.menuItems}>
-          <MenuItem icon="home-outline" label="Home" onPress={() => onNavigate('Home')} />
-          <MenuItem icon="compass-outline" label="Explore" onPress={() => onNavigate('Explore')} />
-          <MenuItem icon="book-outline" label="Bookings" onPress={() => onNavigate('Bookings')} />
-          <MenuItem icon="person-outline" label="Profile" onPress={() => onNavigate('Profile')} />
-          {isAdmin && <MenuItem icon="settings-outline" label="Dashboard" onPress={() => onNavigate('Dashboard')} />}
-        </View>
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <TouchableOpacity onPress={onClose} activeOpacity={0.8} style={styles.logoutBtn}>
-            <Icon name="log-out-outline" size={20} color={Colors.white.primary} />
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
-          <Text style={styles.versionText}>v1.0.0</Text>
-        </View>
+        </ScrollView>
       </MotiView>
     </View>
   );
 }
 
-const MenuItem = ({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) => (
-  <TouchableOpacity activeOpacity={0.7} onPress={onPress} style={styles.menuItem}>
-    <Icon name={icon} size={22} color={Colors.black.primary} style={{ width: 28 }} />
-    <Text style={styles.menuLabel}>{label}</Text>
-  </TouchableOpacity>
-);
-
 const styles = StyleSheet.create({
   menuContainer: {
-    width: width * 0.72,
+    width: MENU_WIDTH,
     height: '100%',
-    backgroundColor: Colors.white.primary,
-    paddingVertical: 36,
-    paddingHorizontal: 20,
+    backgroundColor: Colors.white.secondary,
+    paddingTop: 36,
     borderTopRightRadius: 24,
     borderBottomRightRadius: 24,
     shadowColor: '#000',
@@ -93,35 +304,115 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 12,
   },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F9CBAF',
+  scrollView: {
+    flex: 1,
   },
-  name: { fontFamily: Fonts.semibold, fontSize: 16, color: Colors.black.primary },
-  role: { fontFamily: Fonts.regular, fontSize: 13, color: Colors.black.qua, marginTop: 2 },
-  divider: { height: 1, backgroundColor: Colors.white.tertiary, marginVertical: 18 },
-  menuItems: { gap: 16, marginTop: 10 },
-  menuItem: { flexDirection: 'row', alignItems: 'center' },
-  menuLabel: { fontFamily: Fonts.medium, fontSize: 15, color: Colors.black.primary },
-  footer: { position: 'absolute', bottom: 36, left: 20, right: 20 },
-  logoutBtn: {
-    backgroundColor: Colors.brand.primary,
+  scrollContent: {
+    paddingBottom: 20,
+  },
+  profileCard: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 10,
-    gap: 8,
+    gap: 12,
   },
-  logoutText: { color: Colors.white.primary, fontFamily: Fonts.semibold, fontSize: 14 },
+  avatarContainer: {
+    position: 'relative',
+  },
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.white.tertiary,
+  },
+  avatarPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.brand.primary + '20',
+  },
+  verifiedBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: Colors.white.primary,
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: Colors.white.secondary,
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  profileName: {
+    fontFamily: Fonts.semibold,
+    fontSize: 18,
+    color: Colors.black.primary,
+    marginBottom: 6,
+  },
+  roleBadgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  roleBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  roleBadgeText: {
+    fontFamily: Fonts.medium,
+    fontSize: 12,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.white.tertiary,
+    marginVertical: 16,
+    marginHorizontal: 20,
+  },
+  menuGroup: {
+    paddingHorizontal: 20,
+    marginBottom: 8,
+  },
+  groupTitle: {
+    fontFamily: Fonts.medium,
+    fontSize: 13,
+    color: Colors.black.qua,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 12,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderRadius: 12,
+    marginBottom: 4,
+  },
+  menuIcon: {
+    width: 28,
+    marginRight: 12,
+  },
+  menuLabel: {
+    flex: 1,
+    fontFamily: Fonts.medium,
+    fontSize: 15,
+    color: Colors.black.primary,
+  },
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    alignItems: 'center',
+  },
   versionText: {
     textAlign: 'center',
-    marginTop: 10,
     fontSize: 12,
     color: Colors.black.qua,
     fontFamily: Fonts.regular,

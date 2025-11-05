@@ -126,7 +126,7 @@ export default function HomeScreen({ navigation }: any) {
                       {!!item.placeName && <Text style={styles.postPlace}>{item.placeName}</Text>}
                     </View>
                   </View>
-                  {!!item.imageURL && <Image source={{ uri: item.imageURL }} style={styles.postImage} />}
+                  {!!item.imageURL && <Image source={{ uri: item.imageURL }} style={styles.postImage as any} />}
                   <View style={styles.postActionsTop}>
                     <TouchableOpacity activeOpacity={0.8} style={styles.viewDetails}><Text style={styles.viewDetailsText}>View Details</Text></TouchableOpacity>
                   </View>
@@ -167,9 +167,7 @@ export default function HomeScreen({ navigation }: any) {
           setMenuOpen(false);
           navigation.navigate(route);
         }}
-        role={role}
-        isAdmin={false}
-        name={user?.email || 'Traveler'}
+        navigation={navigation}
       />
     </SafeAreaView>
   );
