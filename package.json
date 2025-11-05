@@ -9,7 +9,8 @@
     "start": "react-native start",
     "start:clean": "react-native start --reset-cache",
     "android:clean": "cd android && gradlew clean && cd ..",
-    "test": "jest"
+    "test": "jest",
+    "docs:dev": "node documentation-site/server.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
