@@ -13,10 +13,18 @@
     "esModuleInterop": true,
     "jsx": "react-native",
     "lib": ["ES6", "DOM", "ESNext"],
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["**/node_modules", "**/Pods"]
+  "include": ["src/**/*", "__tests__/**/*", "*.ts", "*.tsx"],
+  "exclude": [
+    "**/node_modules",
+    "**/Pods",
+    "__tests__",
+    "src/__tests__",
+    "functions",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
 }
