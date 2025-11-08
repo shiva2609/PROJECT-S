@@ -1,7 +1,7 @@
 /**
- * Ride Creator
+ * Ride Partner
  * 
- * Allows Ride Creator accounts to create transport/mobility listings
+ * Allows Ride Partner accounts to create transport/mobility listings
  */
 
 import React, { useState } from 'react';
@@ -99,7 +99,7 @@ export default function RideCreator({ accountType, onClose, navigation }: Props)
       }
 
   const hostTypeMap: Record<string, string> = {
-    'RideCreator': 'RideCreator',
+    'RideCreator': 'RidePartner',
     'Host': 'TravelHost',
     'Agency': 'Agency',
   };

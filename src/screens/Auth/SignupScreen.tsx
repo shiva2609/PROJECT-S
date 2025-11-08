@@ -435,7 +435,7 @@ const styles = StyleSheet.create({
   bottomRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
   muted: { color: colors.mutedText, fontFamily: FontFamily.poppinsRegular },
   linkStrong: { color: colors.primary, fontFamily: FontFamily.poppinsBold },
-  validText: { color: '#4CAF50', fontSize: 12, marginTop: 4, marginLeft: 4, fontFamily: FontFamily.poppinsRegular },
-  errorText: { color: '#F44336', fontSize: 12, marginTop: 4, marginLeft: 4, fontFamily: FontFamily.poppinsRegular },
+  validText: { color: '#43A047', fontSize: 12, marginTop: 4, marginLeft: 4, fontFamily: FontFamily.poppinsRegular }, // Accent Green
+  errorText: { color: '#E53935', fontSize: 12, marginTop: 4, marginLeft: 4, fontFamily: FontFamily.poppinsRegular }, // Accent Red
   mutedSmall: { color: colors.mutedText, fontSize: 12, marginTop: 4, marginLeft: 4, fontFamily: FontFamily.poppinsRegular },
 });

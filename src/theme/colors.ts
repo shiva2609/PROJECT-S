@@ -1,35 +1,39 @@
 /**
- * Sanchari Brand Color System
+ * Sanchari Brand Color System v2
  * 
- * Premium color palette for consistent UI across all screens
+ * Unified Orange Core System - Complete color palette replacement
+ * Built around primary orange tone #FF5C02
  */
 export const Colors = {
   brand: {
-    primary: '#FF6600',
-    secondary: '#E87A5D',
-    tertiary: '#C47A5D',
-    qua: '#B58B75',
-    accent: '#A69386',
+    primary: '#FF5C02', // Base Brand Orange
+    secondary: '#FF5C02CC', // 80% Opacity
+    tertiary: '#FF5C0299', // 60% Opacity
+    qua: '#FF5C0266', // 40% Opacity
+    accent: '#FF5C0233', // 20% Opacity
   },
   black: {
-    primary: '#000000',
-    secondary: '#212121',
-    tertiary: '#444444',
-    qua: '#666666',
+    primary: '#1A1A1A',
+    secondary: '#2D2D2D',
+    tertiary: '#3C3C3C',
+    qua: '#4D4D4D',
   },
   white: {
     primary: '#FFFFFF',
-    secondary: '#F8F5F1',
-    tertiary: '#EDEDED',
-    qua: '#D1D1D0',
+    secondary: '#F5F5F5',
+    tertiary: '#EAEAEA',
+    qua: '#DADADA',
   },
   accent: {
-    red: '#E53935',
-    amber: '#F3B72E',
-    green: '#4CAF50',
-    blue: '#2196F3',
+    red: '#E53935', // Error
+    amber: '#FFB300', // Warning (Amber Yellow)
+    green: '#43A047', // Success
+    blue: '#1E88E5', // Info
   },
 };
+
+
+
 
 
 

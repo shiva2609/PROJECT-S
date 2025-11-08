@@ -56,6 +56,20 @@ export default function DashboardScreen() {
         return <Section title="Adventure"> <Text style={styles.text}>Courses and experiences.</Text> </Section>;
       case 'Creator':
         return <Section title="Creator Tools"> <Text style={styles.text}>Affiliate links and itineraries.</Text> </Section>;
+      case 'superAdmin':
+        return (
+          <>
+            <Section title="Super Admin Dashboard">
+              <Text style={styles.text}>Access the full admin dashboard to manage verifications, users, trips, and reports.</Text>
+            </Section>
+            <Section title="Quick Actions">
+              <Text style={styles.text}>• Review pending verifications</Text>
+              <Text style={styles.text}>• Manage user accounts</Text>
+              <Text style={styles.text}>• Approve trips and packages</Text>
+              <Text style={styles.text}>• Handle reports and reviews</Text>
+            </Section>
+          </>
+        );
       default:
         return null;
     }
@@ -82,6 +96,9 @@ const styles = StyleSheet.create({
   sectionTitle: { color: colors.text, fontWeight: '700', marginBottom: 8 },
   text: { color: colors.text },
 });
+
+
+
 
 
 

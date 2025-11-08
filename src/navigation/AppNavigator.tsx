@@ -31,6 +31,7 @@ import TripsScreen from '../screens/TripsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AccountScreen from '../screens/AccountScreen';
 import AdminVerificationScreen from '../screens/AdminVerificationScreen';
+import SuperAdminDashboardScreen from '../screens/admin/SuperAdminDashboardScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import RoleUpgradeScreen from '../screens/RoleUpgradeScreen';
 // KYC Verification Screens
@@ -39,11 +40,12 @@ import AgencyVerification from '../screens/kyc/AgencyVerification';
 import StayHostVerification from '../screens/kyc/StayHostVerification';
 import CreatorVerification from '../screens/kyc/CreatorVerification';
 import AccountChangeFlowScreen from '../screens/kyc/AccountChangeFlowScreen';
+import DrawerNavigator from './DrawerNavigator';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-function Tabs() {
+export function Tabs() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -133,12 +135,20 @@ export default function AppNavigator() {
         {/* Travel Select */}
         <Stack.Screen name="TravelPlanSelect" component={TravelPlanSelectScreen} />
 
-        {/* Main Tabs */}
-        <Stack.Screen name="MainTabs" component={Tabs} />
+        {/* Main Tabs - wrapped with Drawer */}
+        <Stack.Screen name="MainTabs" component={DrawerNavigator} />
         <Stack.Screen name="Home" component={HomeScreen} />
         <Stack.Screen name="Dashboard" component={DashboardScreen} />
         <Stack.Screen name="Account" component={AccountScreen} />
         <Stack.Screen name="AdminVerification" component={AdminVerificationScreen} />
+        <Stack.Screen 
+          name="SuperAdminDashboard" 
+          component={SuperAdminDashboardScreen}
+          options={{
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
         <Stack.Screen name="RoleUpgrade" component={RoleUpgradeScreen} />
         
         {/* KYC Verification Screens */}

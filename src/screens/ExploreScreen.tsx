@@ -193,11 +193,7 @@ export default function ExploreScreen({ navigation }: any) {
     <SafeAreaView style={styles.container}>
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
         {/* Header with Hamburger and Search */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.menuButton}>
-            <Icon name="menu" size={28} color={colors.text} />
-          </TouchableOpacity>
-        </View>
+        
 
         <View style={styles.searchContainer}>
           <Icon name="search" size={20} color={colors.mutedText} style={styles.searchIconInside} />
@@ -257,8 +253,8 @@ export default function ExploreScreen({ navigation }: any) {
 // Categories Section Component
 function CategoriesSection() {
   const categories = [
-    { name: 'Mountains', icon: '🏔️', color: '#5D9A94' },
-    { name: 'Camp', icon: '⛺', color: '#5D9A94' },
+    { name: 'Mountains', icon: '🏔️', color: '#FF5C02' }, // Brand Primary
+    { name: 'Camp', icon: '⛺', color: '#FF5C02' }, // Brand Primary
     { name: 'Beach', icon: '🏖️', color: '#87CEEB' },
     { name: 'Forest', icon: '🌲', color: '#87CEEB' },
   ];
@@ -405,7 +401,7 @@ function TripCard({ post, navigation, large = false, user }: { post: Post; navig
           <Icon
             name={favorite ? 'heart' : 'heart-outline'}
             size={24}
-            color={favorite ? '#EF4444' : '#FFFFFF'}
+            color={favorite ? '#E53935' : '#FFFFFF'} // Accent Red when favorited
           />
         </TouchableOpacity>
       </View>
@@ -463,7 +459,7 @@ function VerticalTripList({ trips, navigation }: { trips: Post[]; navigation: an
                     key={star}
                     name="star"
                     size={14}
-                    color={trip.rating && trip.rating >= star ? '#FFD700' : '#E5E5E5'}
+                    color={trip.rating && trip.rating >= star ? '#FFD700' : '#EAEAEA'} // White Tertiary for inactive
                   />
                 ))}
                 {trip.rating !== null && trip.rating !== undefined && (
@@ -520,10 +516,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F5F5F5',
-    borderRadius: 12,
+    borderRadius: 40,
     marginHorizontal: 16,
     marginTop: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 20,
     paddingVertical: 4,
   },
   searchBar: {

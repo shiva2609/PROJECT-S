@@ -371,7 +371,7 @@ export default function UpgradeAccountModal({ visible, onClose, currentAccountTy
                   onChangeText={setIdNumber}
                 />
 
-                {(selectedType === 'Agency' || selectedType === 'Stay Host' || selectedType === 'Ride Partner') && (
+                {(selectedType === 'Agency' || selectedType === 'StayHost' || selectedType === 'RideCreator') && (
                   <>
                     <Text style={styles.label}>Business Name *</Text>
                     <TextInput

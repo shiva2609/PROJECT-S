@@ -2,25 +2,25 @@
  🌍 Global Styles for Sanchari App
 --------------------------------- */
 
-/* 🎨 Brand Colors */
+/* 🎨 Brand Colors - Sanchari Brand v2 Orange Core System */
 export const Color = {
-  // Brand palette
-  colorOrangered: "#FF5C02", // Brand Coral - main accent (buttons, highlights)
-  colorTeal: "#5D9A94", // Brand Teal - secondary elements
+  // Brand palette - Orange Core System
+  colorOrangered: "#FF5C02", // Brand Primary - Base Brand Orange
+  colorTeal: "#FF5C02CC", // Brand Secondary - 80% Opacity
 
-  // Neutrals
-  colorWhite: "#FFFFFF",
-  colorWhitesmoke: "#ECECEC",
-  colorGainsboro: "#DDDDDD",
-  colorDarkgray: "#969696",
-  colorGray100: "#838383",
-  colorGray200: "#828282",
-  colorGray300: "rgba(0, 0, 0, 0.01)",
+  // Neutrals - Black Series
+  colorWhite: "#FFFFFF", // White Primary
+  colorWhitesmoke: "#F5F5F5", // White Secondary
+  colorGainsboro: "#EAEAEA", // White Tertiary
+  colorDarkgray: "#4D4D4D", // Black Qua
+  colorGray100: "#3C3C3C", // Black Tertiary
+  colorGray200: "#2D2D2D", // Black Secondary
+  colorGray300: "#1A1A1A", // Black Primary
 
-  // Semantic feedback colors
-  colorSuccess: "#4CAF50",
-  colorWarning: "#FFC107",
-  colorError: "#F44336",
+  // Semantic feedback colors - Accent Series
+  colorSuccess: "#43A047", // Accent Green (Success)
+  colorWarning: "#FFB300", // Accent Amber Yellow (Warning)
+  colorError: "#E53935", // Accent Red (Error)
 };
 
 /* 🧱 Font Families */

@@ -236,10 +236,10 @@ const styles = StyleSheet.create({
   reqRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   reqLabel: { flex: 1, color: colors.text, fontWeight: '600' },
   reqRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  progressBarBg: { width: 140, height: 8, borderRadius: 6, backgroundColor: '#E5E7EB' },
-  progressBarFg: { height: 8, borderRadius: 6, backgroundColor: '#5D9A94' },
+  progressBarBg: { width: 140, height: 8, borderRadius: 6, backgroundColor: '#EAEAEA' }, // White Tertiary
+  progressBarFg: { height: 8, borderRadius: 6, backgroundColor: '#FF5C02' }, // Brand Primary
   uploadBtn: { padding: 8 },
-  submitButton: { backgroundColor: '#E87A5D', padding: 14, borderRadius: 12, alignItems: 'center', marginTop: 16 },
+  submitButton: { backgroundColor: '#FF5C02', padding: 14, borderRadius: 12, alignItems: 'center', marginTop: 16 }, // Brand Primary
   submitButtonDisabled: { opacity: 0.6 },
   submitText: { color: 'white', fontSize: 16, fontWeight: '700' },
 });

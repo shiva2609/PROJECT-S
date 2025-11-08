@@ -7,7 +7,6 @@ import { Colors } from '../theme/colors';
 import { Fonts } from '../theme/fonts';
 import { db } from '../api/authService';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
-import SideMenu from '../components/SideMenu';
 import SegmentedControl from '../components/SegmentedControl';
 import { useAuth } from '../contexts/AuthContext';
 import { getAccountTypeMetadata, AccountType } from '../types/account';
@@ -22,7 +21,6 @@ export default function HomeScreen({ navigation }: any) {
   const [stories, setStories] = useState<StoryDoc[]>([]);
   const [posts, setPosts] = useState<PostDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [role, setRole] = useState<AccountType>('Traveler');
   const [selectedTab, setSelectedTab] = useState<'For You' | 'Following'>('For You');
 
@@ -46,7 +44,7 @@ export default function HomeScreen({ navigation }: any) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
-        <TouchableOpacity activeOpacity={0.8} onPress={() => setMenuOpen(true)}>
+        <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.openDrawer()}>
           <Icon name="menu" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.topIcons}>
@@ -159,16 +157,6 @@ export default function HomeScreen({ navigation }: any) {
           )}
         </>
       )}
-
-      <SideMenu
-        visible={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        onNavigate={(route) => {
-          setMenuOpen(false);
-          navigation.navigate(route);
-        }}
-        navigation={navigation}
-      />
     </SafeAreaView>
   );
 }
