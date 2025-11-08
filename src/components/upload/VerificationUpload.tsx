@@ -33,8 +33,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   label: { flex: 1, color: colors.text, fontWeight: '600' },
   right: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  progressBg: { width: 140, height: 8, backgroundColor: '#E5E7EB', borderRadius: 6 },
-  progressFg: { height: 8, backgroundColor: '#5D9A94', borderRadius: 6 },
+  progressBg: { width: 140, height: 8, backgroundColor: '#EAEAEA', borderRadius: 6 }, // White Tertiary
+  progressFg: { height: 8, backgroundColor: '#FF5C02', borderRadius: 6 }, // Brand Primary
   btn: { padding: 8 },
 });
 

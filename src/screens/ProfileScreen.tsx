@@ -19,7 +19,7 @@ export default function ProfileScreen({ navigation }: any) {
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('none');
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [showChangeTypeModal, setShowChangeTypeModal] = useState(false);
+  // Change Account Type moved to Side Menu - modal state removed
   const [previousTypes, setPreviousTypes] = useState<AccountType[]>([]);
   const { startPendingAccountChange, requiresVerification, hasPendingChange, getPendingChange } = useKYCManager();
   const [pendingChange, setPendingChange] = useState<any>(null);
@@ -113,10 +113,10 @@ export default function ProfileScreen({ navigation }: any) {
         {isAdmin && (
           <TouchableOpacity
             style={[styles.upgradeButton, { backgroundColor: colors.danger }]}
-            onPress={() => navigation.navigate('AdminVerification')}
+            onPress={() => navigation.navigate('SuperAdminDashboard')}
           >
             <Icon name="shield-checkmark-outline" size={24} color="white" />
-            <Text style={[styles.upgradeButtonText, { color: 'white' }]}>Admin Panel</Text>
+            <Text style={[styles.upgradeButtonText, { color: 'white' }]}>Super Admin Dashboard</Text>
           </TouchableOpacity>
         )}
 
@@ -154,14 +154,7 @@ export default function ProfileScreen({ navigation }: any) {
           </View>
         )}
 
-        <TouchableOpacity 
-          style={[styles.btn, styles.changeTypeButton]} 
-          onPress={() => setShowChangeTypeModal(true)}
-          disabled={!!pendingChange && pendingChange.status !== 'rejected'}
-        >
-          <Icon name="swap-horizontal-outline" size={20} color={colors.primary} />
-          <Text style={[styles.btnText, styles.changeTypeButtonText]}>Change Account Type</Text>
-        </TouchableOpacity>
+        {/* Change Account Type moved to Side Menu */}
 
         <View style={styles.infoSection}>
           <Text style={styles.infoTitle}>Account Information</Text>
@@ -219,170 +212,7 @@ export default function ProfileScreen({ navigation }: any) {
         )}
       </ScrollView>
 
-      {/* Change Account Type Modal */}
-      <Modal
-        visible={showChangeTypeModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowChangeTypeModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity 
-            style={styles.modalBackdrop} 
-            activeOpacity={1}
-            onPress={() => setShowChangeTypeModal(false)}
-          />
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <View style={styles.modalTitleContainer}>
-                <Icon name="swap-horizontal" size={28} color={colors.primary} />
-                <Text style={styles.modalTitle}>Change Account Type</Text>
-              </View>
-              <TouchableOpacity 
-                onPress={() => setShowChangeTypeModal(false)}
-                style={styles.closeButton}
-              >
-                <Icon name="close-circle" size={28} color={colors.mutedText} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.modalSubtitle}>
-              Select a new account type. Verification may be required.
-            </Text>
-
-            <ScrollView 
-              style={styles.typeList}
-              showsVerticalScrollIndicator={false}
-            >
-              {Object.entries(ACCOUNT_TYPE_METADATA).map(([type, metadata]) => {
-                if (type === 'superAdmin') return null;
-                const isCurrent = type === accountType;
-                const needsVerification = requiresVerification(type as AccountType);
-                
-                return (
-                  <TouchableOpacity
-                    key={type}
-                    style={[
-                      styles.typeOption,
-                      isCurrent && styles.typeOptionCurrent,
-                    ]}
-                    activeOpacity={0.7}
-                    onPress={async () => {
-                      if (isCurrent) {
-                        Alert.alert('Current Type', 'This is your current account type');
-                        setShowChangeTypeModal(false);
-                        return;
-                      }
-
-                      if (!user) {
-                        Alert.alert('Error', 'You must be logged in to change account type');
-                        return;
-                      }
-
-                      // Check if user has pending change
-                      const hasPending = await hasPendingChange(user.uid);
-                      if (hasPending) {
-                        Alert.alert(
-                          'Pending Change',
-                          'You already have a pending account change. Please complete or cancel it first.',
-                          [
-                            {
-                              text: 'View Progress',
-                              onPress: () => {
-                                setShowChangeTypeModal(false);
-                                if (pendingChange) {
-                                  navigation.navigate('AccountChangeFlow', {
-                                    toRole: pendingChange.toRole,
-                                    requestId: pendingChange.requestId,
-                                  });
-                                }
-                              },
-                            },
-                            { text: 'OK' },
-                          ]
-                        );
-                        return;
-                      }
-
-                      // Show confirmation
-                      Alert.alert(
-                        'Change Account Type',
-                        `Changing to ${metadata.displayName} will require verification. Your account type will only change after verification is approved.\n\nDo you want to continue?`,
-                        [
-                          {
-                            text: 'Cancel',
-                            style: 'cancel',
-                          },
-                          {
-                            text: 'Continue',
-                            onPress: async () => {
-                              setShowChangeTypeModal(false);
-                              
-                              try {
-                                setLoading(true);
-                                // Start pending account change
-                                const requestId = await startPendingAccountChange(
-                                  user.uid,
-                                  type as AccountType
-                                );
-
-                                if (requestId) {
-                                  // Navigate to verification flow
-                                  navigation.navigate('AccountChangeFlow', {
-                                    toRole: type as AccountType,
-                                    requestId,
-                                  });
-                                } else {
-                                  Alert.alert('Error', 'Failed to start account change process');
-                                }
-                              } catch (error: any) {
-                                Alert.alert('Error', error.message || 'Failed to start account change');
-                              } finally {
-                                setLoading(false);
-                              }
-                            },
-                          },
-                        ]
-                      );
-                    }}
-                  >
-                    <View style={[styles.typeBadge, { backgroundColor: metadata.color }]}>
-                      <Text style={styles.typeBadgeText}>{metadata.tag}</Text>
-                    </View>
-                    <View style={styles.typeInfo}>
-                      <View style={styles.typeNameRow}>
-                        <Text style={styles.typeName}>{metadata.displayName}</Text>
-                        {isCurrent && (
-                          <View style={styles.currentBadge}>
-                            <Icon name="checkmark-circle" size={16} color={colors.primary} />
-                            <Text style={styles.currentBadgeText}>Current</Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={styles.typeDescription} numberOfLines={2}>
-                        {metadata.description}
-                      </Text>
-                      {needsVerification && !isCurrent && (
-                        <View style={styles.verificationBadge}>
-                          <Icon name="shield-checkmark-outline" size={12} color={colors.primary} />
-                          <Text style={styles.verificationNote}>
-                            Verification required
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    {!isCurrent && (
-                      <Icon name="chevron-forward" size={20} color={colors.mutedText} />
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Legacy modal kept but not used when RoleUpgrade is present */}
+      {/* Change Account Type functionality moved to Side Menu */}
     </SafeAreaView>
   );
 }
