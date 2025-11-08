@@ -74,32 +74,51 @@ export function useVerificationStats() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+    const unsubscribes: Array<() => void> = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-        const [approvedSnap, deniedSnap, pendingSnap, upcomingSnap] = await Promise.all([
-          getDocs(query(collection(db, 'verifications'), where('status', '==', 'approved'))),
-          getDocs(query(collection(db, 'verifications'), where('status', '==', 'denied'))),
-          getDocs(query(collection(db, 'verifications'), where('status', '==', 'pending'))),
-          getDocs(query(collection(db, 'verifications'), where('scheduledDate', '>=', today))),
-        ]);
+    // Real-time snapshots for each stat
+    const collections = [
+      { 
+        key: 'approved', 
+        q: query(collection(db, 'verifications'), where('status', '==', 'approved')) 
+      },
+      { 
+        key: 'denied', 
+        q: query(collection(db, 'verifications'), where('status', '==', 'denied')) 
+      },
+      { 
+        key: 'pending', 
+        q: query(collection(db, 'verifications'), where('status', '==', 'pending')) 
+      },
+      { 
+        key: 'upcoming', 
+        q: query(collection(db, 'verifications'), where('scheduledDate', '>=', today)) 
+      },
+    ];
 
-        setStats({
-          approved: approvedSnap.size,
-          denied: deniedSnap.size,
-          pending: pendingSnap.size,
-          upcoming: upcomingSnap.size,
-        });
-        setLoading(false);
-      } catch (error: any) {
-        console.error('Error fetching verification stats:', error);
-        setLoading(false);
-      }
+    collections.forEach(({ key, q }) => {
+      const unsub = onSnapshot(
+        q,
+        (snapshot) => {
+          setStats((prev) => ({
+            ...prev,
+            [key]: snapshot.size,
+          }));
+          setLoading(false);
+        },
+        (err) => {
+          console.error(`Error fetching ${key} stats:`, err);
+          setLoading(false);
+        }
+      );
+      unsubscribes.push(unsub);
+    });
+
+    return () => {
+      unsubscribes.forEach((unsub) => unsub());
     };
-
-    fetchStats();
   }, []);
 
   return { stats, loading };

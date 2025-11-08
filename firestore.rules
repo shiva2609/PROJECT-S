@@ -13,82 +13,337 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == uid;
     }
     
-    // Helper function to check if user is superAdmin
+    // Check if user is super admin (from adminUsers collection)
     function isSuperAdmin() {
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/adminUsers/$(request.auth.uid)) ||
+        (request.auth.email != null && exists(/databases/$(database)/documents/adminUsers/$(request.auth.email.split('@')[0]))) ||
+        exists(/databases/$(database)/documents/adminUsers/sanchariadmin)
+      );
+    }
+    
+    // Check if user is super admin via users collection
+    function isSuperAdminByAccountType() {
       return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == 'superAdmin';
     }
     
-    // Users collection
+    // Combined super admin check
+    function isSuperAdminCombined() {
+      return isSuperAdmin() || isSuperAdminByAccountType();
+    }
+    
+    // ============================================
+    // Users Collection
+    // ============================================
     match /users/{uid} {
-      // Allow read if user is authenticated
+      // Allow read for authenticated users
       allow read: if isAuthenticated();
       
-      // Allow create for new users (signup)
+      // Allow create for new users during signup
       allow create: if isAuthenticated() && 
-                      request.auth.uid == uid &&
-                      !('accountType' in request.resource.data) ||
-                      request.resource.data.accountType == 'Traveler';
+                     request.auth.uid == uid &&
+                     (!('accountType' in request.resource.data) ||
+                      request.resource.data.accountType == 'Traveler');
       
-      // Allow update for own profile, but protect accountType
+      // Allow update for own profile (except accountType and suspended)
       allow update: if isOwner(uid) && 
-                      // Prevent direct accountType changes from client
-                      (!('accountType' in request.resource.data) ||
-                       request.resource.data.accountType == resource.data.accountType) &&
-                      // Allow pendingAccountChange updates
-                      ('pendingAccountChange' in request.resource.data ||
-                       // Allow other profile fields
-                       !('accountType' in request.resource.data));
+                 (!('accountType' in request.resource.data) ||
+                  request.resource.data.accountType == resource.data.accountType) &&
+                 (!('suspended' in request.resource.data) ||
+                  request.resource.data.suspended == resource.data.suspended);
       
-      // Only superAdmin or Cloud Functions can update accountType
-      allow update: if isSuperAdmin() ||
-                      // Allow Cloud Function updates (via service account)
-                      request.auth.token.firebase.sign_in_provider == 'custom';
+      // Super admin can update any user
+      allow update: if isSuperAdminCombined();
       
-      // Deny delete
+      // Prevent deletion
       allow delete: if false;
+      
+      // Subcollections
+      match /pendingVerifications/{docId} {
+        allow read, write: if isOwner(uid) || isSuperAdminCombined();
+        allow delete: if false;
+      }
+      
+      match /favorites/{docId} {
+        allow read, write: if isOwner(uid);
+        allow delete: if false;
+      }
     }
     
-    // Upgrade requests collection
-    match /upgrade_requests/{requestId} {
-      // Allow read if user is owner or superAdmin
-      allow read: if isAuthenticated() && 
-                    (resource.data.uid == request.auth.uid || isSuperAdmin());
-      
-      // Allow create only for own requests
-      allow create: if isAuthenticated() && 
-                      request.resource.data.uid == request.auth.uid &&
-                      request.resource.data.status == 'pending' &&
-                      'requestId' in request.resource.data &&
-                      'fromRole' in request.resource.data &&
-                      'toRole' in request.resource.data &&
-                      'createdAt' in request.resource.data;
-      
-      // Only superAdmin can update status
-      allow update: if isSuperAdmin() &&
-                      // Only allow status changes
-                      ('status' in request.resource.data) &&
-                      (request.resource.data.status == 'approved' ||
-                       request.resource.data.status == 'rejected') &&
-                      // Allow adding review fields
-                      ('reviewedBy' in request.resource.data ||
-                       'reviewedAt' in request.resource.data ||
-                       'adminComment' in request.resource.data);
-      
-      // Deny delete
-      allow delete: if false;
-    }
-    
-    // Roles metadata collection (read-only for authenticated users)
-    match /roles_metadata/{role} {
+    // ============================================
+    // Admin Users Collection
+    // ============================================
+    match /adminUsers/{adminId} {
+      // Allow authenticated users to read (needed for checking admin status)
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      
+      // Only super admins can create/update
+      allow create, update: if isSuperAdminCombined();
+      
+      // Prevent deletion
+      allow delete: if false;
     }
     
-    // Deny all other collections
+    // ============================================
+    // Verifications Collection
+    // ============================================
+    match /verifications/{verificationId} {
+      // Super admins can read all, users can read their own
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() ||
+        isSuperAdminByAccountType() ||
+        resource.data.uid == request.auth.uid
+      );
+      
+      // Users can create their own verification requests
+      allow create: if isAuthenticated() && 
+                     request.resource.data.uid == request.auth.uid;
+      
+      // Only super admins can update
+      allow update: if isSuperAdminCombined();
+      
+      // Prevent deletion
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // Upgrade Requests Collection
+    // ============================================
+    match /upgradeRequests/{requestId} {
+      // Users can read their own, super admins can read all
+      allow read: if isAuthenticated() && (
+        isSuperAdminCombined() ||
+        resource.data.uid == request.auth.uid
+      );
+      
+      // Users can create upgrade requests
+      allow create: if isAuthenticated() && 
+                     request.resource.data.uid == request.auth.uid;
+      
+      // Only super admins can update
+      allow update: if isSuperAdminCombined();
+      
+      // Prevent deletion
+      allow delete: if false;
+    }
+    
+    // Legacy upgrade_requests collection
+    match /upgrade_requests/{requestId} {
+      allow read: if isAuthenticated() && (
+        isSuperAdminCombined() ||
+        resource.data.uid == request.auth.uid
+      );
+      allow create: if isAuthenticated() && 
+                     request.resource.data.uid == request.auth.uid;
+      allow update: if isSuperAdminCombined();
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // Posts Collection
+    // ============================================
+    match /posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+      
+      // Reviews subcollection
+      match /reviews/{reviewId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && 
+                       request.resource.data.userId == request.auth.uid;
+        allow update: if isAuthenticated() && 
+                       (resource.data.userId == request.auth.uid || isSuperAdminCombined());
+        allow delete: if isSuperAdminCombined();
+      }
+    }
+    
+    // ============================================
+    // Trips Collection
+    // ============================================
+    match /trips/{tripId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    // ============================================
+    // Reports Collection
+    // ============================================
+    match /reports/{reportId} {
+      // Only super admins can read
+      allow read: if isSuperAdminCombined();
+      
+      // Users can create reports
+      allow create: if isAuthenticated() && 
+                     request.resource.data.reportedBy == request.auth.uid;
+      
+      // Only super admins can update
+      allow update: if isSuperAdminCombined();
+      
+      // Prevent deletion
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // Content Collections
+    // ============================================
+    match /packages/{packageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    match /stays/{stayId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    match /rides/{rideId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    match /courses/{courseId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    match /localTours/{tourId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    match /itineraries/{itineraryId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    match /affiliateLinks/{linkId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    match /teamMembers/{memberId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    match /events/{eventId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    match /stories/{storyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.createdBy == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    // ============================================
+    // Usernames Collection
+    // ============================================
+    match /usernames/{username} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // Role Requirements Collection
+    // ============================================
+    match /roleRequirements/{docId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isSuperAdminCombined();
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // Health Check Collection
+    // ============================================
+    match /healthcheck/{docId} {
+      allow read, write: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ============================================
+    // Comments Collection (if used separately)
+    // ============================================
+    match /comments/{commentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                     request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                     (resource.data.userId == request.auth.uid || isSuperAdminCombined());
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    // ============================================
+    // Messages Collection (for chat)
+    // ============================================
+    match /messages/{messageId} {
+      allow read: if isAuthenticated() && 
+                   (resource.data.senderId == request.auth.uid ||
+                    resource.data.recipientId == request.auth.uid ||
+                    isSuperAdminCombined());
+      allow create: if isAuthenticated() && 
+                     request.resource.data.senderId == request.auth.uid;
+      allow update: if isSuperAdminCombined();
+      allow delete: if isSuperAdminCombined();
+    }
+    
+    // ============================================
+    // Default Deny (for any other collections)
+    // ============================================
     match /{document=**} {
       allow read, write: if false;
     }
   }
 }
-

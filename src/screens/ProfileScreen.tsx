@@ -13,7 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useKYCManager } from '../hooks/useKYCManager';
 
 export default function ProfileScreen({ navigation }: any) {
-  const { user, initialized } = useAuth();
+  const { user, initialized, isSuperAdmin } = useAuth();
   const reduxUser = useSelector((s: RootState) => s.user.currentUser);
   const [accountType, setAccountType] = useState<AccountType>('Traveler');
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('none');
@@ -110,7 +110,7 @@ export default function ProfileScreen({ navigation }: any) {
         </View>
 
 
-        {isAdmin && (
+        {isAdmin && isSuperAdmin && (
           <TouchableOpacity
             style={[styles.upgradeButton, { backgroundColor: colors.danger }]}
             onPress={() => navigation.navigate('SuperAdminDashboard')}

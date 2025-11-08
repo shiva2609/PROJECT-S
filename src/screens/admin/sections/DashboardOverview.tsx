@@ -14,9 +14,18 @@ interface Props {
 
 export default function DashboardOverview({ searchQuery, navigation }: Props) {
   const { stats, loading: statsLoading } = useVerificationStats();
+  // Get all verifications (no status filter) for recent activity
   const { verifications, loading: verificationsLoading } = useVerifications();
 
-  const recentVerifications = verifications.slice(0, 5);
+  // Show most recent verifications (including pending ones)
+  const recentVerifications = verifications
+    .filter(v => v.createdAt) // Only show verifications with createdAt
+    .sort((a, b) => {
+      const aDate = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
+      const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
+      return bDate.getTime() - aDate.getTime();
+    })
+    .slice(0, 5);
 
   const formatDate = (timestamp: any) => {
     if (!timestamp) return 'N/A';

@@ -26,6 +26,9 @@ import HelpSupportScreen from '../screens/side-menu/settings/HelpSupportScreen';
 import TermsPoliciesScreen from '../screens/side-menu/settings/TermsPoliciesScreen';
 import LogoutScreen from '../screens/side-menu/settings/LogoutScreen';
 
+// Admin Screens
+import SuperAdminDashboardScreen from '../screens/admin/SuperAdminDashboardScreen';
+
 import { DrawerParamList } from './types';
 
 const Drawer = createDrawerNavigator<DrawerParamList>();
@@ -79,6 +82,15 @@ export default function DrawerNavigator() {
       <Drawer.Screen name="Help & Support" component={HelpSupportScreen} />
       <Drawer.Screen name="Terms & Policies" component={TermsPoliciesScreen} />
       <Drawer.Screen name="Logout" component={LogoutScreen} />
+      
+      {/* Super Admin Dashboard */}
+      <Drawer.Screen 
+        name="SuperAdminDashboard" 
+        component={SuperAdminDashboardScreen}
+        options={{
+          drawerItemStyle: { display: 'none' }, // Hide from drawer menu (shown conditionally in CustomDrawerContent)
+        }}
+      />
     </Drawer.Navigator>
   );
 }

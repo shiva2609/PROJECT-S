@@ -25,28 +25,57 @@ interface MenuGroup {
 
 export default function CustomDrawerContent(props: DrawerContentComponentProps) {
   const { navigation, state } = props;
-  const { user } = useAuth();
+  const { user, userRole, roleChecked } = useAuth();
   const dispatch = useDispatch();
   const currentRoute = state.routes[state.index]?.name;
   const [accountType, setAccountType] = useState<AccountType>('Traveler');
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('none');
 
   // Fetch user account type and verification status for conditional rendering
+  // This uses real-time listener to ensure accountType updates dynamically
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setAccountType('Traveler');
+      setVerificationStatus('none');
+      return;
+    }
+
+    console.log('📊 CustomDrawerContent - Setting up accountType listener for:', user.uid);
 
     const userRef = doc(db, 'users', user.uid);
-    const unsubscribe = onSnapshot(userRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        const accType = (data.accountType || data.role || 'Traveler') as AccountType;
-        const verStatus = (data.verificationStatus || 'none') as VerificationStatus;
-        setAccountType(accType);
-        setVerificationStatus(verStatus);
+    const unsubscribe = onSnapshot(
+      userRef,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          const accType = (data.accountType || data.role || 'Traveler') as AccountType;
+          const verStatus = (data.verificationStatus || 'none') as VerificationStatus;
+          
+          console.log('📊 CustomDrawerContent - AccountType updated:', {
+            accountType: accType,
+            verificationStatus: verStatus,
+            uid: user.uid,
+          });
+          
+          setAccountType(accType);
+          setVerificationStatus(verStatus);
+        } else {
+          console.log('⚠️ CustomDrawerContent - User document not found, defaulting to Traveler');
+          setAccountType('Traveler');
+          setVerificationStatus('none');
+        }
+      },
+      (error) => {
+        console.error('❌ CustomDrawerContent - Error fetching user data:', error);
+        setAccountType('Traveler');
+        setVerificationStatus('none');
       }
-    });
+    );
 
-    return () => unsubscribe();
+    return () => {
+      console.log('📊 CustomDrawerContent - Cleaning up accountType listener');
+      unsubscribe();
+    };
   }, [user]);
 
   const handleNavigate = (routeName: string) => {
@@ -68,19 +97,65 @@ export default function CustomDrawerContent(props: DrawerContentComponentProps) 
   // Check if user is Explorer (Traveler) - only they can upgrade
   const isExplorer = accountType === 'Traveler';
   
-  // Check if user is superAdmin
-  const isSuperAdmin = accountType === 'superAdmin';
-  
   // Check if verification is pending (same logic as ProfileScreen)
   const isPending = verificationStatus === 'pending';
 
-  const menuGroups: MenuGroup[] = [
+  // Determine if user is super admin
+  // ONLY use userRole from AuthContext (checks adminUsers collection)
+  // DO NOT use accountType fallback - this causes incorrect menu display for all users
+  // Only users in adminUsers collection should see Super Admin menu
+  // Wait for role check to complete before determining admin status
+  const isSuperAdmin = roleChecked && userRole === 'super_admin';
+  
+  // Show upgrade option for all users except super admins
+  // Users can upgrade from Traveler to Host, Creator, etc., or from one account type to another
+  const showUpgrade = !isSuperAdmin && accountType !== 'superAdmin';
+  
+  // Debug logging
+  useEffect(() => {
+    if (user && roleChecked) {
+      console.log('🔍 CustomDrawerContent - Role Check:', {
+        userRole,
+        accountType,
+        isSuperAdmin,
+        showUpgrade,
+        isExplorer,
+        roleChecked,
+        uid: user.uid,
+        email: user.email,
+      });
+    }
+  }, [user, userRole, accountType, isSuperAdmin, showUpgrade, isExplorer, roleChecked]);
+
+  // Conditionally render menu items based on userRole from AuthContext
+  // If userRole is 'super_admin', show Super Admin menu items
+  // Otherwise, show normal user menu items
+  const menuGroups: MenuGroup[] = isSuperAdmin ? [
+    {
+      title: 'Super Admin',
+      items: [
+        { icon: 'grid-outline', label: 'Dashboard Overview', onPress: () => navigation.navigate('SuperAdminDashboard', { section: 'dashboard' }) },
+        { icon: 'people-outline', label: 'User Management', onPress: () => navigation.navigate('SuperAdminDashboard', { section: 'users' }) },
+        { icon: 'check-circle-outline', label: 'Host Verifications', onPress: () => navigation.navigate('SuperAdminDashboard', { section: 'host-verifications' }) },
+        { icon: 'briefcase-outline', label: 'Trip Approvals', onPress: () => navigation.navigate('SuperAdminDashboard', { section: 'trip-approvals' }) },
+        { icon: 'chatbubbles-outline', label: 'Reports & Reviews', onPress: () => navigation.navigate('SuperAdminDashboard', { section: 'reports' }) },
+        { icon: 'calendar-outline', label: 'Upcoming Verifications', onPress: () => navigation.navigate('SuperAdminDashboard', { section: 'upcoming' }) },
+        { icon: 'cube-outline', label: 'Package Management', onPress: () => navigation.navigate('SuperAdminDashboard', { section: 'packages' }) },
+        { icon: 'stats-chart-outline', label: 'Analytics', onPress: () => navigation.navigate('SuperAdminDashboard', { section: 'analytics' }) },
+      ],
+    },
+    {
+      title: 'Settings',
+      items: [
+        { icon: 'settings-outline', label: 'Settings', onPress: () => navigation.navigate('SuperAdminDashboard', { section: 'settings' }) },
+        { icon: 'log-out-outline', label: 'Logout', onPress: handleLogoutPress },
+      ],
+    },
+  ] : [
     {
       title: 'Tools',
       items: [
         { icon: 'grid-outline', label: 'Dashboard', routeName: 'Dashboard' },
-        // Show Super Admin Dashboard prominently at the top for superAdmin users
-        ...(isSuperAdmin ? [{ icon: 'shield-checkmark-outline', label: 'Super Admin Dashboard', onPress: () => navigation.navigate('SuperAdminDashboard') }] : []),
         { icon: 'briefcase-outline', label: 'Host Tools', routeName: 'Host Tools' },
         { icon: 'card-outline', label: 'Traveler Card', routeName: 'Traveler Card' },
         { icon: 'location-outline', label: "Sanchari's Near You", routeName: "Sanchari's Near You" },
@@ -98,14 +173,33 @@ export default function CustomDrawerContent(props: DrawerContentComponentProps) 
       title: 'Settings',
       items: [
         { icon: 'settings-outline', label: 'Account Settings', routeName: 'Account Settings' },
-        // Only show Upgrade Account for Explorer users
-        ...(isExplorer ? [{ icon: 'arrow-up-circle-outline', label: 'Upgrade Account', onPress: handleUpgradePress }] : []),
+        // Show Upgrade Account for all users except super admins
+        // This allows Travelers to upgrade to Host/Creator, and other account types to upgrade further
+        ...(showUpgrade ? [{ icon: 'arrow-up-circle-outline', label: 'Upgrade Account', onPress: handleUpgradePress }] : []),
         { icon: 'help-circle-outline', label: 'Help & Support', routeName: 'Help & Support' },
         { icon: 'document-text-outline', label: 'Terms & Policies', routeName: 'Terms & Policies' },
         { icon: 'log-out-outline', label: 'Logout', onPress: handleLogoutPress },
       ],
     },
   ];
+
+  // Don't render menu until role check is complete
+  // This prevents showing wrong menu during role check
+  if (!roleChecked || !user) {
+    return (
+      <View style={styles.container}>
+        <DrawerContentScrollView
+          {...props}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+            <Text style={{ color: Colors.text.secondary, fontSize: 14 }}>Loading...</Text>
+          </View>
+        </DrawerContentScrollView>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

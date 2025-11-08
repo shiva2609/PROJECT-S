@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { collection, query, getDocs, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../api/authService';
 import { AccountType } from '../../types/account';
 
@@ -70,5 +70,28 @@ export async function unsuspendUser(uid: string): Promise<void> {
     suspendedAt: null,
     suspendedBy: null,
   });
+}
+
+/**
+ * Approve a user - updates verification status and marks as verified
+ * Only super admins can approve users
+ */
+export async function approveUser(uid: string, adminUid: string, newRole?: AccountType): Promise<void> {
+  const userRef = doc(db, 'users', uid);
+  const updateData: any = {
+    verificationStatus: 'verified',
+    verified: true,
+    verifiedAt: serverTimestamp(),
+    reviewedBy: adminUid,
+    reviewedAt: serverTimestamp(),
+    updatedAt: Date.now(),
+  };
+
+  // If a new role is provided, update accountType
+  if (newRole) {
+    updateData.accountType = newRole;
+  }
+
+  await updateDoc(userRef, updateData);
 }
 
