@@ -45,15 +45,19 @@ export default function HomeScreen({ navigation }: any) {
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
         <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.openDrawer()}>
-          <Icon name="menu" size={24} color={colors.text} />
+          <Icon name="menu" size={24} color={Colors.brand.primary} />
         </TouchableOpacity>
         <View style={styles.topIcons}>
           <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Notifications')} style={styles.topIconWrap}>
-            <Icon name="notifications" size={24} color={colors.text} />
+            <Icon name="notifications" size={24} color={Colors.brand.primary} />
             <View style={styles.badge}><Text style={styles.badgeText}>2</Text></View>
           </TouchableOpacity>
-          <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Chats')} style={styles.topIconWrap}>
-            <Icon name="paper-plane" size={24} color={colors.text} />
+          <TouchableOpacity 
+            activeOpacity={0.8} 
+            onPress={() => navigation.navigate('Chats')} 
+            style={styles.topIconWrap}
+          >
+            <Icon name="paper-plane" size={24} color={Colors.brand.primary} />
             <View style={styles.badge}><Text style={styles.badgeText}>1</Text></View>
           </TouchableOpacity>
         </View>

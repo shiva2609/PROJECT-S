@@ -27,7 +27,7 @@ export const DrawerItem: React.FC<DrawerItemProps> = ({
       <Icon
         name={icon}
         size={22}
-        color={isActive ? Colors.brand.primary : Colors.black.qua}
+        color={isActive ? Colors.brand.primary : Colors.brand.primary + 'CC'} // Active: full brand color, Inactive: 80% opacity brand color
         style={styles.icon}
       />
       <Text style={[styles.label, isActive && styles.activeLabel]}>

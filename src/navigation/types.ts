@@ -44,6 +44,12 @@ export type RootStackParamList = {
   StayHostVerification: undefined;
   CreatorVerification: undefined;
   AccountChangeFlow: undefined;
+  Chats: undefined;
+  Messaging: {
+    userId: string;
+    username: string;
+    profilePhoto?: string;
+  };
   DrawerNavigator: undefined;
 };
 

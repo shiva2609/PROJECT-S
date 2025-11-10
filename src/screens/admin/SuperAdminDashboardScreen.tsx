@@ -5,7 +5,7 @@
  * Only accessible to users with accountType === 'superAdmin'
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,14 +16,17 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  Animated,
+  Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { auth, db } from '../../api/authService';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { handleLogout } from '../../utils/accountActions';
 import { useDispatch } from 'react-redux';
-import { NavigationProp } from '@react-navigation/native';
+import { NavigationProp, useRoute, useFocusEffect } from '@react-navigation/native';
+import { BackHandler } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -55,12 +58,122 @@ interface Props {
 
 export default function SuperAdminDashboardScreen({ navigation }: Props) {
   const dispatch = useDispatch();
-  const { user, initialized } = useAuth();
+  const { user, initialized, isSuperAdmin, roleChecked } = useAuth();
+  const route = useRoute();
+  const insets = useSafeAreaInsets();
+  const routeParams = (route.params as any) || {};
+  const initialSection = (routeParams.section as Section) || 'dashboard';
+  
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState<Section>('dashboard');
+  const [activeSection, setActiveSection] = useState<Section>(initialSection);
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const DRAWER_WIDTH = 270;
+  const drawerAnimation = useRef(new Animated.Value(-DRAWER_WIDTH)).current; // Drawer width
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
+  
+  // Update active section when route params change (when navigating from drawer)
+  useEffect(() => {
+    const section = (route.params as any)?.section as Section;
+    if (section && section !== activeSection) {
+      console.log('🔄 Updating active section from route params:', section);
+      setActiveSection(section);
+      // Scroll to top when section changes
+      setTimeout(() => {
+        scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+      }, 100);
+    }
+  }, [(route.params as any)?.section]);
+  
+  // Toggle drawer
+  const toggleDrawer = React.useCallback(() => {
+    setDrawerOpen((prev) => {
+      const newState = !prev;
+      const toValue = newState ? 0 : -DRAWER_WIDTH;
+      const overlayValue = newState ? 1 : 0;
+      
+      Animated.parallel([
+        Animated.timing(drawerAnimation, {
+          toValue,
+          duration: 300,
+          useNativeDriver: false,
+        }),
+        Animated.timing(overlayOpacity, {
+          toValue: overlayValue,
+          duration: 300,
+          useNativeDriver: false,
+        }),
+      ]).start();
+      
+      return newState;
+    });
+  }, []);
+
+  // Close drawer
+  const closeDrawer = React.useCallback(() => {
+    if (drawerOpen) {
+      toggleDrawer();
+    }
+  }, [drawerOpen, toggleDrawer]);
+
+  // Handle section change with navigation params update
+  const handleSectionChange = (section: Section) => {
+    console.log('📱 handleSectionChange called with:', section);
+    console.log('📱 Current activeSection:', activeSection);
+    
+    if (section === activeSection) {
+      console.log('⚠️ Already on this section, skipping');
+      closeDrawer(); // Close drawer even if same section
+      return; // Don't do anything if already on this section
+    }
+    
+    console.log('✅ Setting new active section:', section);
+    setActiveSection(section);
+    
+    // Update route params to reflect current section (for deep linking)
+    try {
+      navigation.setParams({ section });
+    } catch (error) {
+      console.warn('⚠️ Could not update route params:', error);
+    }
+    
+    // Close drawer after selection
+    closeDrawer();
+    
+    // Scroll to top when section changes
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, 50);
+  };
+  
+  // Debug: Log activeSection changes
+  useEffect(() => {
+    console.log('🔄 activeSection changed to:', activeSection);
+  }, [activeSection]);
+
+  // Handle back button press
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => {
+        if (drawerOpen) {
+          // If drawer is open, close it instead of navigating back
+          toggleDrawer();
+          return true; // Prevent default back behavior
+        }
+        // If drawer is closed, allow normal back navigation
+        return false;
+      };
+
+      // Add event listener
+      const backHandler = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+      // Cleanup
+      return () => backHandler.remove();
+    }, [drawerOpen, toggleDrawer])
+  );
 
   useEffect(() => {
     if (initialized) {
@@ -216,30 +329,39 @@ export default function SuperAdminDashboardScreen({ navigation }: Props) {
     { key: 'settings', label: 'Settings', icon: 'settings-outline' },
   ];
 
+  // Get current section display name
+  const getCurrentSectionName = (): string => {
+    const currentItem = menuItems.find(item => item.key === activeSection);
+    return currentItem?.label || 'Dashboard';
+  };
+
   const renderSection = () => {
     const commonProps = { searchQuery, navigation };
     
+    console.log('🎨 Rendering section:', activeSection);
+    
     switch (activeSection) {
       case 'dashboard':
-        return <DashboardOverview {...commonProps} />;
+        return <DashboardOverview key="dashboard" {...commonProps} />;
       case 'users':
-        return <UserManagement {...commonProps} />;
+        return <UserManagement key="users" {...commonProps} />;
       case 'host-verifications':
-        return <HostVerifications {...commonProps} />;
+        return <HostVerifications key="host-verifications" {...commonProps} />;
       case 'trip-approvals':
-        return <TripApprovals {...commonProps} />;
+        return <TripApprovals key="trip-approvals" {...commonProps} />;
       case 'reports':
-        return <ReportsReviews {...commonProps} />;
+        return <ReportsReviews key="reports" {...commonProps} />;
       case 'upcoming':
-        return <UpcomingVerifications {...commonProps} />;
+        return <UpcomingVerifications key="upcoming" {...commonProps} />;
       case 'packages':
-        return <PackageManagement {...commonProps} />;
+        return <PackageManagement key="packages" {...commonProps} />;
       case 'analytics':
-        return <Analytics {...commonProps} />;
+        return <Analytics key="analytics" {...commonProps} />;
       case 'settings':
-        return <Settings {...commonProps} onLogout={handleLogoutPress} />;
+        return <Settings key="settings" {...commonProps} onLogout={handleLogoutPress} />;
       default:
-        return <DashboardOverview {...commonProps} />;
+        console.warn('⚠️ Unknown section, defaulting to dashboard:', activeSection);
+        return <DashboardOverview key="dashboard-default" {...commonProps} />;
     }
   };
 
@@ -254,26 +376,70 @@ export default function SuperAdminDashboardScreen({ navigation }: Props) {
     );
   }
 
-  if (!isAdmin) {
-    return null;
+  // Guard: Only super admins can access this screen
+  // Wait for role check to complete
+  if (!roleChecked) {
+    return (
+      <SafeAreaView style={styles.container} edges={[]}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#FF5C02" />
+          <Text style={styles.loadingText}>Verifying access...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+  
+  // Check both local isAdmin state AND AuthContext isSuperAdmin
+  // Only users in adminUsers collection should have access
+  if (!isAdmin || !isSuperAdmin) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F5F1' }}>
+        <Text style={{ fontSize: 18, fontWeight: '600', color: '#3C3C3B', marginBottom: 12 }}>
+          Access Denied
+        </Text>
+        <Text style={{ fontSize: 14, color: '#757574', textAlign: 'center', paddingHorizontal: 40 }}>
+          You don't have permission to view this section. Only super admins can access the Super Admin Dashboard.
+        </Text>
+        <TouchableOpacity
+          style={{ marginTop: 24, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: '#FF5C02', borderRadius: 8 }}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
+    <SafeAreaView style={styles.container} edges={[]}>
+      {/* Header - Dynamic with current section name */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>Super Admin Dashboard</Text>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.7}
+          >
+            <Icon name="arrow-back" size={24} color="#3C3C3B" />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.menuButton}
+            onPress={toggleDrawer}
+            activeOpacity={0.7}
+          >
+            <Icon name="menu" size={26} color="#FF5C02" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{getCurrentSectionName()}</Text>
         </View>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerIconButton}>
-            <Icon name="notifications-outline" size={24} color="#3C3C3B" />
+            <Icon name="notifications-outline" size={22} color="#3C3C3B" />
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.headerIconButton}
             onPress={() => navigation.navigate('Profile')}
           >
-            <Icon name="person-circle-outline" size={24} color="#3C3C3B" />
+            <Icon name="person-circle-outline" size={22} color="#3C3C3B" />
           </TouchableOpacity>
         </View>
       </View>
@@ -295,52 +461,104 @@ export default function SuperAdminDashboardScreen({ navigation }: Props) {
         )}
       </View>
 
+      {/* Overlay */}
+      {drawerOpen && (
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={closeDrawer}
+        >
+          <Animated.View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                opacity: overlayOpacity,
+                zIndex: 999,
+              },
+            ]}
+          />
+        </TouchableOpacity>
+      )}
+
       <View style={styles.contentContainer}>
-        {/* Sidebar */}
-        <View style={styles.sidebar}>
-          <ScrollView showsVerticalScrollIndicator={false}>
-            {menuItems.map((item) => (
-              <TouchableOpacity
-                key={item.key}
-                style={[
-                  styles.menuItem,
-                  activeSection === item.key && styles.menuItemActive,
-                ]}
-                onPress={() => setActiveSection(item.key)}
-              >
-                <Icon
-                  name={item.icon}
-                  size={20}
-                  color={activeSection === item.key ? '#FF5C02' : '#757574'}
-                />
-                <Text
+        {/* Drawer Sidebar */}
+        <Animated.View
+          style={[
+            styles.sidebar,
+            {
+              transform: [{ translateX: drawerAnimation }],
+            },
+          ]}
+        >
+          <ScrollView 
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.drawerContent}
+          >
+            {/* Drawer Header - Branded orange header */}
+            <View style={[styles.drawerHeader, { paddingTop: 18 + insets.top }]}>
+              <Text style={styles.drawerHeaderTitle}>Super Admin Dashboard</Text>
+            </View>
+
+            {/* Menu Items */}
+            {menuItems.map((item) => {
+              const isActive = activeSection === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
                   style={[
-                    styles.menuItemText,
-                    activeSection === item.key && styles.menuItemTextActive,
+                    styles.menuItem,
+                    isActive && styles.menuItemActive,
                   ]}
+                  onPress={() => {
+                    console.log('👆 Menu item pressed:', item.key, item.label);
+                    handleSectionChange(item.key);
+                  }}
+                  activeOpacity={0.7}
                 >
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Icon
+                    name={item.icon}
+                    size={20}
+                    color={isActive ? '#FF5C02' : '#757574'}
+                  />
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      isActive && styles.menuItemTextActive,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+            
+            {/* Logout Button */}
+            <View style={styles.drawerDivider} />
             <TouchableOpacity
-              style={[styles.menuItem, styles.logoutButton]}
-              onPress={handleLogoutPress}
+              style={styles.logoutButton}
+              onPress={() => {
+                closeDrawer();
+                handleLogoutPress();
+              }}
+              activeOpacity={0.7}
             >
-              <Icon name="log-out-outline" size={20} color="#E53935" />
-              <Text style={[styles.menuItemText, styles.logoutText]}>Logout</Text>
+              <Icon name="log-out-outline" size={20} color="#FF5C02" />
+              <Text style={styles.logoutText}>Logout</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
+        </Animated.View>
 
-        {/* Main Content */}
+        {/* Main Content - Full Width */}
         <View style={styles.mainContent}>
           <ScrollView
+            ref={scrollViewRef}
             style={styles.scrollView}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
             }
             showsVerticalScrollIndicator={false}
+            key={activeSection} // Force re-render when section changes
           >
             {renderSection()}
           </ScrollView>
@@ -354,6 +572,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8F5F1',
+    paddingTop: 0, // Ensure no top padding
   },
   loadingContainer: {
     flex: 1,
@@ -370,20 +589,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 10,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#EAEAEA',
   },
   headerLeft: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  backButton: {
+    padding: 4,
+  },
+  menuButton: {
+    padding: 4,
   },
   headerTitle: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '700',
     color: '#FF5C02',
     fontFamily: 'Poppins-Bold',
+    marginLeft: 4,
   },
   headerRight: {
     flexDirection: 'row',
@@ -417,20 +647,58 @@ const styles = StyleSheet.create({
   contentContainer: {
     flex: 1,
     flexDirection: 'row',
+    zIndex: 0,
   },
   sidebar: {
-    width: 240,
+    position: 'absolute',
+    left: 0,
+    top: 0, // Starts from very top of screen
+    bottom: 0,
+    width: 270,
     backgroundColor: '#FFFFFF',
-    borderRightWidth: 1,
-    borderRightColor: '#EAEAEA',
-    paddingTop: 12,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+    marginTop: 0, // No margin offset
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 6,
+    zIndex: 1000,
+  },
+  drawerContent: {
+    flexGrow: 1,
+    paddingTop: 0, // Aligns to top of screen
+    backgroundColor: '#FFFFFF',
+  },
+  drawerHeader: {
+    backgroundColor: '#FF5C02',
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    alignItems: 'flex-start',
+  },
+  drawerHeaderTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: 'Poppins-Bold',
+  },
+  drawerDivider: {
+    height: 1,
+    backgroundColor: '#F0F0F0',
+    marginVertical: 8,
+    marginHorizontal: 16,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginVertical: 2,
+    marginHorizontal: 8,
+    borderRadius: 10,
     gap: 12,
+    minHeight: 44,
   },
   menuItemActive: {
     backgroundColor: 'rgba(255, 92, 2, 0.1)',
@@ -438,26 +706,36 @@ const styles = StyleSheet.create({
     borderLeftColor: '#FF5C02',
   },
   menuItemText: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#757574',
     fontFamily: 'Poppins-Medium',
+    fontWeight: '500',
   },
   menuItemTextActive: {
     color: '#FF5C02',
     fontFamily: 'Poppins-SemiBold',
+    fontWeight: '600',
   },
   logoutButton: {
-    marginTop: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderTopWidth: 1,
-    borderTopColor: '#EAEAEA',
-    paddingTop: 20,
+    borderTopColor: '#F0F0F0',
+    marginTop: 'auto',
   },
   logoutText: {
-    color: '#E53935',
+    marginLeft: 12,
+    color: '#FF5C02',
+    fontWeight: '600',
+    fontSize: 15,
+    fontFamily: 'Poppins-SemiBold',
   },
   mainContent: {
     flex: 1,
     backgroundColor: '#F8F5F1',
+    zIndex: 1,
   },
   scrollView: {
     flex: 1,
