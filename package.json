@@ -13,6 +13,7 @@
     "docs:dev": "node documentation-site/server.js"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/blur": "^4.4.1",
     "@react-native-firebase/app": "^23.5.0",

@@ -15,6 +15,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { db } from '../api/authService';
 import { collection, query, where, orderBy, onSnapshot, getDoc, doc } from 'firebase/firestore';
 import { ChatMessage } from '../api/firebaseService';
+import { getCopilotChatMessages, hasCopilotChat } from '../api/chatService';
+import { getLastReadTimestamp, markChatAsRead } from '../api/notificationService';
+import { Colors } from '../theme/colors';
 
 interface ChatListItem {
   id: string;
@@ -25,6 +28,7 @@ interface ChatListItem {
   lastMessageTime?: number;
   unreadCount: number;
   isTyping?: boolean;
+  isUnread?: boolean; // For styling
 }
 
 export default function ChatsScreen({ navigation }: any) {
@@ -66,6 +70,27 @@ export default function ChatsScreen({ navigation }: any) {
           // Build chat list items
           const chatList: ChatListItem[] = [];
           
+          // Batch fetch all last read timestamps
+          const lastReadPromises = Array.from(threadMap.keys()).map(otherUserId => 
+            getLastReadTimestamp(user.uid, otherUserId).then(time => ({ userId: otherUserId, time }))
+          );
+          const lastReadTimes = await Promise.all(lastReadPromises);
+          const lastReadMap = new Map(lastReadTimes.map(r => [r.userId, r.time]));
+          
+          // Process all messages once for timestamp conversion
+          const allMessages = snapshot.docs.map(d => {
+            const data = d.data();
+            let createdAt = 0;
+            if (data.createdAt) {
+              if (typeof data.createdAt === 'number') {
+                createdAt = data.createdAt;
+              } else if (data.createdAt.toMillis) {
+                createdAt = data.createdAt.toMillis();
+              }
+            }
+            return { id: d.id, ...data, createdAt } as ChatMessage;
+          });
+          
           for (const [otherUserId, lastMessage] of threadMap.entries()) {
             // Fetch user data for the other user
             try {
@@ -76,6 +101,32 @@ export default function ChatsScreen({ navigation }: any) {
               const username = userData?.username || userData?.displayName || 'User';
               const profilePhoto = userData?.photoURL;
               
+              // Get last read time from map
+              const lastReadTime = lastReadMap.get(otherUserId) || 0;
+              
+              // Handle timestamp conversion
+              let lastMessageTime = 0;
+              if (lastMessage.createdAt) {
+                if (typeof lastMessage.createdAt === 'number') {
+                  lastMessageTime = lastMessage.createdAt;
+                } else if (lastMessage.createdAt.toMillis) {
+                  lastMessageTime = lastMessage.createdAt.toMillis();
+                }
+              }
+              
+              const isUnread = lastMessageTime > lastReadTime;
+              
+              // Count unread messages
+              let unreadCount = 0;
+              if (isUnread) {
+                const threadMessages = allMessages.filter(msg => {
+                  const isInThread = (msg.senderId === user.uid && msg.recipientId === otherUserId) ||
+                                    (msg.senderId === otherUserId && msg.recipientId === user.uid);
+                  return isInThread && msg.createdAt > lastReadTime && msg.senderId !== user.uid;
+                });
+                unreadCount = threadMessages.length;
+              }
+              
               chatList.push({
                 id: otherUserId,
                 userId: otherUserId,
@@ -83,8 +134,9 @@ export default function ChatsScreen({ navigation }: any) {
                 profilePhoto,
                 lastMessage: lastMessage.text || 'Image',
                 lastMessageTime: lastMessage.createdAt,
-                unreadCount: 0, // TODO: Calculate unread count
+                unreadCount,
                 isTyping: false,
+                isUnread,
               });
             } catch (error) {
               console.error('Error fetching user data:', error);
@@ -98,6 +150,31 @@ export default function ChatsScreen({ navigation }: any) {
                 lastMessageTime: lastMessage.createdAt,
                 unreadCount: 0,
                 isTyping: false,
+                isUnread: false,
+              });
+            }
+          }
+
+          // Add Sanchari Copilot chat if it exists
+          const hasCopilot = await hasCopilotChat(user.uid);
+          if (hasCopilot) {
+            const copilotMessages = await getCopilotChatMessages(user.uid);
+            if (copilotMessages.length > 0) {
+              const lastCopilotMessage = copilotMessages[0]; // Already sorted desc
+              const lastReadTime = await getLastReadTimestamp(user.uid, 'sanchari-copilot');
+              const lastMessageTime = lastCopilotMessage.timestamp || Date.now();
+              const isUnread = lastMessageTime > lastReadTime;
+              
+              chatList.push({
+                id: 'sanchari-copilot',
+                userId: 'sanchari-copilot',
+                username: 'Sanchari Copilot',
+                profilePhoto: undefined,
+                lastMessage: lastCopilotMessage.text || 'Your saved itinerary',
+                lastMessageTime,
+                unreadCount: isUnread ? 1 : 0,
+                isTyping: false,
+                isUnread,
               });
             }
           }
@@ -151,24 +228,43 @@ export default function ChatsScreen({ navigation }: any) {
   };
 
   const renderChatItem = ({ item, index }: { item: ChatListItem; index: number }) => {
-    const isAlternate = index % 2 === 0;
+    const isAlternate = index % 2 === 0 && !item.isUnread;
     
     return (
       <TouchableOpacity
         style={[
           styles.chatItem,
+          item.isUnread && styles.chatItemUnread,
           isAlternate && styles.chatItemAlternate,
         ]}
-        onPress={() => {
-          navigation.navigate('Messaging', {
-            userId: item.userId,
-            username: item.username,
-            profilePhoto: item.profilePhoto,
-          });
+        onPress={async () => {
+          // Mark chat as read when user opens it
+          if (item.isUnread) {
+            await markChatAsRead(user?.uid || '', item.userId);
+          }
+          
+          if (item.userId === 'sanchari-copilot') {
+            navigation.navigate('Messaging', {
+              userId: 'sanchari-copilot',
+              username: 'Sanchari Copilot',
+              profilePhoto: undefined,
+              isCopilot: true,
+            });
+          } else {
+            navigation.navigate('Messaging', {
+              userId: item.userId,
+              username: item.username,
+              profilePhoto: item.profilePhoto,
+            });
+          }
         }}
         activeOpacity={0.7}
       >
-        {item.profilePhoto ? (
+        {item.userId === 'sanchari-copilot' ? (
+          <View style={[styles.avatarPlaceholder, { backgroundColor: '#FF5C02' }]}>
+            <Icon name="compass-outline" size={24} color="#FFFFFF" />
+          </View>
+        ) : item.profilePhoto ? (
           <Image source={{ uri: item.profilePhoto }} style={styles.avatar} />
         ) : (
           <View style={styles.avatarPlaceholder}>
@@ -177,8 +273,10 @@ export default function ChatsScreen({ navigation }: any) {
         )}
         
         <View style={styles.chatContent}>
-          <Text style={styles.chatName}>{item.username}</Text>
-          <Text style={styles.chatMessage} numberOfLines={1}>
+          <Text style={[styles.chatName, item.isUnread && styles.chatNameUnread]}>
+            {item.username}
+          </Text>
+          <Text style={[styles.chatMessage, item.isUnread && styles.chatMessageUnread]} numberOfLines={1}>
             {item.isTyping ? (
               <Text style={styles.typingText}>Typing...</Text>
             ) : (
@@ -189,7 +287,9 @@ export default function ChatsScreen({ navigation }: any) {
 
         {item.unreadCount > 0 && (
           <View style={styles.unreadBadge}>
-            <Text style={styles.unreadText}>{item.unreadCount}</Text>
+            <Text style={styles.unreadText}>
+              {item.unreadCount > 99 ? '99+' : item.unreadCount}
+            </Text>
           </View>
         )}
       </TouchableOpacity>
@@ -368,6 +468,11 @@ const styles = StyleSheet.create({
   chatItemAlternate: {
     backgroundColor: '#FF5C0233', // Light coral background (20% opacity)
   },
+  chatItemUnread: {
+    backgroundColor: '#FF5C0215', // Very light orange for unread (8% opacity)
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.brand.primary,
+  },
   avatar: {
     width: 50,
     height: 50,
@@ -403,10 +508,18 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     fontFamily: 'System',
   },
+  chatNameUnread: {
+    fontWeight: '800',
+    color: Colors.black.primary,
+  },
   chatMessage: {
     fontSize: 14,
     color: '#757574',
     fontFamily: 'System',
+  },
+  chatMessageUnread: {
+    color: Colors.black.secondary,
+    fontWeight: '500',
   },
   typingText: {
     fontStyle: 'italic',

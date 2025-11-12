@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Image, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation, useFocusEffect, DrawerActions } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { colors } from '../utils/colors';
 import { Colors } from '../theme/colors';
@@ -12,17 +13,77 @@ import { useAuth } from '../contexts/AuthContext';
 import { getAccountTypeMetadata, AccountType } from '../types/account';
 import { MotiView } from '../utils/moti';
 import { LinearGradient } from '../utils/gradient';
+import { listenToUnreadCounts, markNotificationsAsRead, markMessagesAsRead } from '../api/notificationService';
+import { useRewardOnboarding } from '../hooks/useRewardOnboarding';
+import RewardPopCard from '../components/RewardPopCard';
+import { useTopicClaimReminder } from '../hooks/useTopicClaimReminder';
+import TopicClaimAlert from '../components/TopicClaimAlert';
 
 interface PostDoc { id: string; userId: string; placeName?: string; imageURL?: string; caption?: string; }
 interface StoryDoc { id: string; userId: string; media?: string; location?: string; }
 
-export default function HomeScreen({ navigation }: any) {
+export default function HomeScreen({ navigation: navProp, route }: any) {
   const { user } = useAuth();
+  const navigation = useNavigation();
+  
+  // Function to open drawer - HomeScreen is inside Tab > Drawer
+  // The Tab navigator's parent is the Drawer navigator
+  const openDrawer = React.useCallback(() => {
+    try {
+      // Method 1: navProp is from Tab navigator, its parent should be Drawer
+      if (navProp) {
+        const drawerNav = (navProp as any).getParent?.();
+        if (drawerNav && typeof drawerNav.openDrawer === 'function') {
+          drawerNav.openDrawer();
+          return;
+        }
+      }
+      
+      // Method 2: Traverse up from useNavigation (Tab navigator context)
+      // Tab's parent is Drawer, Drawer's parent is Stack
+      let currentNav = navigation as any;
+      for (let i = 0; i < 3; i++) {
+        const parent = currentNav?.getParent?.();
+        if (parent && typeof parent.openDrawer === 'function') {
+          parent.openDrawer();
+          return;
+        }
+        if (!parent) break;
+        currentNav = parent;
+      }
+      
+      // Method 3: Last resort - try DrawerActions
+      // This will only work if we're in a drawer navigator context
+      navigation.dispatch(DrawerActions.openDrawer());
+    } catch (error) {
+      console.error('Error opening drawer:', error);
+    }
+  }, [navProp, navigation]);
   const [stories, setStories] = useState<StoryDoc[]>([]);
   const [posts, setPosts] = useState<PostDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<AccountType>('Traveler');
   const [selectedTab, setSelectedTab] = useState<'For You' | 'Following'>('For You');
+  const [unreadCounts, setUnreadCounts] = useState({ notifications: 0, messages: 0 });
+
+  // Welcome reward onboarding hook
+  const {
+    visible: rewardVisible,
+    claimed,
+    points,
+    claiming: rewardClaiming,
+    error: rewardError,
+    grantReward,
+    dismiss: dismissReward,
+    showReward,
+  } = useRewardOnboarding(user?.uid);
+
+  // Topic claim reminder hook
+  const {
+    showAlert: showTopicAlert,
+    onClaimNow: handleTopicClaimNow,
+    onRemindLater: handleTopicRemindLater,
+  } = useTopicClaimReminder(user?.uid, navigation);
 
   useEffect(() => {
     const load = async () => {
@@ -37,6 +98,49 @@ export default function HomeScreen({ navigation }: any) {
     load();
   }, []);
 
+  // Listen to unread counts
+  useEffect(() => {
+    if (!user) return;
+
+    console.log('🔔 Setting up unread counts listener for user:', user.uid);
+    const unsubscribe = listenToUnreadCounts(user.uid, (counts) => {
+      console.log('🔔 Unread counts received:', counts);
+      setUnreadCounts(counts);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Note: Removed auto-grant logic
+  // Reward will only be claimed when user manually clicks "Claim Now" button
+  // This ensures the modal stays open until user interaction
+
+  // Listen for navigation events to show reward when coming from notification
+  useFocusEffect(
+    React.useCallback(() => {
+      // Check if we should show reward (from route params or if not claimed)
+      const shouldShowReward = route?.params?.showReward || false;
+      
+      // When screen comes into focus, check if we should show reward
+      // This handles the case when user navigates from notification
+      if (!claimed && user) {
+        if (shouldShowReward || !rewardVisible) {
+          console.log('🔄 Screen focused, showing reward modal...', { shouldShowReward, rewardVisible });
+          // Small delay to ensure state is ready
+          const timer = setTimeout(() => {
+            showReward();
+            // Clear the param after showing
+            if (shouldShowReward && navProp?.setParams) {
+              navProp.setParams({ showReward: undefined });
+            }
+          }, 500);
+          
+          return () => clearTimeout(timer);
+        }
+      }
+    }, [claimed, user, showReward, rewardVisible, route?.params, navProp])
+  );
+
   const meta = getAccountTypeMetadata(role);
   const hasStories = stories && stories.length > 0;
   const storyData = useMemo(() => [{ id: 'your-story', isYou: true } as any, ...stories], [stories]);
@@ -44,21 +148,40 @@ export default function HomeScreen({ navigation }: any) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
-        <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.openDrawer()}>
-          <Icon name="menu" size={24} color={Colors.brand.primary} />
+        <TouchableOpacity 
+          activeOpacity={0.8} 
+          onPress={openDrawer}
+        >
+          <Icon name="menu" size={28} color={Colors.black.primary} />
         </TouchableOpacity>
         <View style={styles.topIcons}>
-          <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Notifications')} style={styles.topIconWrap}>
-            <Icon name="notifications" size={24} color={Colors.brand.primary} />
-            <View style={styles.badge}><Text style={styles.badgeText}>2</Text></View>
+          <TouchableOpacity 
+            activeOpacity={0.8} 
+            onPress={() => navProp?.navigate('Notifications')} 
+            style={styles.topIconWrap}
+          >
+            <Icon name="notifications-outline" size={28} color={Colors.black.primary} />
+            {unreadCounts.notifications > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {unreadCounts.notifications > 99 ? '99+' : String(unreadCounts.notifications)}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
           <TouchableOpacity 
             activeOpacity={0.8} 
-            onPress={() => navigation.navigate('Chats')} 
+            onPress={() => navProp?.navigate('Chats')} 
             style={styles.topIconWrap}
           >
-            <Icon name="paper-plane" size={24} color={Colors.brand.primary} />
-            <View style={styles.badge}><Text style={styles.badgeText}>1</Text></View>
+            <Icon name="paper-plane-outline" size={28} color={Colors.black.primary} />
+            {unreadCounts.messages > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {unreadCounts.messages > 99 ? '99+' : String(unreadCounts.messages)}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -154,13 +277,45 @@ export default function HomeScreen({ navigation }: any) {
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No posts yet, start exploring!</Text>
               <Text style={styles.emptySub}>Follow explorers or create your first travel memory.</Text>
-              <TouchableOpacity activeOpacity={0.8} style={styles.exploreCta} onPress={() => navigation.navigate('Explore')}>
+              <TouchableOpacity activeOpacity={0.8} style={styles.exploreCta} onPress={() => navProp?.navigate('Explore')}>
                 <Text style={styles.exploreCtaText}>Explore Trips</Text>
               </TouchableOpacity>
             </View>
           )}
         </>
       )}
+
+      {/* Welcome Reward Pop Card */}
+      <RewardPopCard
+        visible={rewardVisible}
+        onClose={dismissReward}
+        onClaim={async () => {
+          try {
+            // Handle claim with async/await
+            await grantReward();
+            // Show success confirmation using Alert
+            Alert.alert(
+              '🎉 Reward Claimed!',
+              `You've successfully claimed ${150} Explorer Points!`,
+              [{ text: 'OK' }]
+            );
+          } catch (error) {
+            // Error is already handled in the hook and displayed in the modal
+            console.error('Error claiming reward:', error);
+          }
+        }}
+        onViewWallet={() => navProp?.navigate('Explorer Wallet')}
+        points={150}
+        claiming={rewardClaiming}
+        error={rewardError}
+      />
+
+      {/* Topic Claim Alert */}
+      <TopicClaimAlert
+        visible={showTopicAlert}
+        onClaimNow={handleTopicClaimNow}
+        onRemindLater={handleTopicRemindLater}
+      />
     </SafeAreaView>
   );
 }
@@ -169,9 +324,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.white.secondary },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10 },
   topIcons: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  topIconWrap: { width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.white.secondary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 1 }, shadowRadius: 2, elevation: 2 },
-  badge: { position: 'absolute', top: -2, right: -2, backgroundColor: Colors.accent.amber, width: 14, height: 14, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
-  badgeText: { color: Colors.black.primary, fontSize: 9, fontFamily: Fonts.semibold },
+  topIconWrap: { width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.white.secondary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 1 }, shadowRadius: 2, elevation: 2, position: 'relative' },
+  badge: { position: 'absolute', top: -2, right: -2, backgroundColor: Colors.brand.primary, minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, zIndex: 10 },
+  badgeText: { color: Colors.white.primary, fontSize: 10, fontFamily: Fonts.semibold },
   storyItem: { alignItems: 'left', marginRight: 350 },
   storyRing: {
     width: 68,                  // 👈 make sure this matches height (adjust based on your design)
