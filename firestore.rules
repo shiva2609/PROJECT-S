@@ -340,6 +340,37 @@ service cloud.firestore {
     }
     
     // ============================================
+    // Follows Collection
+    // ============================================
+    match /follows/{followId} {
+      // Users can read all follows (needed for feed queries)
+      allow read: if isAuthenticated();
+      
+      // Users can create follows only for themselves
+      allow create: if isAuthenticated() && 
+                     request.resource.data.followerId == request.auth.uid &&
+                     request.resource.data.followingId != request.auth.uid; // Prevent self-follow
+      
+      // Users can delete only their own follows
+      allow delete: if isAuthenticated() && 
+                     resource.data.followerId == request.auth.uid;
+      
+      // Prevent updates (follows are immutable)
+      allow update: if false;
+    }
+    
+    // ============================================
+    // Suggestions Cache Collection (optional)
+    // ============================================
+    match /suggestions_cache/{userId} {
+      // Users can read their own cache
+      allow read: if isAuthenticated() && userId == request.auth.uid;
+      
+      // Only server (Cloud Functions) can write
+      allow write: if false; // Managed by Cloud Functions only
+    }
+    
+    // ============================================
     // Default Deny (for any other collections)
     // ============================================
     match /{document=**} {

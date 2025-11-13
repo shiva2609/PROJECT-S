@@ -83,10 +83,16 @@ export default function ExploreScreen({ navigation }: any) {
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const fetchedPosts: Post[] = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as Post[];
+        // Filter out posts without createdAt
+        const fetchedPosts: Post[] = snapshot.docs
+          .filter((doc) => {
+            const data = doc.data();
+            return !!data.createdAt;
+          })
+          .map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          })) as Post[];
         setPosts(fetchedPosts);
         setLoading(false);
         
@@ -97,8 +103,12 @@ export default function ExploreScreen({ navigation }: any) {
           useNativeDriver: true,
         }).start();
       },
-      (error) => {
-        console.error('Error fetching posts:', error);
+      (error: any) => {
+        if (error.code === 'failed-precondition') {
+          console.warn('Firestore query error: ensure createdAt exists.');
+        } else {
+          console.warn('Firestore query error:', error.message || error);
+        }
         setLoading(false);
       }
     );

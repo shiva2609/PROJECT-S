@@ -8,18 +8,23 @@
  * Features:
  * - Atomic Firestore transaction for points update
  * - Optimistic UI updates with Firestore fallback
- * - One-time reward claim tracking
+ * - One-time reward claim tracking (Firestore + AsyncStorage)
  * - Resilient error handling
+ * - Popup appears only once per user (first registration/login)
  * 
  * Firestore Schema:
  * users/{uid} {
  *   explorerPoints: number,    // default 0
  *   rewardClaimed: boolean      // default false
  * }
+ * 
+ * AsyncStorage:
+ * REWARD_CLAIMED_{userId}: "true" | null
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { doc, getDoc, runTransaction } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../api/authService';
 import {
   createRewardNotification,
@@ -42,6 +47,40 @@ interface UseRewardOnboardingReturn {
 const REWARD_POINTS = 150;
 
 /**
+ * AsyncStorage key for reward claim status
+ * Format: REWARD_CLAIMED_{userId}
+ */
+const getRewardClaimedKey = (userId: string) => `REWARD_CLAIMED_${userId}`;
+
+/**
+ * Check if reward has been claimed from AsyncStorage (fast local check)
+ */
+const checkRewardClaimedLocal = async (userId: string): Promise<boolean> => {
+  try {
+    const key = getRewardClaimedKey(userId);
+    const value = await AsyncStorage.getItem(key);
+    return value === 'true';
+  } catch (error) {
+    console.warn('⚠️ Failed to check AsyncStorage for reward claim:', error);
+    return false; // Default to false if check fails
+  }
+};
+
+/**
+ * Save reward claim status to AsyncStorage
+ */
+const saveRewardClaimedLocal = async (userId: string): Promise<void> => {
+  try {
+    const key = getRewardClaimedKey(userId);
+    await AsyncStorage.setItem(key, 'true');
+    console.log('✅ Saved reward claim status to AsyncStorage');
+  } catch (error) {
+    console.warn('⚠️ Failed to save reward claim to AsyncStorage:', error);
+    // Non-critical, continue
+  }
+};
+
+/**
  * Hook to manage welcome reward onboarding
  * 
  * @param userId - Firebase Auth user UID
@@ -59,7 +98,9 @@ export function useRewardOnboarding(
   const [hasChecked, setHasChecked] = useState(false);
 
   /**
-   * Check user's reward status from Firestore
+   * Check user's reward status from Firestore AND AsyncStorage
+   * Only shows popup if BOTH checks indicate reward is not claimed
+   * This ensures popup appears only once per user
    */
   const checkRewardStatus = useCallback(async () => {
     if (!userId) {
@@ -71,6 +112,20 @@ export function useRewardOnboarding(
       setLoading(true);
       setError(null);
 
+      // FIRST: Check AsyncStorage (fast local check)
+      const claimedLocal = await checkRewardClaimedLocal(userId);
+      
+      if (claimedLocal) {
+        // Already claimed locally, skip Firestore check
+        console.log('✅ Reward already claimed (AsyncStorage), skipping popup');
+        setClaimed(true);
+        setVisible(false);
+        setLoading(false);
+        setHasChecked(true);
+        return;
+      }
+
+      // SECOND: Check Firestore (source of truth)
       const userDocRef = doc(db, 'users', userId);
       const userDoc = await getDoc(userDocRef);
 
@@ -88,8 +143,11 @@ export function useRewardOnboarding(
       setPoints(currentPoints);
       setClaimed(rewardClaimed);
 
-      // Show card if reward hasn't been claimed yet
-      if (!rewardClaimed) {
+      // Show popup ONLY if:
+      // 1. Not claimed in Firestore AND
+      // 2. Not claimed in AsyncStorage (already checked above)
+      if (!rewardClaimed && !claimedLocal) {
+        console.log('🎉 Reward not claimed, showing popup for first time');
         setVisible(true);
         
         // Create notification for unclaimed reward
@@ -97,14 +155,22 @@ export function useRewardOnboarding(
         console.log('📝 Creating notification for unclaimed reward...');
         await checkUnclaimedRewards(userId, rewardClaimed);
       } else {
+        // If reward is claimed in Firestore, sync AsyncStorage
+        if (rewardClaimed && !claimedLocal) {
+          await saveRewardClaimedLocal(userId);
+        }
+        
         // If reward is claimed, ensure notification is marked as claimed
         await checkUnclaimedRewards(userId, rewardClaimed);
+        setVisible(false); // Ensure popup is hidden
       }
 
       console.log('✅ Reward status checked:', {
         userId,
         rewardClaimed,
+        claimedLocal,
         currentPoints,
+        willShowPopup: !rewardClaimed && !claimedLocal,
       });
     } catch (err: any) {
       console.error('❌ Error checking reward status:', err);
@@ -192,11 +258,14 @@ export function useRewardOnboarding(
       setClaimed(true);
       setVisible(false); // Close modal only after successful claim
 
+      // Save claim status to AsyncStorage for persistence across app sessions
+      await saveRewardClaimedLocal(userId);
+
       // Mark reward notification as claimed
       console.log('📝 Marking reward notification as claimed...');
       await markRewardNotificationAsClaimed(userId);
 
-      console.log('✅ Reward claim completed successfully');
+      console.log('✅ Reward claim completed successfully (Firestore + AsyncStorage)');
     } catch (err: any) {
       console.error('❌ Error granting reward:', err);
 
@@ -237,9 +306,21 @@ export function useRewardOnboarding(
   /**
    * Manually show the reward modal
    * Useful when navigating from notifications
+   * Also checks AsyncStorage to prevent showing if already claimed
    */
-  const showReward = useCallback(() => {
-    if (!claimed && userId) {
+  const showReward = useCallback(async () => {
+    if (!userId) return;
+    
+    // Check AsyncStorage first to prevent showing if already claimed
+    const claimedLocal = await checkRewardClaimedLocal(userId);
+    if (claimedLocal) {
+      console.log('⚠️ Reward already claimed (AsyncStorage), cannot show popup');
+      setClaimed(true);
+      setVisible(false);
+      return;
+    }
+    
+    if (!claimed) {
       console.log('📝 Manually showing reward modal...');
       setVisible(true);
     }

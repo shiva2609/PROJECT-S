@@ -194,6 +194,8 @@ export default function PackageCreator({ accountType, onClose, navigation }: Pro
       // Create post document in unified 'posts' collection
       await addDoc(collection(db, 'posts'), {
         type: 'trip',
+        createdBy: user.uid, // Primary field
+        hostId: user.uid, // Legacy field
         title,
         location,
         duration,
@@ -209,9 +211,8 @@ export default function PackageCreator({ accountType, onClose, navigation }: Pro
         description: description || '',
         itinerary: itinerary.trim(),
         tags: [],
-        hostId: user.uid,
         hostType: hostType,
-        createdAt: serverTimestamp(),
+        createdAt: serverTimestamp(), // Always use serverTimestamp
         rating: null, // Will be calculated from reviews
         reviewCount: 0,
       });

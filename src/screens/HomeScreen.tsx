@@ -18,6 +18,7 @@ import { useRewardOnboarding } from '../hooks/useRewardOnboarding';
 import RewardPopCard from '../components/RewardPopCard';
 import { useTopicClaimReminder } from '../hooks/useTopicClaimReminder';
 import TopicClaimAlert from '../components/TopicClaimAlert';
+import FollowingScreen from './FollowingScreen';
 
 interface PostDoc { id: string; userId: string; placeName?: string; imageURL?: string; caption?: string; }
 interface StoryDoc { id: string; userId: string; media?: string; location?: string; }
@@ -91,8 +92,20 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
         const sSnap = await getDocs(query(collection(db, 'stories')));
         setStories(sSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
         const pSnap = await getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc')));
-        setPosts(pSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
-      } catch {}
+        // Filter out posts without createdAt
+        setPosts(pSnap.docs
+          .filter((d) => {
+            const data = d.data();
+            return !!data.createdAt;
+          })
+          .map((d) => ({ id: d.id, ...(d.data() as any) })));
+      } catch (error: any) {
+        if (error.code === 'failed-precondition') {
+          console.warn('Firestore query error: ensure createdAt exists.');
+        } else {
+          console.warn('Firestore query error:', error.message || error);
+        }
+      }
       setLoading(false);
     };
     load();
@@ -116,29 +129,30 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   // This ensures the modal stays open until user interaction
 
   // Listen for navigation events to show reward when coming from notification
+  // NOTE: The reward popup is now controlled by useRewardOnboarding hook
+  // which checks AsyncStorage + Firestore to ensure it only shows once
+  // This useFocusEffect only handles manual navigation from notifications
   useFocusEffect(
     React.useCallback(() => {
-      // Check if we should show reward (from route params or if not claimed)
+      // Only show if explicitly requested via route params (e.g., from notification)
       const shouldShowReward = route?.params?.showReward || false;
       
-      // When screen comes into focus, check if we should show reward
-      // This handles the case when user navigates from notification
-      if (!claimed && user) {
-        if (shouldShowReward || !rewardVisible) {
-          console.log('🔄 Screen focused, showing reward modal...', { shouldShowReward, rewardVisible });
-          // Small delay to ensure state is ready
-          const timer = setTimeout(() => {
-            showReward();
-            // Clear the param after showing
-            if (shouldShowReward && navProp?.setParams) {
-              navProp.setParams({ showReward: undefined });
-            }
-          }, 500);
-          
-          return () => clearTimeout(timer);
-        }
+      // Only trigger if explicitly requested AND reward not claimed
+      if (shouldShowReward && !claimed && user) {
+        console.log('🔄 Screen focused with showReward param, checking if can show...');
+        // Small delay to ensure state is ready
+        const timer = setTimeout(() => {
+          showReward(); // This will check AsyncStorage internally
+          // Clear the param after showing
+          if (navProp?.setParams) {
+            navProp.setParams({ showReward: undefined });
+          }
+        }, 500);
+        
+        return () => clearTimeout(timer);
       }
-    }, [claimed, user, showReward, rewardVisible, route?.params, navProp])
+      // Do NOT auto-show on every focus - let the hook handle it on mount only
+    }, [claimed, user, showReward, route?.params, navProp])
   );
 
   const meta = getAccountTypeMetadata(role);
@@ -191,98 +205,111 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : (
-        <>
-          <FlatList
-            ListHeaderComponent={
-              <View style={{ paddingVertical: 8 }}>
-                {hasStories ? (
-                  <FlatList
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    data={storyData}
-                    keyExtractor={(i) => i.id}
-                    contentContainerStyle={{ paddingLeft: 20, paddingRight: 12 }}
-                    renderItem={({ item, index }) => {
-                      const hasStory = !item.isYou || (item.media && item.media.length > 0);
-                      return (
-                        <View style={styles.storyItem}>
-                          {hasStory ? (
-                            <LinearGradient colors={[Colors.brand.primary, Colors.brand.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.storyRing}>
-                              <View style={styles.storyAvatar} />
-                            </LinearGradient>
-                          ) : (
-                            <View style={[styles.storyRing, styles.storyRingInactive]}>
-                              <View style={styles.storyAvatar} />
-                            </View>
-                          )}
-                          {item.isYou && (
-                            <View style={styles.storyAdd}><Icon name="add" size={12} color="white" /></View>
-                          )}
-                          <Text style={styles.storyText}>{item.isYou ? 'You' : (item.location || 'Story')}</Text>
-                        </View>
-                      );
-                    }}
-                  />
-                ) : (
-                  <View style={{ height: 110, paddingLeft: 20 }}>
+        <View style={{ flex: 1 }}>
+          {/* Shared Header: Stories + SegmentedControl */}
+          <View style={styles.sharedHeader}>
+            {hasStories ? (
+              <FlatList
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                data={storyData}
+                keyExtractor={(i) => i.id}
+                contentContainerStyle={{ paddingLeft: 20, paddingRight: 12 }}
+                renderItem={({ item, index }) => {
+                  const hasStory = !item.isYou || (item.media && item.media.length > 0);
+                  return (
                     <View style={styles.storyItem}>
-                      <View style={[styles.storyRing, styles.storyRingInactive]}>
-                        <View style={styles.storyAvatar} />
-                      </View>
-                      <View style={styles.storyAdd}><Icon name="add" size={12} color="white" /></View>
-                      <Text style={styles.storyText}>You</Text>
+                      {hasStory ? (
+                        <LinearGradient colors={[Colors.brand.primary, Colors.brand.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.storyRing}>
+                          <View style={styles.storyAvatar} />
+                        </LinearGradient>
+                      ) : (
+                        <View style={[styles.storyRing, styles.storyRingInactive]}>
+                          <View style={styles.storyAvatar} />
+                        </View>
+                      )}
+                      {item.isYou && (
+                        <View style={styles.storyAdd}><Icon name="add" size={12} color="white" /></View>
+                      )}
+                      <Text style={styles.storyText}>{item.isYou ? 'You' : (item.location || 'Story')}</Text>
                     </View>
+                  );
+                }}
+              />
+            ) : (
+              <View style={{ height: 110, paddingLeft: 20 }}>
+                <View style={styles.storyItem}>
+                  <View style={[styles.storyRing, styles.storyRingInactive]}>
+                    <View style={styles.storyAvatar} />
                   </View>
-                )}
-
-                {/* Premium Segmented Control */}
-                <SegmentedControl selectedTab={selectedTab} onChange={(tab) => setSelectedTab(tab as 'For You' | 'Following')} />
-              </View>
-            }
-            data={posts}
-            keyExtractor={(i) => i.id}
-            renderItem={({ item, index }) => (
-              <MotiView from={{ opacity: 0, translateY: 12 }} animate={{ opacity: 1, translateY: 0 }} transition={{ delay: index * 40, type: 'timing', duration: 220 }}>
-                <View style={styles.postCard}>
-                  <View style={styles.postHeader}>
-                    <View style={styles.postAvatar} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.postName}>{item.userId?.slice(0, 10) || 'User'}</Text>
-                      {!!item.placeName && <Text style={styles.postPlace}>{item.placeName}</Text>}
-                    </View>
-                  </View>
-                  {!!item.imageURL && <Image source={{ uri: item.imageURL }} style={styles.postImage as any} />}
-                  <View style={styles.postActionsTop}>
-                    <TouchableOpacity activeOpacity={0.8} style={styles.viewDetails}><Text style={styles.viewDetailsText}>View Details</Text></TouchableOpacity>
-                  </View>
-
-                  <View style={styles.postActions}>
-                    <View style={styles.actionLeft}>
-                      <View style={styles.actionBtn}><Icon name="heart-outline" size={20} color={colors.text} /><Text style={styles.actionText}>748</Text></View>
-                      <View style={styles.actionBtn}><Icon name="chatbubble-ellipses-outline" size={20} color={colors.text} /><Text style={styles.actionText}>48</Text></View>
-                      <View style={styles.actionBtn}><Icon name="share-social-outline" size={20} color={colors.text} /><Text style={styles.actionText}>748</Text></View>
-                    </View>
-                  </View>
-                  {!!item.caption && <Text numberOfLines={2} style={styles.caption}>{item.caption}</Text>}
-                  <View style={styles.postDivider} />
+                  <View style={styles.storyAdd}><Icon name="add" size={12} color="white" /></View>
+                  <Text style={styles.storyText}>You</Text>
                 </View>
-              </MotiView>
+              </View>
             )}
-            windowSize={8}
-            initialNumToRender={5}
-            removeClippedSubviews
-          />
 
-          {(!posts || posts.length === 0) && (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No posts yet, start exploring!</Text>
-              <Text style={styles.emptySub}>Follow explorers or create your first travel memory.</Text>
-              <TouchableOpacity activeOpacity={0.8} style={styles.exploreCta} onPress={() => navProp?.navigate('Explore')}>
-                <Text style={styles.exploreCtaText}>Explore Trips</Text>
-              </TouchableOpacity>
-            </View>
+            {/* Premium Segmented Control */}
+            <SegmentedControl selectedTab={selectedTab} onChange={(tab) => setSelectedTab(tab as 'For You' | 'Following')} />
+          </View>
+
+          {/* Tab Content */}
+          {selectedTab === 'For You' ? (
+            <FlatList
+              data={posts}
+              keyExtractor={(i) => i.id}
+              renderItem={({ item, index }) => (
+                <MotiView from={{ opacity: 0, translateY: 12 }} animate={{ opacity: 1, translateY: 0 }} transition={{ delay: index * 40, type: 'timing', duration: 220 }}>
+                  <View style={styles.postCard}>
+                    <View style={styles.postHeader}>
+                      <View style={styles.postAvatar} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.postName}>{item.userId?.slice(0, 10) || 'User'}</Text>
+                        {!!item.placeName && <Text style={styles.postPlace}>{item.placeName}</Text>}
+                      </View>
+                    </View>
+                    {!!item.imageURL && <Image source={{ uri: item.imageURL }} style={styles.postImage as any} />}
+                    <View style={styles.postActionsTop}>
+                      <TouchableOpacity activeOpacity={0.8} style={styles.viewDetails}><Text style={styles.viewDetailsText}>View Details</Text></TouchableOpacity>
+                    </View>
+
+                    <View style={styles.postActions}>
+                      <View style={styles.actionLeft}>
+                        <View style={styles.actionBtn}><Icon name="heart-outline" size={20} color={colors.text} /><Text style={styles.actionText}>748</Text></View>
+                        <View style={styles.actionBtn}><Icon name="chatbubble-ellipses-outline" size={20} color={colors.text} /><Text style={styles.actionText}>48</Text></View>
+                        <View style={styles.actionBtn}><Icon name="share-social-outline" size={20} color={colors.text} /><Text style={styles.actionText}>748</Text></View>
+                      </View>
+                    </View>
+                    {!!item.caption && <Text numberOfLines={2} style={styles.caption}>{item.caption}</Text>}
+                    <View style={styles.postDivider} />
+                  </View>
+                </MotiView>
+              )}
+              windowSize={8}
+              initialNumToRender={5}
+              removeClippedSubviews
+              ListEmptyComponent={
+                (!posts || posts.length === 0) ? (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyTitle}>No posts yet, start exploring!</Text>
+                    <Text style={styles.emptySub}>Follow explorers or create your first travel memory.</Text>
+                    <TouchableOpacity activeOpacity={0.8} style={styles.exploreCta} onPress={() => navProp?.navigate('Explore')}>
+                      <Text style={styles.exploreCtaText}>Explore Trips</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null
+              }
+            />
+          ) : (
+            <FollowingScreen
+              navigation={navProp}
+              onUserPress={(userId) => navProp?.navigate('Profile', { userId })}
+              onPostPress={(post) => {
+                // Navigate to post detail if needed
+                console.log('Post pressed:', post.id);
+              }}
+            />
           )}
-        </>
+        </View>
       )}
 
       {/* Welcome Reward Pop Card */}
@@ -327,7 +354,8 @@ const styles = StyleSheet.create({
   topIconWrap: { width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.white.secondary, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 1 }, shadowRadius: 2, elevation: 2, position: 'relative' },
   badge: { position: 'absolute', top: -2, right: -2, backgroundColor: Colors.brand.primary, minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, zIndex: 10 },
   badgeText: { color: Colors.white.primary, fontSize: 10, fontFamily: Fonts.semibold },
-  storyItem: { alignItems: 'left', marginRight: 350 },
+  sharedHeader: { paddingVertical: 8, backgroundColor: Colors.white.secondary },
+  storyItem: { alignItems: 'flex-start', marginRight: 350 },
   storyRing: {
     width: 68,                  // 👈 make sure this matches height (adjust based on your design)
     height: 68,

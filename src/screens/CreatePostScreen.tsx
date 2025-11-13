@@ -215,13 +215,14 @@ export default function CreatePostScreen() {
       console.log('📝 Creating Firestore document...');
       const postData = {
         type: 'post',
-        userId: currentUser.uid,
+        createdBy: currentUser.uid, // Primary field
+        userId: currentUser.uid, // Legacy field for backward compatibility
         username: currentUser.displayName || currentUser.email || 'User',
         imageUrl,
         caption: caption.trim(),
         likeCount: 0,
         commentCount: 0,
-        createdAt: firestore.FieldValue.serverTimestamp(),
+        createdAt: firestore.FieldValue.serverTimestamp(), // Always use serverTimestamp
       };
 
       console.log('📄 Post data:', { ...postData, createdAt: '[serverTimestamp]' });
