@@ -275,6 +275,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A97A60204439945C5E57171A /* Pods-Sanchari.debug.xcconfig */;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -303,6 +304,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = EC210CF006C46462D02466B4 /* Pods-Sanchari.release.xcconfig */;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = 1;
