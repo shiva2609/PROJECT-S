@@ -20,6 +20,7 @@ import {
     orderBy,
     onSnapshot,
     where,
+    serverTimestamp,
     Firestore,
 } from 'firebase/firestore';
 import {
@@ -452,13 +453,14 @@ export async function createPost(params: {
 	caption?: string;
 }): Promise<Post> {
 	const base = {
-		userId: params.userId,
+		createdBy: params.userId, // Primary field
+		userId: params.userId, // Legacy field for backward compatibility
 		username: params.username,
 		imageUrl: params.imageUrl,
 		caption: params.caption ?? '',
 		likeCount: 0,
 		commentCount: 0,
-		createdAt: nowMs(),
+		createdAt: serverTimestamp(), // Always use serverTimestamp
 	};
     const ref = await withRetry(() => addDoc(collection(db(), 'posts'), base));
 	return { id: ref.id, ...base } as Post;
@@ -467,10 +469,21 @@ export async function createPost(params: {
 export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
 	const q = query(collection(db(), 'posts'), orderBy('createdAt', 'desc'));
     return onSnapshot(q, (snap) => {
-		const posts: Post[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+		const posts: Post[] = snap.docs
+			.map((d) => {
+				const data = d.data();
+				// Skip posts without createdAt
+				if (!data.createdAt) return null;
+				return { id: d.id, ...data };
+			})
+			.filter((post): post is Post => post !== null);
 		onUpdate(posts);
-    }, (error) => {
-        console.log('listenToFeed error:', error?.message || error);
+    }, (error: any) => {
+		if (error.code === 'failed-precondition') {
+			console.warn('Firestore query error: ensure createdAt exists.');
+		} else {
+			console.warn('listenToFeed error:', error?.message || error);
+		}
     });
 }
 

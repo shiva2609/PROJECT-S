@@ -42,6 +42,7 @@ import CreatorVerification from '../screens/kyc/CreatorVerification';
 import AccountChangeFlowScreen from '../screens/kyc/AccountChangeFlowScreen';
 import MessagingScreen from '../screens/MessagingScreen';
 import ChatsScreen from '../screens/ChatsScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
 import DrawerNavigator from './DrawerNavigator';
 
 const Stack = createNativeStackNavigator();
@@ -205,6 +206,14 @@ export default function AppNavigator() {
         <Stack.Screen 
           name="Messaging" 
           component={MessagingScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="Notifications" 
+          component={NotificationsScreen}
           options={{ 
             headerShown: false,
             gestureEnabled: true,

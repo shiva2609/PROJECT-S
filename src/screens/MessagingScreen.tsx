@@ -10,12 +10,19 @@ import {
   Platform,
   Image,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../contexts/AuthContext';
 import { listenToDirectMessages, sendMessage, ChatMessage } from '../api/firebaseService';
+import { getCopilotChatMessages } from '../api/chatService';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { db } from '../api/authService';
+import ItineraryCard from '../components/itinerary/ItineraryCard';
+import { ItineraryResponse } from '../api/generateItinerary';
+import { markChatAsRead } from '../api/notificationService';
 
 interface MessagingScreenProps {
   navigation: any;
@@ -24,15 +31,29 @@ interface MessagingScreenProps {
       userId: string;
       username: string;
       profilePhoto?: string;
+      isCopilot?: boolean;
     };
   };
 }
 
+interface CopilotMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  recipientId: string;
+  messageType?: string;
+  text?: string;
+  content?: string;
+  itineraryData?: ItineraryResponse;
+  timestamp?: number;
+  createdAt?: any;
+}
+
 export default function MessagingScreen({ navigation, route }: MessagingScreenProps) {
   const { user } = useAuth();
-  const { userId, username, profilePhoto } = route.params;
+  const { userId, username, profilePhoto, isCopilot } = route.params;
   
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<(ChatMessage | CopilotMessage)[]>([]);
   const [messageText, setMessageText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -42,22 +63,57 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
   useEffect(() => {
     if (!user || !userId) return;
 
-    // Listen to messages between current user and selected user
-    const unsubscribe = listenToDirectMessages(user.uid, userId, (msgs) => {
-      setMessages(msgs);
-      setLoading(false);
-      
-      // Auto-scroll to bottom when new messages arrive
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    });
+    // Mark chat as read when screen opens
+    markChatAsRead(user.uid, userId);
 
-    return () => unsubscribe();
-  }, [user, userId]);
+    if (isCopilot && userId === 'sanchari-copilot') {
+      // Listen to Copilot chat messages
+      const messagesRef = collection(db, 'users', user.uid, 'chats', 'sanchari-copilot', 'messages');
+      const q = query(messagesRef, orderBy('timestamp', 'asc'));
+      
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const copilotMessages: CopilotMessage[] = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as CopilotMessage[];
+        
+        setMessages(copilotMessages);
+        setLoading(false);
+        
+        // Scroll to top (start of conversation) when chat opens
+        setTimeout(() => {
+          flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+        }, 100);
+      }, (error) => {
+        console.error('Error listening to copilot messages:', error);
+        setLoading(false);
+      });
+
+      return () => unsubscribe();
+    } else {
+      // Listen to messages between current user and selected user
+      const unsubscribe = listenToDirectMessages(user.uid, userId, (msgs) => {
+        setMessages(msgs);
+        setLoading(false);
+        
+        // Scroll to top (start of conversation) when chat opens
+        setTimeout(() => {
+          flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+        }, 100);
+      });
+
+      return () => unsubscribe();
+    }
+  }, [user, userId, isCopilot]);
 
   const handleSend = async () => {
     if (!messageText.trim() || !user) return;
+
+    // Don't allow sending messages to Copilot (it's a one-way system chat)
+    if (isCopilot) {
+      Alert.alert('Info', 'You can view your saved itineraries here. To create a new itinerary, use the Itinerary Builder.');
+      return;
+    }
 
     const text = messageText.trim();
     setMessageText('');
@@ -78,8 +134,24 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
     }
   };
 
-  const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp);
+  const formatTime = (timestamp: number | any) => {
+    let date: Date;
+    
+    // Handle Firestore Timestamp
+    if (timestamp && typeof timestamp === 'object') {
+      if (timestamp.toMillis && typeof timestamp.toMillis === 'function') {
+        date = new Date(timestamp.toMillis());
+      } else if (timestamp.seconds) {
+        date = new Date(timestamp.seconds * 1000);
+      } else {
+        date = new Date();
+      }
+    } else if (typeof timestamp === 'number') {
+      date = new Date(timestamp);
+    } else {
+      date = new Date();
+    }
+    
     const hours = date.getHours();
     const minutes = date.getMinutes();
     const ampm = hours >= 12 ? 'PM' : 'AM';
@@ -87,12 +159,60 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
     return `${displayHours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
   };
 
-  const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
+  const renderMessage = ({ item, index }: { item: ChatMessage | CopilotMessage; index: number }) => {
     const isUserMessage = item.senderId === user?.uid;
+    const isCopilotMessage = (item as CopilotMessage).messageType === 'itinerary';
     const nextMessage = index < messages.length - 1 ? messages[index + 1] : undefined;
+    
+    // Get timestamp properly
+    let itemTimestamp: number | any = (item as ChatMessage).createdAt || (item as CopilotMessage).timestamp || Date.now();
+    let nextTimestamp: number | any = nextMessage ? ((nextMessage as ChatMessage).createdAt || (nextMessage as CopilotMessage).timestamp || Date.now()) : Date.now();
+    
+    // Convert Firestore Timestamps to numbers for comparison
+    if (itemTimestamp && typeof itemTimestamp === 'object') {
+      if (itemTimestamp.toMillis) {
+        itemTimestamp = itemTimestamp.toMillis();
+      } else if (itemTimestamp.seconds) {
+        itemTimestamp = itemTimestamp.seconds * 1000;
+      }
+    }
+    if (nextTimestamp && typeof nextTimestamp === 'object') {
+      if (nextTimestamp.toMillis) {
+        nextTimestamp = nextTimestamp.toMillis();
+      } else if (nextTimestamp.seconds) {
+        nextTimestamp = nextTimestamp.seconds * 1000;
+      }
+    }
+    
     const showTimestamp = index === messages.length - 1 || 
-      (nextMessage && nextMessage.createdAt - item.createdAt > 300000); // 5 minutes
+      (Math.abs(nextTimestamp - itemTimestamp) > 300000); // 5 minutes
 
+    // Render itinerary message
+    if (isCopilotMessage && (item as CopilotMessage).itineraryData) {
+      const copilotItem = item as CopilotMessage;
+      return (
+        <View key={item.id}>
+          <View style={[styles.messageContainer, styles.otherMessageContainer]}>
+            <View style={[styles.messageAvatar, { backgroundColor: '#FF5C02' }]}>
+              <Icon name="compass-outline" size={20} color="#FFFFFF" />
+            </View>
+            <View style={[styles.messageBubble, styles.otherBubble, { maxWidth: '85%' }]}>
+              <ItineraryCard 
+                itinerary={copilotItem.itineraryData!}
+                onSave={undefined} // Already saved
+              />
+            </View>
+          </View>
+          {showTimestamp && (
+            <Text style={[styles.timestamp, styles.timestampLeft]}>
+              {formatTime(itemTimestamp)}
+            </Text>
+          )}
+        </View>
+      );
+    }
+
+    // Render regular message
     return (
       <View key={item.id}>
         <View
@@ -101,9 +221,13 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
             isUserMessage ? styles.userMessageContainer : styles.otherMessageContainer,
           ]}
         >
-          {/* Profile picture for receiver's messages */}
+          {/* Profile picture for receiver's messages only */}
           {!isUserMessage && (
-            profilePhoto ? (
+            isCopilot ? (
+              <View style={[styles.messageAvatar, { backgroundColor: '#FF5C02' }]}>
+                <Icon name="compass-outline" size={20} color="#FFFFFF" />
+              </View>
+            ) : profilePhoto ? (
               <Image
                 source={{ uri: profilePhoto }}
                 style={styles.messageAvatar}
@@ -124,7 +248,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
             ]}
           >
             <Text style={[styles.messageText, isUserMessage && styles.userMessageText]}>
-              {item.text}
+              {(item as ChatMessage).text || (item as CopilotMessage).text || ''}
             </Text>
           </View>
         </View>
@@ -134,7 +258,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
             styles.timestamp,
             isUserMessage ? styles.timestampRight : styles.timestampLeft
           ]}>
-            {formatTime(item.createdAt)}
+            {formatTime(itemTimestamp)}
           </Text>
         )}
       </View>
@@ -146,17 +270,25 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
       <View style={styles.emptyIconContainer}>
         <Icon name="chatbubbles-outline" size={64} color="#E87A5D" />
       </View>
-      <Text style={styles.emptyTitle}>No messages yet with {username}</Text>
-      <Text style={styles.emptySubtext}>Start your first conversation with this traveler.</Text>
-      <TouchableOpacity
-        style={styles.sendMessageButton}
-        onPress={() => {
-          // Focus on input when button is pressed
-          setMessageText('');
-        }}
-      >
-        <Text style={styles.sendMessageButtonText}>Send Message</Text>
-      </TouchableOpacity>
+      <Text style={styles.emptyTitle}>
+        {isCopilot ? 'No saved itineraries yet' : `No messages yet with ${username}`}
+      </Text>
+      <Text style={styles.emptySubtext}>
+        {isCopilot 
+          ? 'Save an itinerary from the Itinerary Builder to see it here.' 
+          : 'Start your first conversation with this traveler.'}
+      </Text>
+      {!isCopilot && (
+        <TouchableOpacity
+          style={styles.sendMessageButton}
+          onPress={() => {
+            // Focus on input when button is pressed
+            setMessageText('');
+          }}
+        >
+          <Text style={styles.sendMessageButtonText}>Send Message</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 
@@ -179,7 +311,11 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
           </TouchableOpacity>
 
           <View style={styles.headerCenterBar}>
-            {profilePhoto ? (
+            {isCopilot ? (
+              <View style={[styles.headerAvatar, { backgroundColor: '#FF5C02', justifyContent: 'center', alignItems: 'center' }]}>
+                <Icon name="compass-outline" size={24} color="#FFFFFF" />
+              </View>
+            ) : profilePhoto ? (
               <Image 
                 source={{ uri: profilePhoto }} 
                 style={styles.headerAvatar as any}
@@ -197,14 +333,16 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
             </View>
           </View>
 
-          <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.headerActionButton}>
-              <Icon name="call-outline" size={22} color="#E87A5D" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.headerActionButton}>
-              <Icon name="videocam-outline" size={22} color="#E87A5D" />
-            </TouchableOpacity>
-          </View>
+          {!isCopilot && (
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.headerActionButton}>
+                <Icon name="call-outline" size={22} color="#E87A5D" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerActionButton}>
+                <Icon name="videocam-outline" size={22} color="#E87A5D" />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* Chat Area with Gradient Background */}
@@ -227,8 +365,8 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
               keyExtractor={(item) => item.id}
               renderItem={renderMessage}
               contentContainerStyle={styles.messagesList}
-              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
               showsVerticalScrollIndicator={false}
+              inverted={false}
             />
           )}
         </LinearGradient>
@@ -244,38 +382,40 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
           </View>
         )}
 
-        {/* Bottom Input Bar */}
-        <View style={styles.inputContainer}>
-          <View style={styles.inputBar}>
-            <TouchableOpacity style={styles.attachButton}>
-              <Icon name="add" size={24} color="#3C3C3B" />
-            </TouchableOpacity>
+        {/* Bottom Input Bar - Hidden for Copilot chat */}
+        {!isCopilot && (
+          <View style={styles.inputContainer}>
+            <View style={styles.inputBar}>
+              <TouchableOpacity style={styles.attachButton}>
+                <Icon name="add" size={24} color="#3C3C3B" />
+              </TouchableOpacity>
 
-            <TextInput
-              style={styles.textInput}
-              placeholder="Type your message here"
-              placeholderTextColor="#757574"
-              value={messageText}
-              onChangeText={setMessageText}
-              multiline
-              maxLength={1000}
-            />
-
-            <TouchableOpacity
-              style={styles.micButton}
-              onPress={messageText.trim() ? handleSend : () => {
-                // TODO: Handle voice input
-                console.log('Voice input not implemented yet');
-              }}
-            >
-              <Icon
-                name={messageText.trim() ? "send" : "mic-outline"}
-                size={22}
-                color="#3C3C3B"
+              <TextInput
+                style={styles.textInput}
+                placeholder="Type your message here"
+                placeholderTextColor="#757574"
+                value={messageText}
+                onChangeText={setMessageText}
+                multiline
+                maxLength={1000}
               />
-            </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.micButton}
+                onPress={messageText.trim() ? handleSend : () => {
+                  // TODO: Handle voice input
+                  console.log('Voice input not implemented yet');
+                }}
+              >
+                <Icon
+                  name={messageText.trim() ? "send" : "mic-outline"}
+                  size={22}
+                  color="#3C3C3B"
+                />
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -317,7 +457,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
-    gap: 10,
+    gap: 8,
   },
   headerAvatar: {
     width: 40,
@@ -325,6 +465,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: '#EAEAEA',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerAvatarPlaceholder: {
     backgroundColor: '#E87A5D',
@@ -378,25 +520,30 @@ const styles = StyleSheet.create({
   },
   messageContainer: {
     flexDirection: 'row',
-    marginVertical: 6,
-    maxWidth: '75%',
-    alignItems: 'flex-end',
+    marginVertical: 8,
+    maxWidth: '85%',
+    alignItems: 'flex-start',
   },
   userMessageContainer: {
     alignSelf: 'flex-end',
     justifyContent: 'flex-end',
+    flexDirection: 'row-reverse',
   },
   otherMessageContainer: {
     alignSelf: 'flex-start',
     justifyContent: 'flex-start',
   },
   messageAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     marginRight: 8,
+    marginLeft: 0,
     borderWidth: 1,
     borderColor: '#EAEAEA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
   } as any,
   messageAvatarPlaceholder: {
     backgroundColor: '#E87A5D',
@@ -409,43 +556,51 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   messageBubble: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   userBubble: {
-    backgroundColor: 'rgba(255, 237, 230, 0.9)', // Light peach, slightly opaque
+    backgroundColor: '#FFF5F0', // Light peach/cream gradient background
     borderTopRightRadius: 4,
     borderBottomRightRadius: 4,
+    marginLeft: 8,
   },
   otherBubble: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 4,
     borderBottomLeftRadius: 4,
+    marginRight: 8,
   },
   messageText: {
     fontSize: 15,
     lineHeight: 20,
     color: '#3C3C3B',
     fontFamily: 'System',
+    textAlign: 'left',
   },
   userMessageText: {
     color: '#3C3C3B', // Dark text on light peach background
   },
   timestamp: {
     fontSize: 11,
-    color: '#757574',
+    color: '#A0A0A0',
     marginTop: 4,
     marginBottom: 8,
     fontFamily: 'System',
   },
   timestampLeft: {
     textAlign: 'left',
-    marginLeft: 36, // Align with message bubble (avatar + margin)
+    marginLeft: 44, // Align with message bubble (avatar 36px + margin 8px)
   },
   timestampRight: {
     textAlign: 'right',
-    marginRight: 0,
+    marginRight: 8,
   },
   typingContainer: {
     paddingHorizontal: 16,

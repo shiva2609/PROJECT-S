@@ -107,6 +107,8 @@ export default function RideCreator({ accountType, onClose, navigation }: Props)
 
       await addDoc(collection(db, 'posts'), {
         type: 'ride',
+        createdBy: user.uid, // Primary field
+        hostId: user.uid, // Legacy field
         title: vehicleName || `${vehicleType} Rental`,
         location,
         price: parseFloat(pricePerDay),
@@ -117,9 +119,8 @@ export default function RideCreator({ accountType, onClose, navigation }: Props)
         coverImage: imageUrls[0] || '',
         gallery: imageUrls,
         description: description || '',
-        hostId: user.uid,
         hostType: hostType,
-        createdAt: serverTimestamp(),
+        createdAt: serverTimestamp(), // Always use serverTimestamp
         rating: null,
         reviewCount: 0,
       });
