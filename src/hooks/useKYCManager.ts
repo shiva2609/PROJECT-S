@@ -326,13 +326,12 @@ export function useKYCManager(): UseKYCManagerReturn {
         [stepKey]: uploadedDoc,
       };
 
-      // Mark step as completed if it has all required data
+      // Mark step as completed if it has all required form data (files are optional)
       const step = pendingChange.requiredSteps.find(s => s.key === stepKey);
       const stepData = pendingChange.stepData[stepKey] || { stepKey, completed: false };
       
       const isStepComplete = step
-        ? (!step.fileRequired || uploadedDoc.url) &&
-          (!step.fields || step.fields.every(f => !f.required || stepData.formData?.[f.key]))
+        ? (!step.fields || step.fields.every(f => !f.required || stepData.formData?.[f.key]))
         : true;
 
       const updatedStepData = {
@@ -384,6 +383,7 @@ export function useKYCManager(): UseKYCManagerReturn {
 
   /**
    * Validate a step
+   * Note: File uploads are now optional, only form fields are validated
    */
   const validateStep = useCallback((
     step: VerificationStep,
@@ -392,7 +392,7 @@ export function useKYCManager(): UseKYCManagerReturn {
   ): ValidationResult => {
     const errors: Record<string, string> = {};
 
-    // Validate form fields
+    // Validate form fields only (file uploads are optional)
     if (step.fields) {
       for (const field of step.fields) {
         if (field.required) {
@@ -405,16 +405,8 @@ export function useKYCManager(): UseKYCManagerReturn {
       }
     }
 
-    // Validate file upload
-    if (step.fileRequired && !uploadedDoc?.url) {
-      errors.file = `${step.label} document is required`;
-    }
-
-    // Validate file type if provided
-    if (uploadedDoc && step.acceptedFileTypes) {
-      // File type validation would need to be checked during upload
-      // This is handled in uploadDoc function
-    }
+    // File uploads are optional - no validation needed
+    // File type validation is still checked during upload in uploadDoc function
 
     return {
       isValid: Object.keys(errors).length === 0,
@@ -458,7 +450,7 @@ export function useKYCManager(): UseKYCManagerReturn {
         const stepData = pendingChange.stepData[step.key];
         const uploadedDoc = pendingChange.uploadedDocs[step.key];
 
-        // Check form fields
+        // Check form fields only (file uploads are optional)
         if (step.fields) {
           for (const field of step.fields) {
             if (field.required) {
@@ -470,16 +462,16 @@ export function useKYCManager(): UseKYCManagerReturn {
           }
         }
 
-        // Check file upload
-        if (step.fileRequired && !uploadedDoc?.url) {
-          missingSteps.push(`${step.label}: Document upload required`);
-        }
+        // File uploads are optional - no check needed
 
-        // Validate step
+        // Validate step (only form fields, file errors are ignored)
         const validation = validateStep(step, stepData?.formData || {}, uploadedDoc);
         if (!validation.isValid) {
           Object.keys(validation.errors).forEach(key => {
-            missingSteps.push(`${step.label}: ${validation.errors[key]}`);
+            // Skip file validation errors
+            if (key !== 'file') {
+              missingSteps.push(`${step.label}: ${validation.errors[key]}`);
+            }
           });
         }
       }
@@ -507,14 +499,18 @@ export function useKYCManager(): UseKYCManagerReturn {
     try {
       setLoading(true);
 
-      // Check if can submit
+      // Check if can submit (file uploads are optional, only form fields are checked)
       const { canSubmit: can, missingSteps } = await canSubmit(uid);
       if (!can) {
-        Alert.alert(
-          'Incomplete Verification',
-          `Please complete all required steps:\n\n${missingSteps.join('\n')}`
-        );
-        throw new Error('Cannot submit: incomplete verification');
+        // Only show errors for form fields, not file uploads
+        const formFieldErrors = missingSteps.filter(step => !step.includes('Document upload'));
+        if (formFieldErrors.length > 0) {
+          Alert.alert(
+            'Incomplete Verification',
+            `Please complete all required fields:\n\n${formFieldErrors.join('\n')}`
+          );
+          throw new Error('Cannot submit: incomplete verification');
+        }
       }
 
       const userRef = doc(db, 'users', uid);

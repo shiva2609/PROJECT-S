@@ -245,10 +245,17 @@ export default function AccountChangeFlowScreen({
       return;
     }
 
-    // Validate current step
+    // Validate current step (only form fields, not file uploads)
     const validation = validateCurrentStep();
-    if (!validation.isValid) {
-      setValidationErrors(validation.errors);
+    // Only show errors for form fields, not file uploads
+    const formFieldErrors: Record<string, string> = {};
+    Object.keys(validation.errors).forEach(key => {
+      if (key !== 'file') {
+        formFieldErrors[key] = validation.errors[key];
+      }
+    });
+    if (Object.keys(formFieldErrors).length > 0) {
+      setValidationErrors(formFieldErrors);
       Alert.alert('Validation Error', 'Please complete all required fields');
       return;
     }
@@ -312,15 +319,8 @@ export default function AccountChangeFlowScreen({
       return;
     }
 
-    // Validate all steps
-    const { canSubmit: can, missingSteps } = await canSubmit(user.uid);
-    if (!can) {
-      Alert.alert(
-        'Incomplete Verification',
-        `Please complete all required steps:\n\n${missingSteps.join('\n')}`
-      );
-      return;
-    }
+    // Allow submission even if files are missing (only validate form fields)
+    // File uploads are now optional
 
     Alert.alert(
       'Submit Verification',
@@ -337,7 +337,12 @@ export default function AccountChangeFlowScreen({
             try {
               setSubmitting(true);
               await submitAccountChange(user.uid, requestId);
-              navigation.navigate('Profile');
+              // Navigate back to Account screen or go back to previous screen
+              if (navigation.canGoBack()) {
+                navigation.goBack();
+              } else {
+                navigation.navigate('Account');
+              }
             } catch (error: any) {
               Alert.alert('Error', error.message || 'Failed to submit');
             } finally {
@@ -522,11 +527,11 @@ export default function AccountChangeFlowScreen({
             )}
 
             {/* File Upload */}
-            {currentStep.fileRequired && (
+            {(currentStep.type === 'file' || currentStep.type === 'form+file') && (
               <View style={styles.uploadContainer}>
                 <Text style={styles.uploadLabel}>
                   {currentStep.label} Document
-                  <Text style={styles.required}> *</Text>
+                  <Text style={styles.optionalLabel}> (Optional)</Text>
                 </Text>
                 {uploadedDocs[currentStep.key] ? (
                   <View style={styles.uploadedDoc}>
@@ -573,9 +578,6 @@ export default function AccountChangeFlowScreen({
                       </>
                     )}
                   </TouchableOpacity>
-                )}
-                {validationErrors.file && (
-                  <Text style={styles.errorText}>{validationErrors.file}</Text>
                 )}
               </View>
             )}
@@ -779,6 +781,11 @@ const styles = StyleSheet.create({
   },
   required: {
     color: colors.danger,
+  },
+  optionalLabel: {
+    color: colors.mutedText,
+    fontSize: 12,
+    fontWeight: '400',
   },
   input: {
     backgroundColor: colors.background,
