@@ -90,7 +90,7 @@ export default function ProfileScreen({ navigation }: any) {
   }, [activeTab]);
 
   const handleEditProfile = () => {
-    navigation?.navigate('Account');
+    navigation?.navigate('EditProfile');
   };
 
   // Firebase update functions
@@ -318,12 +318,21 @@ export default function ProfileScreen({ navigation }: any) {
   };
 
   const renderBioTab = () => {
-    const { location, aboutMe, interests, countriesVisited } = profileData || {};
+    const { location, aboutMe, interests, countriesVisited, bio } = profileData || {};
 
     return (
       <>
         <ScrollView style={styles.bioContent} contentContainerStyle={styles.bioContentInner}>
           <View style={styles.bioCard}>
+            {/* Bio Section - Read-only, auto-generated */}
+            {bio && (
+              <View style={styles.bioSection}>
+                <Text style={styles.bioSectionTitle}>Bio</Text>
+                <Text style={styles.bioTextReadOnly}>{bio}</Text>
+                <Text style={styles.bioHint}>Auto-generated from your profile</Text>
+              </View>
+            )}
+
             {/* Location Section */}
             <View style={styles.bioSection}>
               <Text style={styles.bioSectionTitle}>Location</Text>
@@ -344,7 +353,7 @@ export default function ProfileScreen({ navigation }: any) {
               )}
             </View>
 
-            {/* About Section */}
+            {/* About Section - Keep for additional details */}
             <View style={styles.bioSection}>
               <Text style={styles.bioSectionTitle}>
                 About {profileData?.fullname || profileData?.username || 'You'}
@@ -878,6 +887,21 @@ const styles = StyleSheet.create({
     color: '#3C3C3B',
     lineHeight: 20,
     textAlign: 'left',
+  },
+  bioTextReadOnly: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: '#3C3C3B',
+    lineHeight: 20,
+    textAlign: 'left',
+    fontStyle: 'italic',
+  },
+  bioHint: {
+    fontSize: 11,
+    fontFamily: Fonts.regular,
+    color: DESIGN_COLORS.secondaryText,
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   bioLocation: {
     fontSize: 14,

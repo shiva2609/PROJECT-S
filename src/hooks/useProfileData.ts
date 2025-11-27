@@ -32,6 +32,7 @@ export interface ProfileData {
   profilePic?: string;
   location?: string;
   aboutMe?: string;
+  bio?: string; // Auto-generated bio
   interests?: string[];
   countriesVisited?: string[];
   statesVisited?: string[];
@@ -112,7 +113,8 @@ export function useProfileData(userId?: string) {
           userTag: data.userTag || `@${data.username || 'user'}`,
           profilePic: data.photoURL || data.profilePic,
           location: data.location || '',
-          aboutMe: data.aboutMe || data.about || data.bio || data.description || '',
+          aboutMe: data.aboutMe || data.about || data.description || '',
+          bio: data.bio || '', // Auto-generated bio (separate from aboutMe)
           interests: data.interests || [],
           countriesVisited: data.countriesVisited || [],
           statesVisited: data.statesVisited || [],
@@ -141,7 +143,8 @@ export function useProfileData(userId?: string) {
             userTag: data.userTag || `@${data.username || 'user'}`,
             profilePic: data.photoURL || data.profilePic,
             location: data.location || '',
-            aboutMe: data.aboutMe || data.about || data.bio || data.description || '',
+            aboutMe: data.aboutMe || data.about || data.description || '',
+            bio: data.bio || '', // Auto-generated bio (separate from aboutMe)
             interests: data.interests || [],
             countriesVisited: data.countriesVisited || [],
             statesVisited: data.statesVisited || [],

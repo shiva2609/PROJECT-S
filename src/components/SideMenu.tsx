@@ -8,12 +8,13 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { AccountType, VerificationStatus, getAccountTypeMetadata, UserAccountData } from '../types/account';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../api/authService';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { signOut } from '../api/authService';
 import { useDispatch } from 'react-redux';
 import { logout } from '../store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_USER_KEY } from '../utils/constants';
+import { PendingAccountChange, PendingStatus } from '../types/kyc';
 
 const { width } = Dimensions.get('window');
 const MENU_WIDTH = width * 0.75;
@@ -38,8 +39,13 @@ interface MenuGroupProps {
 }
 
 interface ProfileMiniCardProps {
-  userData: (UserAccountData & { photoURL?: string }) | null;
+  userData: (UserAccountData & { photoURL?: string; pendingAccountChange?: PendingAccountChange }) | null;
   displayName: string;
+}
+
+interface VerificationStatusCardProps {
+  pendingChange: PendingAccountChange | null | undefined;
+  onPress?: () => void;
 }
 
 // Profile Mini Card Component
@@ -80,6 +86,116 @@ const ProfileMiniCard = ({ userData, displayName }: ProfileMiniCardProps) => {
         </View>
       </View>
     </View>
+  );
+};
+
+// Verification Status Card Component
+const VerificationStatusCard = ({ pendingChange, onPress }: VerificationStatusCardProps) => {
+  // Debug logging
+  console.log('VerificationStatusCard - pendingChange:', JSON.stringify(pendingChange, null, 2));
+  
+  if (!pendingChange) {
+    console.log('VerificationStatusCard - No pending change, returning null');
+    return null;
+  }
+
+  // Validate that pendingChange has required fields
+  if (!pendingChange.toRole || !pendingChange.status) {
+    console.log('VerificationStatusCard - Invalid pending change data:', pendingChange);
+    return null;
+  }
+
+  const status = pendingChange.status as PendingStatus;
+  const toRole = pendingChange.toRole;
+  const toRoleMeta = getAccountTypeMetadata(toRole);
+  const isApproved = status === 'approved';
+  const isDisabled = isApproved;
+
+  const getStatusConfig = () => {
+    switch (status) {
+      case 'in_progress':
+        return {
+          label: 'In Progress',
+          icon: 'time-outline',
+          color: Colors.brand.primary,
+          bgColor: Colors.brand.primary + '15',
+        };
+      case 'submitted':
+        return {
+          label: 'Under Review',
+          icon: 'hourglass-outline',
+          color: Colors.accent.amber,
+          bgColor: Colors.accent.amber + '15',
+        };
+      case 'approved':
+        return {
+          label: 'Approved',
+          icon: 'checkmark-circle',
+          color: Colors.accent.green,
+          bgColor: Colors.accent.green + '15',
+        };
+      case 'rejected':
+        return {
+          label: 'Rejected',
+          icon: 'close-circle',
+          color: Colors.accent.red,
+          bgColor: Colors.accent.red + '15',
+        };
+      case 'incomplete':
+        return {
+          label: 'Incomplete',
+          icon: 'alert-circle-outline',
+          color: Colors.black.qua,
+          bgColor: Colors.white.tertiary,
+        };
+      default:
+        return {
+          label: 'Pending',
+          icon: 'time-outline',
+          color: Colors.brand.primary,
+          bgColor: Colors.brand.primary + '15',
+        };
+    }
+  };
+
+  const statusConfig = getStatusConfig();
+
+  const content = (
+    <View style={[styles.verificationCard, isDisabled && styles.verificationCardDisabled]}>
+      <View style={[styles.verificationIconContainer, { backgroundColor: statusConfig.bgColor }]}>
+        <Icon name={statusConfig.icon} size={20} color={statusConfig.color} />
+      </View>
+      <View style={styles.verificationContent}>
+        <Text style={styles.verificationTitle}>Account Upgrade</Text>
+        <View style={styles.verificationDetails}>
+          <View style={[styles.verificationRoleBadge, { backgroundColor: toRoleMeta.color + '20' }]}>
+            <Text style={[styles.verificationRoleText, { color: toRoleMeta.color }]}>
+              {toRoleMeta.displayName}
+            </Text>
+          </View>
+          <Text style={[styles.verificationStatus, { color: statusConfig.color }]}>
+            {statusConfig.label}
+          </Text>
+        </View>
+      </View>
+      {!isDisabled && (
+        <Icon name="chevron-forward" size={18} color={Colors.black.qua} />
+      )}
+    </View>
+  );
+
+  if (isDisabled) {
+    return content;
+  }
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={onPress}
+      disabled={isDisabled}
+    >
+      {content}
+    </TouchableOpacity>
   );
 };
 
@@ -124,6 +240,24 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
   useEffect(() => {
     if (visible && user) {
       loadUserData();
+      
+      // Set up real-time listener for pendingAccountChange updates
+      const userRef = doc(db, 'users', user.uid);
+      const unsubscribe = onSnapshot(userRef, (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          const data = docSnapshot.data() as UserAccountData & { photoURL?: string; pendingAccountChange?: PendingAccountChange };
+          console.log('SideMenu - Real-time update:', {
+            hasPendingChange: !!data.pendingAccountChange,
+            pendingChangeStatus: data.pendingAccountChange?.status,
+            pendingChangeToRole: data.pendingAccountChange?.toRole,
+          });
+          setUserData(data);
+        }
+      }, (error) => {
+        console.error('SideMenu - Error listening to user updates:', error);
+      });
+
+      return () => unsubscribe();
     }
   }, [visible, user]);
 
@@ -136,7 +270,13 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
 
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       if (userDoc.exists()) {
-        setUserData(userDoc.data() as UserAccountData & { photoURL?: string });
+        const data = userDoc.data() as UserAccountData & { photoURL?: string; pendingAccountChange?: PendingAccountChange };
+        console.log('SideMenu - Loaded user data:', {
+          hasPendingChange: !!data.pendingAccountChange,
+          pendingChangeStatus: data.pendingAccountChange?.status,
+          pendingChangeToRole: data.pendingAccountChange?.toRole,
+        });
+        setUserData(data);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -217,6 +357,20 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
         >
           {/* Profile Mini Card */}
           <ProfileMiniCard userData={userData} displayName={displayName} />
+
+          {/* Verification Status Card */}
+          <VerificationStatusCard
+            pendingChange={userData?.pendingAccountChange}
+            onPress={() => {
+              if (userData?.pendingAccountChange?.requestId) {
+                onClose();
+                navigation?.navigate('AccountChangeFlow', {
+                  toRole: userData.pendingAccountChange.toRole,
+                  requestId: userData.pendingAccountChange.requestId,
+                });
+              }
+            }}
+          />
 
           {/* Divider */}
           <View style={styles.divider} />
@@ -416,5 +570,56 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.black.qua,
     fontFamily: Fonts.regular,
+  },
+  verificationCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 8,
+    backgroundColor: Colors.white.primary,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.white.tertiary,
+  },
+  verificationCardDisabled: {
+    opacity: 0.6,
+  },
+  verificationIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  verificationContent: {
+    flex: 1,
+  },
+  verificationTitle: {
+    fontFamily: Fonts.semibold,
+    fontSize: 14,
+    color: Colors.black.primary,
+    marginBottom: 6,
+  },
+  verificationDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  verificationRoleBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  verificationRoleText: {
+    fontFamily: Fonts.medium,
+    fontSize: 11,
+  },
+  verificationStatus: {
+    fontFamily: Fonts.medium,
+    fontSize: 12,
   },
 });

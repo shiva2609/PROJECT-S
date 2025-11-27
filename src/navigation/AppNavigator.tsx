@@ -30,6 +30,7 @@ import CreateScreen from '../screens/CreateScreen';
 import TripsScreen from '../screens/TripsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AccountScreen from '../screens/AccountScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
 import AdminVerificationScreen from '../screens/AdminVerificationScreen';
 import SuperAdminDashboardScreen from '../screens/admin/SuperAdminDashboardScreen';
 import DashboardScreen from '../screens/DashboardScreen';
@@ -143,6 +144,14 @@ export default function AppNavigator() {
         <Stack.Screen name="Home" component={HomeScreen} />
         <Stack.Screen name="Dashboard" component={DashboardScreen} />
         <Stack.Screen name="Account" component={AccountScreen} />
+        <Stack.Screen 
+          name="EditProfile" 
+          component={EditProfileScreen}
+          options={{
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
         <Stack.Screen name="AdminVerification" component={AdminVerificationScreen} />
         <Stack.Screen 
           name="SuperAdminDashboard" 
