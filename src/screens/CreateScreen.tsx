@@ -17,15 +17,12 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSelector } from 'react-redux';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { colors } from '../utils/colors';
-import { RootState } from '../store';
-import { auth, db } from '../api/authService';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { db } from '../api/authService';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { AccountType, getAccountTypeMetadata, CreateOption, VerificationStatus } from '../types/account';
-import { uploadImageAsync } from '../api/firebaseService';
 import { useAuth } from '../contexts/AuthContext';
 
 // Creator Components
@@ -44,7 +41,6 @@ type CreateMode = CreateOption | null;
 
 export default function CreateScreen({ navigation }: any) {
   const { user } = useAuth();
-  const reduxUser = useSelector((s: RootState) => s.user.currentUser);
   const [accountType, setAccountType] = useState<AccountType>('Traveler');
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('none');
   const [loading, setLoading] = useState(true);
@@ -119,13 +115,11 @@ export default function CreateScreen({ navigation }: any) {
   );
 
   const accountMetadata = getAccountTypeMetadata(accountType);
-  const isVerified = verificationStatus === 'verified' || accountType === 'Traveler';
   
   // Debug logging
   console.log('📊 CreateScreen - Render state:', {
     accountType,
     verificationStatus,
-    isVerified,
     createOptions: accountMetadata.createOptions,
     createOptionsCount: accountMetadata.createOptions.length,
   });
@@ -172,16 +166,6 @@ export default function CreateScreen({ navigation }: any) {
           </View>
         </View>
 
-        {!isVerified && accountType !== 'Traveler' && (
-          <View style={styles.warningBox}>
-            <Icon name="alert-circle" size={20} color={colors.danger} />
-            <Text style={styles.warningText}>
-              Your {accountMetadata.displayName} account is pending verification.
-              Some features may be limited.
-            </Text>
-          </View>
-        )}
-
         <Text style={styles.subtitle}>What would you like to create?</Text>
 
         <View style={styles.optionsGrid}>
@@ -189,8 +173,17 @@ export default function CreateScreen({ navigation }: any) {
             <TouchableOpacity
               key={option}
               style={styles.optionCard}
-              onPress={() => setCreateMode(option)}
-              disabled={!isVerified && accountType !== 'Traveler'}
+              onPress={() => {
+                // Navigate to specific screens for Post and Reel
+                if (option === 'Post') {
+                  navigation.navigate('CreatePostScreen');
+                } else if (option === 'Reel') {
+                  navigation.navigate('CreateReelScreen');
+                } else {
+                  // For other options, use the existing component-based flow
+                  setCreateMode(option);
+                }
+              }}
             >
               <Icon name={getIconForOption(option)} size={32} color={colors.primary} />
               <Text style={styles.optionText}>{option}</Text>
@@ -291,20 +284,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 12,
     fontWeight: '600',
-  },
-  warningBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF2F2',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 24,
-    gap: 8,
-  },
-  warningText: {
-    flex: 1,
-    color: colors.danger,
-    fontSize: 14,
   },
   subtitle: {
     fontSize: 18,

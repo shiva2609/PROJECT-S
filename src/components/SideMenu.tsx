@@ -304,6 +304,7 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
   };
 
   const accountType = (userData?.accountType || 'Traveler') as AccountType;
+  const verificationStatus = (userData?.verificationStatus || 'none') as VerificationStatus;
   const isSuperAdmin = accountType === 'superAdmin';
   const isTraveler = accountType === 'Traveler';
   const showDashboard = !isTraveler;
@@ -357,6 +358,14 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
         >
           {/* Profile Mini Card */}
           <ProfileMiniCard userData={userData} displayName={displayName} />
+
+          {/* Pending Verification Indicator */}
+          {userData && accountType !== 'Traveler' && verificationStatus !== 'verified' && (
+            <View style={styles.pendingVerificationBadge}>
+              <Icon name="information-circle" size={14} color="#FF4A4A" />
+              <Text style={styles.pendingVerificationText}>Verification Pending</Text>
+            </View>
+          )}
 
           {/* Verification Status Card */}
           <VerificationStatusCard
@@ -621,5 +630,23 @@ const styles = StyleSheet.create({
   verificationStatus: {
     fontFamily: Fonts.medium,
     fontSize: 12,
+  },
+  pendingVerificationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFE8E8',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 8,
+    gap: 6,
+  },
+  pendingVerificationText: {
+    fontFamily: Fonts.medium,
+    fontSize: 12,
+    color: '#FF4A4A',
   },
 });

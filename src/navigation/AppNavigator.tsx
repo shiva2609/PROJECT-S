@@ -27,6 +27,8 @@ import TravelPlanSelectScreen from '../screens/travel/TravelPlanSelectScreen';
 import HomeScreen from '../screens/HomeScreen';
 import ExploreScreen from '../screens/ExploreScreen';
 import CreateScreen from '../screens/CreateScreen';
+import CreatePostScreen from '../screens/CreatePostScreen';
+import CreateReelScreen from '../screens/CreateReelScreen';
 import TripsScreen from '../screens/TripsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AccountScreen from '../screens/AccountScreen';
@@ -162,6 +164,22 @@ export default function AppNavigator() {
           }}
         />
         <Stack.Screen name="RoleUpgrade" component={RoleUpgradeScreen} />
+        <Stack.Screen 
+          name="CreatePostScreen" 
+          component={CreatePostScreen}
+          options={{
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="CreateReelScreen" 
+          component={CreateReelScreen}
+          options={{
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
         
         {/* KYC Verification Screens */}
         <Stack.Screen 

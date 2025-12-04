@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Image, Alert, ScrollView, ActivityIndicator, PermissionsAndroid, Platform } from 'react-native';
-import { launchImageLibrary } from 'react-native-image-picker';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView, ActivityIndicator, PermissionsAndroid, Platform } from 'react-native';
+import { launchImageLibrary, launchCamera, MediaType } from 'react-native-image-picker';
 import storage from '@react-native-firebase/storage';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
 import { colors } from '../utils/colors';
 import { useAuth } from '../contexts/AuthContext';
+import Icon from 'react-native-vector-icons/Ionicons';
 
-export default function CreatePostScreen({ navigation }: any) {
+export default function CreateReelScreen({ navigation }: any) {
   const { user, initialized } = useAuth();
   const [caption, setCaption] = useState('');
-  const [image, setImage] = useState<any>(null);
+  const [video, setVideo] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
 
@@ -18,13 +19,13 @@ export default function CreatePostScreen({ navigation }: any) {
   const requestStoragePermission = async (): Promise<boolean> => {
     if (Platform.OS === 'android') {
       try {
-        // Android 13+ (API 33+) uses READ_MEDIA_IMAGES
+        // Android 13+ (API 33+) uses READ_MEDIA_VIDEO
         if (Platform.Version >= 33) {
           const granted = await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+            PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
             {
-              title: 'Access Photos',
-              message: 'Sanchari needs access to your gallery to upload photos.',
+              title: 'Access Videos',
+              message: 'Sanchari needs access to your gallery to upload videos.',
               buttonNeutral: 'Ask Me Later',
               buttonNegative: 'Cancel',
               buttonPositive: 'OK',
@@ -36,8 +37,8 @@ export default function CreatePostScreen({ navigation }: any) {
           const granted = await PermissionsAndroid.request(
             PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
             {
-              title: 'Access Photos',
-              message: 'Sanchari needs access to your gallery to upload photos.',
+              title: 'Access Videos',
+              message: 'Sanchari needs access to your gallery to upload videos.',
               buttonNeutral: 'Ask Me Later',
               buttonNegative: 'Cancel',
               buttonPositive: 'OK',
@@ -54,12 +55,8 @@ export default function CreatePostScreen({ navigation }: any) {
     return true;
   };
 
-  // Log auth state at the top
-  console.log('✅ Auth state:', { initialized, userExists: !!user, uid: user?.uid });
-
   // Wait for auth initialization BEFORE rendering any content
   if (!initialized) {
-    console.log('⏳ Waiting for auth initialization...');
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.surface }}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -70,92 +67,102 @@ export default function CreatePostScreen({ navigation }: any) {
 
   // Check if user is logged in
   if (!user) {
-    console.log('❌ User not logged in');
-    Alert.alert('Login Required', 'You must be logged in to create a post.');
+    Alert.alert('Login Required', 'You must be logged in to create a reel.');
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.surface }}>
-        <Text style={{ color: colors.mutedText, fontSize: 16 }}>Please log in to create a post</Text>
+        <Text style={{ color: colors.mutedText, fontSize: 16 }}>Please log in to create a reel</Text>
       </View>
     );
   }
 
-  const handleSelectImage = async () => {
+  const handleSelectVideo = async () => {
     try {
-      // Request permissions before launching image picker
       const granted = await requestStoragePermission();
       if (!granted) {
-        Alert.alert('Permission Required', 'Please allow access to photos to upload images.');
+        Alert.alert('Permission Required', 'Please allow access to videos to upload reels.');
         return;
       }
 
-      console.log('📸 Launching image picker (no base64 needed)...');
       const result = await launchImageLibrary({
-        mediaType: 'photo',
-        includeBase64: false, // ✅ Not needed anymore - using direct file upload
+        mediaType: 'video',
+        includeBase64: false,
         quality: 0.8,
-        maxWidth: 1920,
-        maxHeight: 1920,
+        videoQuality: 'high',
         selectionLimit: 1,
       });
 
       if (result.didCancel || !result.assets?.length) {
-        console.log('ℹ️ User cancelled image selection');
         return;
       }
 
       if (result.errorMessage) {
-        console.error('❌ Image picker error:', result.errorMessage);
-        Alert.alert('Error', `Failed to pick image: ${result.errorMessage}`);
+        Alert.alert('Error', `Failed to pick video: ${result.errorMessage}`);
         return;
       }
 
       const asset = result.assets[0];
       if (!asset?.uri) {
-        console.error('❌ No image asset found');
-        Alert.alert('Error', 'No image selected');
+        Alert.alert('Error', 'No video selected');
         return;
       }
 
-      console.log('✅ Image selected:', {
-        uri: asset.uri?.substring(0, 60) + '...',
-        fileName: asset.fileName,
-        type: asset.type,
-        fileSize: asset.fileSize,
-      });
-
-      setImage(asset);
-      setProgress(0); // Reset progress
+      setVideo(asset);
+      setProgress(0);
     } catch (error: any) {
-      console.error('❌ Error picking image:', error);
-      Alert.alert('Error', `Failed to pick image: ${error.message || 'Unknown error'}`);
+      console.error('❌ Error picking video:', error);
+      Alert.alert('Error', `Failed to pick video: ${error.message || 'Unknown error'}`);
     }
   };
 
-  const uploadImage = async (imageAsset: any): Promise<string> => {
-    if (!imageAsset?.uri) {
-      throw new Error('No image selected');
+  const handleCaptureVideo = async () => {
+    try {
+      const result = await launchCamera({
+        mediaType: 'video',
+        includeBase64: false,
+        quality: 0.8,
+        videoQuality: 'high',
+      });
+
+      if (result.didCancel || !result.assets?.length) {
+        return;
+      }
+
+      if (result.errorMessage) {
+        Alert.alert('Error', `Failed to capture video: ${result.errorMessage}`);
+        return;
+      }
+
+      const asset = result.assets[0];
+      if (!asset?.uri) {
+        Alert.alert('Error', 'No video captured');
+        return;
+      }
+
+      setVideo(asset);
+      setProgress(0);
+    } catch (error: any) {
+      console.error('❌ Error capturing video:', error);
+      Alert.alert('Error', `Failed to capture video: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const uploadVideo = async (videoAsset: any): Promise<string> => {
+    if (!videoAsset?.uri) {
+      throw new Error('No video selected');
     }
 
-    const fileName = `post_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    const reference = storage().ref(`/posts/${user.uid}/${fileName}`);
+    const fileName = `reel_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
+    const reference = storage().ref(`/reels/${user.uid}/${fileName}`);
 
-    // Fix URI format for Android/iOS compatibility
-    // React Native Firebase Storage handles file:// and content:// URIs natively
-    // iOS requires path without file:// prefix, Android works with or without
-    let uploadUri = imageAsset.uri;
+    let uploadUri = videoAsset.uri;
     if (Platform.OS === 'ios') {
-      // iOS: Remove file:// prefix - Firebase Storage expects absolute path
       if (uploadUri.startsWith('file://')) {
         uploadUri = uploadUri.replace('file://', '');
       }
     }
-    // Android: Keep original URI (supports file://, content://, and absolute paths)
 
-    console.log('📤 Starting upload to Firebase Storage...');
-    console.log('   Path:', `/posts/${user.uid}/${fileName}`);
-    console.log('   Original URI:', imageAsset.uri.substring(0, 60) + '...');
-    console.log('   Upload URI:', uploadUri.substring(0, 60) + '...');
-    console.log('   Platform:', Platform.OS);
+    console.log('📤 Starting video upload to Firebase Storage...');
+    console.log('   Path:', `/reels/${user.uid}/${fileName}`);
 
     const task = reference.putFile(uploadUri);
 
@@ -184,9 +191,9 @@ export default function CreatePostScreen({ navigation }: any) {
     });
   };
 
-  const handlePost = async () => {
-    if (!image?.uri) {
-      Alert.alert('Error', 'Please select an image first');
+  const handleReel = async () => {
+    if (!video?.uri) {
+      Alert.alert('Error', 'Please select a video first');
       return;
     }
 
@@ -199,11 +206,11 @@ export default function CreatePostScreen({ navigation }: any) {
     setProgress(0);
 
     try {
-      console.log('📝 Starting post creation process...');
+      console.log('📝 Starting reel creation process...');
       console.log('🔑 Current User ID:', user.uid);
 
-      // Upload image to Firebase Storage with progress tracking
-      const imageUrl = await uploadImage(image);
+      // Upload video to Firebase Storage with progress tracking
+      const videoUrl = await uploadVideo(video);
 
       // Get current user from React Native Firebase Auth
       const currentUser = auth().currentUser;
@@ -211,42 +218,54 @@ export default function CreatePostScreen({ navigation }: any) {
         throw new Error('User not authenticated');
       }
 
-      // Create post document in Firestore
+      // Get username from Firestore
+      let username = currentUser.displayName || currentUser.email || 'User';
+      try {
+        const userDoc = await firestore().collection('users').doc(currentUser.uid).get();
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          username = userData?.username || username;
+        }
+      } catch (e) {
+        console.log('Could not fetch username from Firestore, using default');
+      }
+
+      // Create reel document in Firestore
       console.log('📝 Creating Firestore document...');
-      const postData = {
-        type: 'post',
-        createdBy: currentUser.uid, // Primary field
+      const reelData = {
+        type: 'reel',
+        createdBy: currentUser.uid,
         userId: currentUser.uid, // Legacy field for backward compatibility
-        username: currentUser.displayName || currentUser.email || 'User',
-        imageUrl,
+        username,
+        videoUrl,
         caption: caption.trim(),
         likeCount: 0,
         commentCount: 0,
-        createdAt: firestore.FieldValue.serverTimestamp(), // Always use serverTimestamp
+        createdAt: firestore.FieldValue.serverTimestamp(),
       };
 
-      console.log('📄 Post data:', { ...postData, createdAt: '[serverTimestamp]' });
+      console.log('📄 Reel data:', { ...reelData, createdAt: '[serverTimestamp]' });
 
-      await firestore().collection('posts').add(postData);
+      await firestore().collection('reels').add(reelData);
 
-      console.log('✅ Post created successfully!');
+      console.log('✅ Reel created successfully!');
 
       // Reset form
       setCaption('');
-      setImage(null);
+      setVideo(null);
       setProgress(0);
 
-      Alert.alert('Success', 'Post uploaded successfully!', [
+      Alert.alert('Success', 'Reel uploaded successfully!', [
         { text: 'OK', onPress: () => navigation?.goBack() },
       ]);
     } catch (err: any) {
-      console.error('❌ Error creating post:', {
+      console.error('❌ Error creating reel:', {
         message: err.message,
         code: err.code,
         stack: err.stack,
       });
 
-      let errorMessage = 'Failed to create post';
+      let errorMessage = 'Failed to create reel';
       if (err.code === 'storage/permission-denied') {
         errorMessage = 'Permission denied. Please check your Firebase Storage rules.';
       } else if (err.code === 'storage/unauthorized') {
@@ -266,17 +285,41 @@ export default function CreatePostScreen({ navigation }: any) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
-      <View style={styles.imageContainer}>
-        <TouchableOpacity style={styles.upload} onPress={handleSelectImage}>
-          {image?.uri ? (
-            <Image source={{ uri: image.uri }} style={styles.preview} />
-          ) : (
-            <View style={styles.uploadPlaceholder}>
-              <Text style={styles.uploadIcon}>📷</Text>
-              <Text style={styles.uploadText}>Pick an image</Text>
-            </View>
-          )}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation?.goBack()} style={styles.backButton}>
+          <Icon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
+        <Text style={styles.headerTitle}>Create Reel</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <View style={styles.videoContainer}>
+        {!video?.uri ? (
+          <View style={styles.uploadSection}>
+            <Text style={styles.label}>Select Video</Text>
+            <View style={styles.uploadButtons}>
+              <TouchableOpacity style={styles.uploadButton} onPress={handleSelectVideo}>
+                <Icon name="images-outline" size={24} color={colors.primary} />
+                <Text style={styles.uploadButtonText}>Choose from Library</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.uploadButton} onPress={handleCaptureVideo}>
+                <Icon name="videocam-outline" size={24} color={colors.primary} />
+                <Text style={styles.uploadButtonText}>Record Video</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.previewSection}>
+            <View style={styles.videoPreview}>
+              <Icon name="videocam" size={48} color={colors.primary} />
+              <Text style={styles.videoPreviewText}>Video Selected</Text>
+              <Text style={styles.videoPreviewSubtext}>{video.fileName || 'Video file'}</Text>
+            </View>
+            <TouchableOpacity style={styles.changeVideoButton} onPress={() => setVideo(null)}>
+              <Text style={styles.changeVideoText}>Change Video</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         
         {/* Upload progress overlay */}
         {uploading && (
@@ -298,9 +341,9 @@ export default function CreatePostScreen({ navigation }: any) {
       />
 
       <TouchableOpacity 
-        style={[styles.btn, (uploading || !image) && styles.btnDisabled]} 
-        onPress={handlePost}
-        disabled={uploading || !image}
+        style={[styles.btn, (uploading || !video) && styles.btnDisabled]} 
+        onPress={handleReel}
+        disabled={uploading || !video}
       >
         {uploading ? (
           <View style={styles.btnContent}>
@@ -308,7 +351,7 @@ export default function CreatePostScreen({ navigation }: any) {
             <Text style={[styles.btnText, { marginLeft: 8 }]}>Uploading...</Text>
           </View>
         ) : (
-          <Text style={styles.btnText}>Share</Text>
+          <Text style={styles.btnText}>Share Reel</Text>
         )}
       </TouchableOpacity>
     </ScrollView>
@@ -320,35 +363,82 @@ const styles = StyleSheet.create({
     flex: 1, 
     backgroundColor: colors.surface 
   },
-  imageContainer: {
-    position: 'relative',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
   },
-  upload: {
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  videoContainer: {
+    position: 'relative',
+    marginBottom: 16,
+  },
+  uploadSection: {
+    marginBottom: 16,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 12,
+  },
+  uploadButtons: {
+    gap: 12,
+  },
+  uploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 12,
+  },
+  uploadButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  previewSection: {
+    marginBottom: 16,
+  },
+  videoPreview: {
     height: 220,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: 'white',
-    overflow: 'hidden',
-  },
-  uploadPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
   },
-  uploadIcon: {
-    fontSize: 48,
-    marginBottom: 8,
-  },
-  uploadText: { 
-    color: colors.mutedText,
+  videoPreviewText: {
     fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
   },
-  preview: { 
-    width: '100%', 
-    height: '100%', 
-    borderRadius: 12 
+  videoPreviewSubtext: {
+    fontSize: 12,
+    color: colors.mutedText,
+  },
+  changeVideoButton: {
+    marginTop: 12,
+    alignSelf: 'flex-end',
+  },
+  changeVideoText: {
+    color: colors.primary,
+    fontSize: 16,
+    fontWeight: '600',
   },
   uploadOverlay: {
     position: 'absolute',
@@ -401,3 +491,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
+
