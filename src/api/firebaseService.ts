@@ -21,6 +21,8 @@ import {
     onSnapshot,
     where,
     serverTimestamp,
+    arrayUnion,
+    arrayRemove,
     Firestore,
 } from 'firebase/firestore';
 import {
@@ -460,10 +462,38 @@ export async function createPost(params: {
 		caption: params.caption ?? '',
 		likeCount: 0,
 		commentCount: 0,
+		shareCount: 0,
+		likedBy: [],
+		savedBy: [],
+		sharedBy: [],
 		createdAt: serverTimestamp(), // Always use serverTimestamp
 	};
     const ref = await withRetry(() => addDoc(collection(db(), 'posts'), base));
 	return { id: ref.id, ...base } as Post;
+}
+
+export async function createReel(params: {
+	userId: string;
+	username: string;
+	videoUrl: string;
+	caption?: string;
+}): Promise<any> {
+	const base = {
+		createdBy: params.userId, // Primary field
+		userId: params.userId, // Legacy field for backward compatibility
+		username: params.username,
+		videoUrl: params.videoUrl,
+		caption: params.caption ?? '',
+		likeCount: 0,
+		commentCount: 0,
+		shareCount: 0,
+		likedBy: [],
+		savedBy: [],
+		sharedBy: [],
+		createdAt: serverTimestamp(), // Always use serverTimestamp
+	};
+    const ref = await withRetry(() => addDoc(collection(db(), 'reels'), base));
+	return { id: ref.id, ...base };
 }
 
 export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
@@ -487,21 +517,85 @@ export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
     });
 }
 
-export async function likePost(postId: string): Promise<void> {
+export async function likePost(postId: string, userId: string): Promise<void> {
 	const ref = doc(db(), 'posts', postId);
-	// Lightweight: rely on Firestore increment via security rules/Cloud Functions if added later
     const snap = await withRetry(() => getDoc(ref));
 	if (!snap.exists()) return;
-	const data = snap.data() as Post;
-    await withRetry(() => updateDoc(ref, { likeCount: (data.likeCount || 0) + 1 }));
+	const data = snap.data() as any;
+	const likedBy = data.likedBy || [];
+	
+	// Check if already liked
+	if (likedBy.includes(userId)) return;
+	
+	// Add user to likedBy array - count is derived from array length
+	await withRetry(() => updateDoc(ref, { 
+		likedBy: arrayUnion(userId)
+	}));
 }
 
-export async function unlikePost(postId: string): Promise<void> {
+export async function unlikePost(postId: string, userId: string): Promise<void> {
 	const ref = doc(db(), 'posts', postId);
     const snap = await withRetry(() => getDoc(ref));
 	if (!snap.exists()) return;
-	const data = snap.data() as Post;
-    await withRetry(() => updateDoc(ref, { likeCount: Math.max(0, (data.likeCount || 0) - 1) }));
+	const data = snap.data() as any;
+	const likedBy = data.likedBy || [];
+	
+	// Check if not liked
+	if (!likedBy.includes(userId)) return;
+	
+	// Remove user from likedBy array - count is derived from array length
+	await withRetry(() => updateDoc(ref, { 
+		likedBy: arrayRemove(userId)
+	}));
+}
+
+export async function bookmarkPost(postId: string, userId: string): Promise<void> {
+	const ref = doc(db(), 'posts', postId);
+    const snap = await withRetry(() => getDoc(ref));
+	if (!snap.exists()) return;
+	const data = snap.data() as any;
+	const savedBy = data.savedBy || [];
+	
+	// Check if already bookmarked
+	if (savedBy.includes(userId)) return;
+	
+	// Add user to savedBy array
+	await withRetry(() => updateDoc(ref, { 
+		savedBy: arrayUnion(userId)
+	}));
+}
+
+export async function unbookmarkPost(postId: string, userId: string): Promise<void> {
+	const ref = doc(db(), 'posts', postId);
+    const snap = await withRetry(() => getDoc(ref));
+	if (!snap.exists()) return;
+	const data = snap.data() as any;
+	const savedBy = data.savedBy || [];
+	
+	// Check if not bookmarked
+	if (!savedBy.includes(userId)) return;
+	
+	// Remove user from savedBy array
+	await withRetry(() => updateDoc(ref, { 
+		savedBy: arrayRemove(userId)
+	}));
+}
+
+export async function sharePost(postId: string, userId: string): Promise<void> {
+	const ref = doc(db(), 'posts', postId);
+    const snap = await withRetry(() => getDoc(ref));
+	if (!snap.exists()) return;
+	const data = snap.data() as any;
+	const sharedBy = data.sharedBy || [];
+	
+	// Check if already shared by this user
+	if (sharedBy.includes(userId)) return;
+	
+	// Add user to sharedBy array
+	await withRetry(() => updateDoc(ref, { 
+		sharedBy: arrayUnion(userId),
+		shareCount: (data.shareCount || 0) + 1 
+	}));
 }
 
 export async function addComment(params: { postId: string; userId: string; username: string; text: string }): Promise<Comment> {
@@ -513,13 +607,7 @@ export async function addComment(params: { postId: string; userId: string; usern
 		createdAt: nowMs(),
 	};
     const ref = await withRetry(() => addDoc(collection(db(), 'comments'), base));
-	// Update commentCount naively
-	const postRef = doc(db(), 'posts', params.postId);
-    const snap = await withRetry(() => getDoc(postRef));
-	if (snap.exists()) {
-		const data = snap.data() as Post;
-        await withRetry(() => updateDoc(postRef, { commentCount: (data.commentCount || 0) + 1 }));
-	}
+	// Comment count is derived from comments collection query, no need to update post
 	return { id: ref.id, ...base } as Comment;
 }
 

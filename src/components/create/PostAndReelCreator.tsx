@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { launchImageLibrary, launchCamera, MediaType } from 'react-native-image-picker';
 import { colors } from '../../utils/colors';
-import { uploadImageAsync, createPost } from '../../api/firebaseService';
+import { uploadImageAsync, createPost, createReel } from '../../api/firebaseService';
 import { db } from '../../api/authService';
 import { doc, getDoc } from 'firebase/firestore';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -109,13 +109,23 @@ export default function PostAndReelCreator({ accountType, onClose, navigation }:
         username = user.email?.split('@')[0] || 'user';
       }
 
-      // Create post/reel
-      await createPost({
-        userId: user.uid,
-        username,
-        imageUrl: mediaUrl,
-        caption: caption.trim(),
-      });
+      // Create post or reel based on mode
+      if (mode === 'post') {
+        await createPost({
+          userId: user.uid,
+          username,
+          imageUrl: mediaUrl,
+          caption: caption.trim(),
+        });
+      } else {
+        // Save reel to reels collection
+        await createReel({
+          userId: user.uid,
+          username,
+          videoUrl: mediaUrl,
+          caption: caption.trim(),
+        });
+      }
 
       Alert.alert('Success', `${mode === 'post' ? 'Post' : 'Reel'} created successfully!`, [
         { text: 'OK', onPress: onClose },

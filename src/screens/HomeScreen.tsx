@@ -7,7 +7,7 @@ import { colors } from '../utils/colors';
 import { Colors } from '../theme/colors';
 import { Fonts } from '../theme/fonts';
 import { db } from '../api/authService';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { collection, getDocs, orderBy, query, onSnapshot } from 'firebase/firestore';
 import SegmentedControl from '../components/SegmentedControl';
 import { useAuth } from '../contexts/AuthContext';
 import { getAccountTypeMetadata, AccountType } from '../types/account';
@@ -19,6 +19,7 @@ import RewardPopCard from '../components/RewardPopCard';
 import { useTopicClaimReminder } from '../hooks/useTopicClaimReminder';
 import TopicClaimAlert from '../components/TopicClaimAlert';
 import FollowingScreen from './FollowingScreen';
+import PostCard from '../components/PostCard';
 
 interface PostDoc { id: string; userId: string; placeName?: string; imageURL?: string; caption?: string; }
 interface StoryDoc { id: string; userId: string; media?: string; location?: string; }
@@ -87,28 +88,45 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   } = useTopicClaimReminder(user?.uid, navigation);
 
   useEffect(() => {
-    const load = async () => {
+    // Load stories (one-time fetch)
+    const loadStories = async () => {
       try {
         const sSnap = await getDocs(query(collection(db, 'stories')));
         setStories(sSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
-        const pSnap = await getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc')));
+      } catch (error: any) {
+        console.warn('Error loading stories:', error.message || error);
+      }
+    };
+    loadStories();
+
+    // Real-time listener for posts using onSnapshot
+    const postsRef = collection(db, 'posts');
+    const postsQuery = query(postsRef, orderBy('createdAt', 'desc'));
+
+    const unsubscribe = onSnapshot(
+      postsQuery,
+      (snapshot) => {
         // Filter out posts without createdAt
-        setPosts(pSnap.docs
+        const fetchedPosts = snapshot.docs
           .filter((d) => {
             const data = d.data();
             return !!data.createdAt;
           })
-          .map((d) => ({ id: d.id, ...(d.data() as any) })));
-      } catch (error: any) {
+          .map((d) => ({ id: d.id, ...(d.data() as any) }));
+        setPosts(fetchedPosts);
+        setLoading(false);
+      },
+      (error: any) => {
         if (error.code === 'failed-precondition') {
           console.warn('Firestore query error: ensure createdAt exists.');
         } else {
           console.warn('Firestore query error:', error.message || error);
         }
+        setLoading(false);
       }
-      setLoading(false);
-    };
-    load();
+    );
+
+    return () => unsubscribe();
   }, []);
 
   // Listen to unread counts
@@ -219,19 +237,29 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
                   const hasStory = !item.isYou || (item.media && item.media.length > 0);
                   return (
                     <View style={styles.storyItem}>
-                      {hasStory ? (
-                        <LinearGradient colors={[Colors.brand.primary, Colors.brand.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.storyRing}>
-                          <View style={styles.storyAvatar} />
-                        </LinearGradient>
-                      ) : (
-                        <View style={[styles.storyRing, styles.storyRingInactive]}>
-                          <View style={styles.storyAvatar} />
-                        </View>
-                      )}
-                      {item.isYou && (
-                        <View style={styles.storyAdd}><Icon name="add" size={12} color="white" /></View>
-                      )}
-                      <Text style={styles.storyText}>{item.isYou ? 'You' : (item.location || 'Story')}</Text>
+                      <View style={{ position: 'relative' }}>
+                        {hasStory ? (
+                          <View style={styles.storyRingActive}>
+                            <View style={styles.storyAvatarContainer}>
+                              <View style={styles.storyAvatar} />
+                            </View>
+                          </View>
+                        ) : (
+                          <View style={styles.storyRingInactive}>
+                            <View style={styles.storyAvatarContainer}>
+                              <View style={styles.storyAvatar} />
+                            </View>
+                          </View>
+                        )}
+                        {item.isYou && (
+                          <View style={styles.storyAdd}>
+                            <Icon name="add" size={12} color="white" />
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.storyText} numberOfLines={1}>
+                        {item.isYou ? 'You' : (item.location || item.username || 'Story')}
+                      </Text>
                     </View>
                   );
                 }}
@@ -239,10 +267,16 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
             ) : (
               <View style={{ height: 110, paddingLeft: 20 }}>
                 <View style={styles.storyItem}>
-                  <View style={[styles.storyRing, styles.storyRingInactive]}>
-                    <View style={styles.storyAvatar} />
+                  <View style={{ position: 'relative' }}>
+                    <View style={styles.storyRingInactive}>
+                      <View style={styles.storyAvatarContainer}>
+                        <View style={styles.storyAvatar} />
+                      </View>
+                    </View>
+                    <View style={styles.storyAdd}>
+                      <Icon name="add" size={12} color="white" />
+                    </View>
                   </View>
-                  <View style={styles.storyAdd}><Icon name="add" size={12} color="white" /></View>
                   <Text style={styles.storyText}>You</Text>
                 </View>
               </View>
@@ -259,29 +293,27 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
               keyExtractor={(i) => i.id}
               renderItem={({ item, index }) => (
                 <MotiView from={{ opacity: 0, translateY: 12 }} animate={{ opacity: 1, translateY: 0 }} transition={{ delay: index * 40, type: 'timing', duration: 220 }}>
-                  <View style={styles.postCard}>
-                    <View style={styles.postHeader}>
-                      <View style={styles.postAvatar} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.postName}>{item.userId?.slice(0, 10) || 'User'}</Text>
-                        {!!item.placeName && <Text style={styles.postPlace}>{item.placeName}</Text>}
-                      </View>
-                    </View>
-                    {!!item.imageURL && <Image source={{ uri: item.imageURL }} style={styles.postImage as any} />}
-                    <View style={styles.postActionsTop}>
-                      <TouchableOpacity activeOpacity={0.8} style={styles.viewDetails}><Text style={styles.viewDetailsText}>View Details</Text></TouchableOpacity>
-                    </View>
-
-                    <View style={styles.postActions}>
-                      <View style={styles.actionLeft}>
-                        <View style={styles.actionBtn}><Icon name="heart-outline" size={20} color={colors.text} /><Text style={styles.actionText}>748</Text></View>
-                        <View style={styles.actionBtn}><Icon name="chatbubble-ellipses-outline" size={20} color={colors.text} /><Text style={styles.actionText}>48</Text></View>
-                        <View style={styles.actionBtn}><Icon name="share-social-outline" size={20} color={colors.text} /><Text style={styles.actionText}>748</Text></View>
-                      </View>
-                    </View>
-                    {!!item.caption && <Text numberOfLines={2} style={styles.caption}>{item.caption}</Text>}
-                    <View style={styles.postDivider} />
-                  </View>
+                  <PostCard
+                    post={item}
+                    onUserPress={(userId) => navProp?.navigate('Profile', { userId })}
+                    onViewDetails={(postId) => {
+                      // Navigate to post detail screen if exists, otherwise show alert
+                      if (navProp?.navigate) {
+                        navProp.navigate('PostDetail', { postId });
+                      } else {
+                        Alert.alert('Post Details', `Post ID: ${postId}`);
+                      }
+                    }}
+                    onCommentPress={(postId) => {
+                      // Navigate to comments screen if exists
+                      if (navProp?.navigate) {
+                        navProp.navigate('Comments', { postId });
+                      } else {
+                        Alert.alert('Comments', `Post ID: ${postId}`);
+                      }
+                    }}
+                    navigation={navProp}
+                  />
                 </MotiView>
               )}
               windowSize={8}
@@ -355,21 +387,68 @@ const styles = StyleSheet.create({
   badge: { position: 'absolute', top: -2, right: -2, backgroundColor: Colors.brand.primary, minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, zIndex: 10 },
   badgeText: { color: Colors.white.primary, fontSize: 10, fontFamily: Fonts.semibold },
   sharedHeader: { paddingVertical: 8, backgroundColor: Colors.white.secondary },
-  storyItem: { alignItems: 'flex-start', marginRight: 350 },
-  storyRing: {
-    width: 68,                  // 👈 make sure this matches height (adjust based on your design)
+  storyItem: { 
+    alignItems: 'center', 
+    marginRight: 16, 
+    width: 68,
+    position: 'relative',
+  },
+  storyRingActive: {
+    width: 68,
     height: 68,
-    borderRadius: 34,           // 👈 half of width/height for perfect circle
-    padding: 2,
-    borderWidth: 2,
-    borderColor: Colors.white.secondary,
+    borderRadius: 34, // Perfect circle
+    borderWidth: 2.5,
+    borderColor: Colors.brand.primary, // Orange active ring
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 2.5,
+    backgroundColor: 'transparent',
   },
-  storyRingInactive: { borderColor: Colors.white.tertiary },
-  storyAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.border },
-  storyAdd: { position: 'absolute', right: -24, bottom: 26, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.brand.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: Colors.white.secondary },
-  storyText: { marginTop: 6, fontSize: 12, color: Colors.black.qua, fontFamily: Fonts.regular },
+  storyRingInactive: {
+    width: 68,
+    height: 68,
+    borderRadius: 34, // Perfect circle
+    borderWidth: 2,
+    borderColor: Colors.white.tertiary, // Gray inactive ring
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 2.5,
+    backgroundColor: 'transparent',
+  },
+  storyAvatarContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30, // Perfect circle
+    overflow: 'hidden',
+    backgroundColor: Colors.white.tertiary,
+  },
+  storyAvatar: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: Colors.white.tertiary,
+  },
+  storyAdd: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: Colors.brand.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: Colors.white.secondary,
+    zIndex: 10,
+  },
+  storyText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: Colors.black.qua,
+    fontFamily: Fonts.regular,
+    textAlign: 'center',
+    maxWidth: 68,
+  },
   postCard: { backgroundColor: Colors.white.primary, marginHorizontal: 12, marginVertical: 10, borderRadius: 16, borderWidth: 1, borderColor: Colors.white.tertiary, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.08, shadowOffset: { width: 0, height: 2 }, shadowRadius: 8, elevation: 3 },
   postHeader: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 10 },
   postAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.white.tertiary },
