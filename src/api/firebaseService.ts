@@ -21,6 +21,10 @@ import {
     onSnapshot,
     where,
     serverTimestamp,
+    arrayUnion,
+    arrayRemove,
+    increment,
+    runTransaction,
     Firestore,
 } from 'firebase/firestore';
 import {
@@ -53,12 +57,32 @@ export interface UserProfile {
 export interface Post {
 	id: string;
 	userId: string;
+	createdBy?: string; // Primary field for post author
 	username: string;
-	imageUrl: string;
+	imageUrl?: string; // Legacy field - use media array for multi-media support
+	// CRITICAL: media is ALWAYS an array, never a single string
+	// Each item has: { type: 'image' | 'video', url: string, uri?: string, id?: string }
+	media?: Array<{ 
+		type: 'image' | 'video'; 
+		url: string; // Primary field
+		uri?: string; // Backward compatibility
+		id?: string; 
+	}>;
 	caption?: string;
 	likeCount: number;
 	commentCount: number;
+	shareCount?: number;
+	likedBy?: string[];
+	savedBy?: string[];
+	sharedBy?: string[]; // Track who shared the post
 	createdAt: number;
+	placeName?: string;
+	location?: string;
+	profilePhoto?: string;
+	coverImage?: string;
+	details?: string; // Additional post details
+	aspectRatio?: number; // Store aspect ratio for proper display (legacy)
+	ratio?: '1:1' | '4:5' | '16:9'; // Store aspect ratio as string for proper display
 }
 
 export interface TripPackage {
@@ -487,21 +511,65 @@ export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
     });
 }
 
-export async function likePost(postId: string): Promise<void> {
+export async function toggleLikePost(postId: string, userId: string): Promise<boolean> {
 	const ref = doc(db(), 'posts', postId);
-	// Lightweight: rely on Firestore increment via security rules/Cloud Functions if added later
-    const snap = await withRetry(() => getDoc(ref));
-	if (!snap.exists()) return;
-	const data = snap.data() as Post;
-    await withRetry(() => updateDoc(ref, { likeCount: (data.likeCount || 0) + 1 }));
+	
+	return await runTransaction(db(), async (transaction) => {
+		const snap = await transaction.get(ref);
+		if (!snap.exists()) throw new Error('Post not found');
+		
+		const data = snap.data() as any;
+		const likedBy = data.likedBy || [];
+		const currentLikeCount = Math.max(0, data.likeCount || 0);
+		const isLiked = likedBy.includes(userId);
+		
+		// Prevent double-like/unlike by checking current state
+		if (isLiked) {
+			// Unlike: remove from array and decrement count (never go below 0)
+			// Double-check: ensure user is actually in the array
+			if (!likedBy.includes(userId)) {
+				// User not in array, nothing to do
+				return false;
+			}
+			
+			const newLikedBy = likedBy.filter((id: string) => id !== userId);
+			const newLikeCount = Math.max(0, currentLikeCount - 1);
+			
+			transaction.update(ref, {
+				likedBy: newLikedBy,
+				likeCount: newLikeCount,
+			});
+			return false;
+		} else {
+			// Like: add to array and increment count
+			// Double-check: ensure user is not already in the array
+			if (likedBy.includes(userId)) {
+				// User already in array, nothing to do
+				return true;
+			}
+			
+			const newLikedBy = [...likedBy, userId];
+			const newLikeCount = currentLikeCount + 1;
+			
+			transaction.update(ref, {
+				likedBy: newLikedBy,
+				likeCount: newLikeCount,
+			});
+			return true;
+		}
+	});
+}
+
+export async function likePost(postId: string): Promise<void> {
+	const user = auth.currentUser;
+	if (!user) throw new Error('User not authenticated');
+	await toggleLikePost(postId, user.uid);
 }
 
 export async function unlikePost(postId: string): Promise<void> {
-	const ref = doc(db(), 'posts', postId);
-    const snap = await withRetry(() => getDoc(ref));
-	if (!snap.exists()) return;
-	const data = snap.data() as Post;
-    await withRetry(() => updateDoc(ref, { likeCount: Math.max(0, (data.likeCount || 0) - 1) }));
+	const user = auth.currentUser;
+	if (!user) throw new Error('User not authenticated');
+	await toggleLikePost(postId, user.uid);
 }
 
 export async function addComment(params: { postId: string; userId: string; username: string; text: string }): Promise<Comment> {
@@ -513,13 +581,13 @@ export async function addComment(params: { postId: string; userId: string; usern
 		createdAt: nowMs(),
 	};
     const ref = await withRetry(() => addDoc(collection(db(), 'comments'), base));
-	// Update commentCount naively
+	
+	// Update commentCount atomically - only increment, never decrement
 	const postRef = doc(db(), 'posts', params.postId);
-    const snap = await withRetry(() => getDoc(postRef));
-	if (snap.exists()) {
-		const data = snap.data() as Post;
-        await withRetry(() => updateDoc(postRef, { commentCount: (data.commentCount || 0) + 1 }));
-	}
+	await withRetry(() => updateDoc(postRef, {
+		commentCount: increment(1),
+	}));
+	
 	return { id: ref.id, ...base } as Comment;
 }
 
@@ -531,6 +599,92 @@ export function listenToComments(postId: string, onUpdate: (comments: Comment[])
     }, (error) => {
         console.log('listenToComments error:', error?.message || error);
     });
+}
+
+// Toggle share post - increment/decrement share count
+export async function toggleSharePost(postId: string, userId: string): Promise<boolean> {
+	const ref = doc(db(), 'posts', postId);
+	
+	return await runTransaction(db(), async (transaction) => {
+		const snap = await transaction.get(ref);
+		if (!snap.exists()) throw new Error('Post not found');
+		
+		const data = snap.data() as any;
+		const sharedBy = data.sharedBy || [];
+		const currentShareCount = Math.max(0, data.shareCount || 0);
+		const hasShared = sharedBy.includes(userId);
+		
+		if (hasShared) {
+			// Unshare: remove from array and decrement count (never go below 0)
+			const newSharedBy = sharedBy.filter((id: string) => id !== userId);
+			const newShareCount = Math.max(0, currentShareCount - 1);
+			
+			transaction.update(ref, {
+				sharedBy: newSharedBy,
+				shareCount: newShareCount,
+			});
+			return false;
+		} else {
+			// Share: add to array and increment count
+			const newSharedBy = [...sharedBy, userId];
+			const newShareCount = currentShareCount + 1;
+			
+			transaction.update(ref, {
+				sharedBy: newSharedBy,
+				shareCount: newShareCount,
+			});
+			return true;
+		}
+	});
+}
+
+// Legacy function for backward compatibility - always increments
+export async function sharePost(postId: string): Promise<void> {
+	const user = auth.currentUser;
+	if (!user) throw new Error('User not authenticated');
+	await toggleSharePost(postId, user.uid);
+}
+
+// Toggle bookmark/save post
+export async function toggleBookmarkPost(postId: string, userId: string): Promise<boolean> {
+	const ref = doc(db(), 'posts', postId);
+    const snap = await withRetry(() => getDoc(ref));
+	if (!snap.exists()) throw new Error('Post not found');
+	
+	const data = snap.data() as any;
+	const savedBy = data.savedBy || [];
+	const isSaved = savedBy.includes(userId);
+	
+	if (isSaved) {
+		// Unsave: remove from array
+		await withRetry(() => updateDoc(ref, {
+			savedBy: arrayRemove(userId),
+		}));
+		return false;
+	} else {
+		// Save: add to array
+		await withRetry(() => updateDoc(ref, {
+			savedBy: arrayUnion(userId),
+		}));
+		return true;
+	}
+}
+
+// Get saved posts for a user
+export function listenToSavedPosts(userId: string, onUpdate: (posts: Post[]) => void): () => void {
+	const q = query(collection(db(), 'posts'), where('savedBy', 'array-contains', userId), orderBy('createdAt', 'desc'));
+	return onSnapshot(q, (snap) => {
+		const posts: Post[] = snap.docs
+			.map((d) => {
+				const data = d.data();
+				if (!data.createdAt) return null;
+				return { id: d.id, ...data } as Post;
+			})
+			.filter((post): post is Post => post !== null);
+		onUpdate(posts);
+	}, (error) => {
+		console.log('listenToSavedPosts error:', error?.message || error);
+	});
 }
 
 // ---------- Trips (Host packages) ----------

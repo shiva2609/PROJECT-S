@@ -24,6 +24,8 @@ import { doc, getDoc } from 'firebase/firestore';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { requireAuth } from '../../utils/authUtils';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNavigation } from '@react-navigation/native';
+import { navigateToScreen } from '../../utils/navigationHelpers';
 
 interface Props {
   accountType: string;
@@ -31,8 +33,10 @@ interface Props {
   navigation: any;
 }
 
-export default function PostAndReelCreator({ accountType, onClose, navigation }: Props) {
+export default function PostAndReelCreator({ accountType, onClose, navigation: navProp }: Props) {
   const { user, initialized } = useAuth();
+  const navigation = useNavigation();
+  const nav = navProp || navigation;
   const [mode, setMode] = useState<'post' | 'reel'>('post');
   const [caption, setCaption] = useState('');
   const [mediaUri, setMediaUri] = useState<string | null>(null);
@@ -44,6 +48,15 @@ export default function PostAndReelCreator({ accountType, onClose, navigation }:
   }
 
   const pickMedia = async (type: 'photo' | 'video') => {
+    // For posts (photos), navigate to PhotoSelectScreen for Instagram-like selection
+    if (mode === 'post' && type === 'photo') {
+      navigateToScreen(nav, 'PhotoSelect', {
+        mode: 'post',
+      });
+      return;
+    }
+
+    // For reels (videos), use direct picker
     const options = {
       mediaType: type as MediaType,
       quality: 0.8,
@@ -52,7 +65,9 @@ export default function PostAndReelCreator({ accountType, onClose, navigation }:
     try {
       const result = await launchImageLibrary(options);
       if (result.assets && result.assets[0]) {
-        setMediaUri(result.assets[0].uri || null);
+        const assetUri = result.assets[0].uri;
+        if (!assetUri) return;
+        setMediaUri(assetUri);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to pick media');
@@ -60,6 +75,15 @@ export default function PostAndReelCreator({ accountType, onClose, navigation }:
   };
 
   const captureMedia = async (type: 'photo' | 'video') => {
+    // For posts (photos), navigate to PhotoSelectScreen
+    if (mode === 'post' && type === 'photo') {
+      navigateToScreen(nav, 'PhotoSelect', {
+        mode: 'post',
+      });
+      return;
+    }
+
+    // For reels (videos), use direct camera
     const options = {
       mediaType: type as MediaType,
       quality: 0.8,
@@ -68,7 +92,9 @@ export default function PostAndReelCreator({ accountType, onClose, navigation }:
     try {
       const result = await launchCamera(options);
       if (result.assets && result.assets[0]) {
-        setMediaUri(result.assets[0].uri || null);
+        const assetUri = result.assets[0].uri;
+        if (!assetUri) return;
+        setMediaUri(assetUri);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to capture media');
