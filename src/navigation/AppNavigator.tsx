@@ -26,9 +26,7 @@ import PasswordChangedScreen from '../screens/Auth/PasswordChangedScreen';
 import TravelPlanSelectScreen from '../screens/travel/TravelPlanSelectScreen';
 import HomeScreen from '../screens/HomeScreen';
 import ExploreScreen from '../screens/ExploreScreen';
-import CreateScreen from '../screens/CreateScreen';
-import CreatePostScreen from '../screens/CreatePostScreen';
-import CreateReelScreen from '../screens/CreateReelScreen';
+import PhotoSelectScreen from '../screens/PhotoSelectScreen';
 import TripsScreen from '../screens/TripsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AccountScreen from '../screens/AccountScreen';
@@ -46,7 +44,16 @@ import AccountChangeFlowScreen from '../screens/kyc/AccountChangeFlowScreen';
 import MessagingScreen from '../screens/MessagingScreen';
 import ChatsScreen from '../screens/ChatsScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
+import PostDetailScreen from '../screens/PostDetailScreen';
+import CommentsScreen from '../screens/CommentsScreen';
+import CropAdjustScreen from '../screens/CropAdjustScreen';
+import AddPostDetailsScreen from '../screens/AddPostDetailsScreen';
+import PostPreviewScreen from '../screens/PostPreviewScreen';
+import CreatePostScreen from '../screens/CreatePostScreen';
+import UnifiedEditScreen from '../screens/UnifiedEditScreen';
+import AddDetailsScreen from '../screens/AddDetailsScreen';
 import DrawerNavigator from './DrawerNavigator';
+import { CreateFlowProvider } from '../store/useCreateFlowStore';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -80,7 +87,7 @@ export function Tabs() {
     >
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Explore" component={ExploreScreen} />
-      <Tab.Screen name="Create" component={CreateScreen} />
+      <Tab.Screen name="Create" component={CreatePostScreen} />
       <Tab.Screen name="Trips" component={TripsScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
@@ -100,13 +107,14 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer
-      theme={{
-        ...DefaultTheme,
-        colors: { ...DefaultTheme.colors, background: colors.background },
-      }}
-    >
-      <Stack.Navigator
+    <CreateFlowProvider>
+      <NavigationContainer
+        theme={{
+          ...DefaultTheme,
+          colors: { ...DefaultTheme.colors, background: colors.background },
+        }}
+      >
+        <Stack.Navigator
         screenOptions={{
           headerShown: false,
           gestureEnabled: true,
@@ -246,7 +254,81 @@ export default function AppNavigator() {
             gestureEnabled: true,
           }}
         />
+        <Stack.Screen 
+          name="PostDetail" 
+          component={PostDetailScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="Comments" 
+          component={CommentsScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="CropAdjust" 
+          component={CropAdjustScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="AddPostDetails" 
+          component={AddPostDetailsScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="PhotoSelect" 
+          component={PhotoSelectScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="PostPreview" 
+          component={PostPreviewScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        {/* New Create Post Flow */}
+        <Stack.Screen 
+          name="CreatePost" 
+          component={CreatePostScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="UnifiedEdit" 
+          component={UnifiedEditScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="AddDetails" 
+          component={AddDetailsScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
+    </CreateFlowProvider>
   );
 }

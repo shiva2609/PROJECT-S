@@ -1,416 +1,312 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   Image,
-  Share,
-  Linking,
+  TouchableOpacity,
+  Animated,
+  Dimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { Colors } from '../theme/colors';
+import { useFollow } from '../hooks/useFollow';
+import { Post } from '../api/firebaseService';
+import { formatTimestamp, parseHashtags } from '../utils/postHelpers';
 import { Fonts } from '../theme/fonts';
-import { useAuth } from '../contexts/AuthContext';
-import { likePost, unlikePost, bookmarkPost, unbookmarkPost, sharePost } from '../api/firebaseService';
-import { db } from '../api/authService';
-import { doc, getDoc, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
+import PostCarousel, { MediaItem } from './PostCarousel';
 
-interface PostCardProps {
-  post: {
-    id: string;
-    createdBy: string;
-    userId?: string;
-    username?: string;
-    imageUrl?: string;
-    imageURL?: string;
-    coverImage?: string;
-    caption?: string;
-    likeCount?: number;
-    commentCount?: number;
-    shareCount?: number;
-    likedBy?: string[];
-    savedBy?: string[];
-    sharedBy?: string[];
-    createdAt: any;
-    metadata?: {
-      location?: string;
-    };
-    placeName?: string;
-  };
-  onUserPress?: (userId: string) => void;
-  onViewDetails?: (postId: string) => void;
-  onCommentPress?: (postId: string) => void;
-  navigation?: any;
+function getAspectRatioHeight(width: number, ratio?: string): number {
+  switch (ratio) {
+    case '1:1':
+      return width; // square
+    case '4:5':
+      return Math.round(width * 1.25); // portrait like Instagram
+    case '16:9':
+      return Math.round(width * 9 / 16); // landscape
+    default:
+      return width; // default to square
+  }
 }
 
-export default function PostCard({
+interface PostCardProps {
+  post: Post;
+  isLiked: boolean;
+  isSaved: boolean;
+  onLike: () => void;
+  onComment: () => void;
+  onShare: () => void;
+  onBookmark: () => void;
+  onProfilePress: () => void;
+  onPostDetailPress: () => void;
+  currentUserId?: string;
+}
+
+function PostCard({
   post,
-  onUserPress,
-  onViewDetails,
-  onCommentPress,
-  navigation,
+  isLiked,
+  isSaved,
+  onLike,
+  onComment,
+  onShare,
+  onBookmark,
+  onProfilePress,
+  onPostDetailPress,
+  currentUserId,
 }: PostCardProps) {
-  const { user } = useAuth();
-  const [isLiked, setIsLiked] = useState(false);
-  const [isBookmarked, setIsBookmarked] = useState(false);
-  const [likeCount, setLikeCount] = useState(0);
-  const [commentCount, setCommentCount] = useState(0);
-  const [shareCount, setShareCount] = useState(0);
-  const [userPhoto, setUserPhoto] = useState<string | null>(null);
-  const [userLocation, setUserLocation] = useState<string>('');
-  const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null);
+  const creatorId = post.createdBy || post.userId;
+  const { isFollowing, toggleFollow, isLoading: followLoading } = useFollow(creatorId || '');
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownOpacity = useRef(new Animated.Value(0)).current;
+  const dropdownRef = useRef<View>(null);
 
-  // Get image URL
-  const imageUrl = post.imageUrl || post.imageURL || post.coverImage;
-
-  // Initialize state from post data
+  // Animate dropdown
   useEffect(() => {
-    const likedBy = post.likedBy || [];
-    const savedBy = post.savedBy || [];
-    const sharedBy = post.sharedBy || [];
-    
-    setLikeCount(likedBy.length);
-    if (user) {
-      setIsLiked(likedBy.includes(user.uid));
+    Animated.timing(dropdownOpacity, {
+      toValue: showDropdown ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [showDropdown]);
+
+
+  // Normalize media array - handle all legacy formats and ensure consistent structure
+  const normalizedMedia: MediaItem[] = useMemo(() => {
+    // Case 1: New format - media is already an array
+    if (Array.isArray(post.media) && post.media.length > 0) {
+      return post.media.map((item: any, index: number) => ({
+        type: item.type || 'image',
+        // Support both 'url' and 'uri' fields
+        uri: item.url || item.uri || '',
+        id: item.id || `media-${index}`,
+      })).filter((item) => item.uri); // Remove any items without URI
     }
-    if (user) {
-      setIsBookmarked(savedBy.includes(user.uid));
-    }
-    setShareCount(sharedBy.length);
-  }, [post.likedBy, post.savedBy, post.sharedBy, user]);
-
-  // Listen to post updates in real-time
-  useEffect(() => {
-    const postRef = doc(db, 'posts', post.id);
-    const unsubscribe = onSnapshot(postRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        const likedBy = data.likedBy || [];
-        const savedBy = data.savedBy || [];
-        const sharedBy = data.sharedBy || [];
-        
-        // Update like count from array length
-        setLikeCount(likedBy.length);
-        if (user) {
-          setIsLiked(likedBy.includes(user.uid));
-        }
-        
-        // Update bookmark state
-        if (user) {
-          setIsBookmarked(savedBy.includes(user.uid));
-        }
-        
-        // Update share count from array length
-        setShareCount(sharedBy.length);
-      }
-    }, (error) => {
-      console.error('Error listening to post updates:', error);
-    });
-
-    return () => unsubscribe();
-  }, [post.id, user]);
-
-  // Fetch and listen to comment count from Firestore
-  useEffect(() => {
-    // Initial fetch
-    const fetchCommentCount = async () => {
-      try {
-        const commentsRef = collection(db, 'comments');
-        const q = query(commentsRef, where('postId', '==', post.id));
-        const snapshot = await getDocs(q);
-        setCommentCount(snapshot.size);
-      } catch (error) {
-        console.error('Error fetching comment count:', error);
-        // Fallback to post.commentCount if available
-        setCommentCount(post.commentCount || 0);
-      }
-    };
-
-    fetchCommentCount();
     
-    // Listen to comments in real-time
-    const commentsRef = collection(db, 'comments');
-    const q = query(commentsRef, where('postId', '==', post.id));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setCommentCount(snapshot.size);
-    }, (error) => {
-      console.error('Error listening to comments:', error);
-    });
-
-    return () => unsubscribe();
-  }, [post.id]);
-
-  // Get image aspect ratio
-  useEffect(() => {
+    // Case 2: Legacy - media is a single string (old bug)
+    if (typeof post.media === 'string' && post.media.length > 0) {
+      return [{ 
+        type: 'image' as const, 
+        uri: post.media, 
+        id: 'legacy-media-string' 
+      }];
+    }
+    
+    // Case 3: Gallery field (used in trip packages)
+    const gallery = (post as any).gallery;
+    if (gallery && Array.isArray(gallery) && gallery.length > 0) {
+      return gallery.map((uri: string, index: number) => ({
+        type: 'image' as const,
+        uri: uri,
+        id: `gallery-${index}`,
+      }));
+    }
+    
+    // Case 4: Legacy imageUrl field (old posts)
+    const imageUrl = (post as any).finalUri || post.imageUrl || post.coverImage || '';
     if (imageUrl) {
-      Image.getSize(
-        imageUrl,
-        (width, height) => {
-          setImageAspectRatio(width / height);
-        },
-        (error) => {
-          console.error('Error getting image size:', error);
-          // Default to 1:1 if we can't get the size
-          setImageAspectRatio(1);
-        }
-      );
+      return [{ 
+        type: 'image' as const, 
+        uri: imageUrl, 
+        id: 'legacy-image-url' 
+      }];
     }
-  }, [imageUrl]);
-
-  // Fetch user photo and location
-  useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const userId = post.createdBy || post.userId;
-        if (!userId) return;
-
-        const userDoc = await getDoc(doc(db, 'users', userId));
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          if (userData.photoURL) {
-            setUserPhoto(userData.photoURL);
-          }
-          if (userData.location) {
-            setUserLocation(userData.location);
-          } else if (post.metadata?.location) {
-            setUserLocation(post.metadata.location);
-          } else if (post.placeName) {
-            setUserLocation(post.placeName);
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching user data:', error);
-      }
-    };
-
-    fetchUserData();
-  }, [post.createdBy, post.userId]);
-
-  // Format timestamp
-  const formatTimestamp = (timestamp: any): string => {
-    if (!timestamp) return '';
     
-    try {
-      let date: Date;
-      if (timestamp.toDate) {
-        date = timestamp.toDate();
-      } else if (timestamp.seconds) {
-        date = new Date(timestamp.seconds * 1000);
-      } else if (typeof timestamp === 'number') {
-        date = new Date(timestamp);
-      } else {
-        return '';
-      }
+    // Case 5: No media found
+    return [];
+  }, [post.media, post.imageUrl, (post as any).finalUri, post.coverImage, (post as any).gallery]);
 
-      const now = new Date();
-      const diff = now.getTime() - date.getTime();
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      const months = Math.floor(days / 30);
-      const years = Math.floor(days / 365);
+  const profilePhoto = post.profilePhoto || '';
+  const location = post.location || post.placeName || '';
+  const username = post.username || 'User';
+  const timestamp = formatTimestamp(post.createdAt);
+  
+  // Ensure counts never go negative
+  const likeCount = Math.max(0, post.likeCount || 0);
+  const commentCount = Math.max(0, post.commentCount || 0);
+  const shareCount = Math.max(0, post.shareCount || 0);
+  
+  const hasDetails = !!post.details || !!post.caption || normalizedMedia.length > 0; // Check if post has details
 
-      if (years > 0) return `${years} year${years > 1 ? 's' : ''} ago`;
-      if (months > 0) return `${months} month${months > 1 ? 's' : ''} ago`;
-      if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
-      
-      const hours = Math.floor(diff / (1000 * 60 * 60));
-      if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-      
-      const minutes = Math.floor(diff / (1000 * 60));
-      if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-      
-      return 'Just now';
-    } catch (error) {
-      return '';
-    }
-  };
+  // Don't show follow button if viewing own post
+  const isOwnPost = currentUserId === creatorId;
 
-  // Extract hashtags from caption
+  // Calculate media container dimensions based on aspect ratio
+  // Account for card margins: card has marginHorizontal: 12, so content width = screenWidth - 24
+  const screenWidth = Dimensions.get('window').width;
+  const cardContentWidth = screenWidth - 24; // 12px margin on each side
+  const mediaHeight = getAspectRatioHeight(cardContentWidth, post.ratio);
+
   const renderCaption = () => {
     if (!post.caption) return null;
-
-    const parts = post.caption.split(/(#\w+)/g);
+    const parts = parseHashtags(post.caption);
     return (
-      <Text style={styles.caption}>
-        {parts.map((part, index) => {
-          if (part.startsWith('#')) {
-            return (
-              <Text
-                key={index}
-                style={styles.hashtag}
-                onPress={() => {
-                  // Navigate to hashtag search if needed
-                  console.log('Hashtag pressed:', part);
-                }}
-              >
-                {part}
-              </Text>
-            );
-          }
-          return part;
-        })}
-      </Text>
+      <View style={styles.captionContainer}>
+        <Text style={styles.captionText}>
+          {parts.map((part, index) => {
+            if (part.isHashtag) {
+              return (
+                <Text key={index} style={styles.hashtag}>
+                  {part.text}
+                </Text>
+              );
+            }
+            return <Text key={index}>{part.text}</Text>;
+          })}
+        </Text>
+      </View>
     );
   };
 
-  const handleLike = async () => {
-    if (!user) return;
-
-    try {
-      // Check current state from Firestore
-      const postRef = doc(db, 'posts', post.id);
-      const postSnap = await getDoc(postRef);
-      if (!postSnap.exists()) return;
-      
-      const data = postSnap.data();
-      const likedBy = data.likedBy || [];
-      const currentlyLiked = likedBy.includes(user.uid);
-      
-      if (currentlyLiked) {
-        await unlikePost(post.id, user.uid);
-      } else {
-        await likePost(post.id, user.uid);
-      }
-      // State will update via onSnapshot listener
-    } catch (error) {
-      console.error('Error toggling like:', error);
-    }
-  };
-
-  const handleBookmark = async () => {
-    if (!user) return;
-
-    try {
-      if (isBookmarked) {
-        await unbookmarkPost(post.id, user.uid);
-        setIsBookmarked(false);
-      } else {
-        await bookmarkPost(post.id, user.uid);
-        setIsBookmarked(true);
-      }
-    } catch (error) {
-      console.error('Error toggling bookmark:', error);
-    }
-  };
-
-  const handleShare = async () => {
-    try {
-      if (!user) return;
-      
-      // Add user to sharedBy array
-      const postRef = doc(db, 'posts', post.id);
-      const postSnap = await getDoc(postRef);
-      if (!postSnap.exists()) return;
-      
-      const data = postSnap.data();
-      const sharedBy = data.sharedBy || [];
-      
-      if (!sharedBy.includes(user.uid)) {
-        await sharePost(post.id, user.uid);
-      }
-
-      const shareUrl = `https://sanchari.app/post/${post.id}`;
-      await Share.share({
-        message: post.caption || 'Check out this post on Sanchari!',
-        url: shareUrl,
-        title: 'Share Post',
-      });
-      // Share count will update via onSnapshot listener
-    } catch (error: any) {
-      if (error.message !== 'User did not share') {
-        console.error('Error sharing post:', error);
-      }
-    }
-  };
-
-  const handleUserPress = () => {
-    const userId = post.createdBy || post.userId;
-    if (userId && onUserPress) {
-      onUserPress(userId);
-    }
-  };
-
-  const username = post.username || post.createdBy?.slice(0, 10) || 'User';
-  const location = userLocation || post.metadata?.location || post.placeName || '';
-
   return (
-    <View style={styles.container}>
-      {/* Post Image */}
-      {imageUrl && (
-        <View style={styles.postImageContainer}>
-          <Image 
-            source={{ uri: imageUrl }} 
-            style={[
-              styles.postImage,
-              imageAspectRatio && { aspectRatio: imageAspectRatio }
-            ]} 
-            resizeMode="cover" 
+    <View style={styles.card}>
+      {/* Post Media - Use PostCarousel for multi-media support */}
+      {normalizedMedia.length > 0 ? (
+        <View style={{
+          width: '100%',
+          height: mediaHeight,
+          backgroundColor: 'black', // prevent ash/white gaps during load
+          overflow: 'hidden',
+          borderTopLeftRadius: 22,
+          borderTopRightRadius: 22,
+        }}>
+          <PostCarousel 
+            media={normalizedMedia} 
+            ratio={post.ratio}
+            width={cardContentWidth}
+            height={mediaHeight}
           />
+        </View>
+      ) : (
+        <View style={[styles.imageContainer, styles.postImagePlaceholder]}>
+          <Icon name="image-outline" size={48} color="#8E8E8E" />
         </View>
       )}
 
-      {/* Profile Row with View Details Button */}
-      <View style={styles.profileRow}>
-        <TouchableOpacity style={styles.profileInfo} onPress={handleUserPress} activeOpacity={0.7}>
-          {userPhoto ? (
-            <Image source={{ uri: userPhoto }} style={styles.profilePhoto} />
+      {/* Creator Section */}
+      <View style={styles.creatorSection}>
+        <TouchableOpacity
+          style={styles.creatorLeft}
+          activeOpacity={0.8}
+          onPress={onProfilePress}
+        >
+          {profilePhoto ? (
+            <Image source={{ uri: profilePhoto }} style={styles.profileImage} />
           ) : (
-            <View style={styles.profilePhotoPlaceholder}>
-              <Text style={styles.profilePhotoText}>{username.charAt(0).toUpperCase()}</Text>
+            <View style={styles.profileImage}>
+              <Icon name="person" size={20} color="#8E8E8E" />
             </View>
           )}
-          <View style={styles.profileTextContainer}>
+          <View style={styles.creatorInfo}>
             <Text style={styles.username}>{username}</Text>
-            {location && (
+            {location ? (
               <View style={styles.locationRow}>
-                <Icon name="location-outline" size={12} color={Colors.black.qua} />
+                <Icon name="location-outline" size={12} color="#8E8E8E" />
                 <Text style={styles.location}>{location}</Text>
               </View>
-            )}
+            ) : null}
           </View>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.viewDetailsButton}
-          onPress={() => onViewDetails && onViewDetails(post.id)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.viewDetailsText}>View Details</Text>
-        </TouchableOpacity>
+
+        {/* Right Section - Dynamic */}
+        <View style={styles.creatorRight}>
+          {isOwnPost ? null : isFollowing ? (
+            // User follows creator - Show View Details button if hasDetails
+            hasDetails ? (
+              <TouchableOpacity
+                style={styles.viewDetailsButton}
+                activeOpacity={0.8}
+                onPress={onPostDetailPress}
+              >
+                <Text style={styles.viewDetailsText}>View Details</Text>
+              </TouchableOpacity>
+            ) : null
+          ) : (
+            // User does NOT follow - Show Follow button + dropdown
+            <View style={styles.followSection}>
+              <TouchableOpacity
+                style={[styles.followButton, followLoading && styles.followButtonLoading]}
+                activeOpacity={0.8}
+                onPress={toggleFollow}
+                disabled={followLoading}
+              >
+                <Text style={styles.followButtonText}>Follow</Text>
+              </TouchableOpacity>
+              {hasDetails && (
+                <TouchableOpacity
+                  style={styles.dropdownButton}
+                  activeOpacity={0.8}
+                  onPress={() => setShowDropdown(!showDropdown)}
+                >
+                  <Icon name="chevron-down" size={16} color="#000000" />
+                </TouchableOpacity>
+              )}
+              {hasDetails && showDropdown && (
+                <Animated.View
+                  ref={dropdownRef}
+                  style={[
+                    styles.dropdown,
+                    { opacity: dropdownOpacity },
+                  ]}
+                >
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setShowDropdown(false);
+                      onPostDetailPress();
+                    }}
+                  >
+                    <Text style={styles.dropdownItemText}>View Details</Text>
+                  </TouchableOpacity>
+                </Animated.View>
+              )}
+            </View>
+          )}
+        </View>
       </View>
 
-      {/* Engagement Strip */}
-      <View style={styles.engagementStrip}>
-        <View style={styles.engagementLeft}>
-          <TouchableOpacity style={styles.engagementButton} onPress={handleLike} activeOpacity={0.7}>
-            <Icon
-              name={isLiked ? 'heart' : 'heart-outline'}
-              size={20}
-              color={isLiked ? Colors.accent.red : Colors.black.secondary}
-            />
-            <Text style={styles.engagementText}>{likeCount}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.engagementButton}
-            onPress={() => onCommentPress && onCommentPress(post.id)}
-            activeOpacity={0.7}
-          >
-            <Icon name="chatbubble-ellipses-outline" size={20} color={Colors.black.secondary} />
-            <Text style={styles.engagementText}>{commentCount}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.engagementButton} onPress={handleShare} activeOpacity={0.7}>
-            <Icon name="paper-plane-outline" size={20} color={Colors.black.secondary} />
-            <Text style={styles.engagementText}>{shareCount}</Text>
-          </TouchableOpacity>
-        </View>
-        <TouchableOpacity onPress={handleBookmark} activeOpacity={0.7}>
+      {/* Icon Row */}
+      <View style={styles.iconRow}>
+        <TouchableOpacity
+          style={styles.iconGroup}
+          activeOpacity={0.7}
+          onPress={onLike}
+        >
           <Icon
-            name={isBookmarked ? 'bookmark' : 'bookmark-outline'}
+            name={isLiked ? 'heart' : 'heart-outline'}
             size={20}
-            color={isBookmarked ? Colors.brand.primary : Colors.black.secondary}
+            color="#FF7F4D"
           />
+          <Text style={styles.iconCount}>{likeCount}</Text>
         </TouchableOpacity>
-        <TouchableOpacity activeOpacity={0.7} style={styles.moreButton}>
-          <Icon name="ellipsis-horizontal" size={20} color={Colors.black.secondary} />
+
+        <TouchableOpacity
+          style={styles.iconGroup}
+          activeOpacity={0.7}
+          onPress={onComment}
+        >
+          <Icon name="chatbubble-outline" size={20} color="#FF7F4D" />
+          <Text style={styles.iconCount}>{commentCount}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.iconGroup}
+          activeOpacity={0.7}
+          onPress={onShare}
+        >
+          <Icon name="paper-plane-outline" size={20} color="#FF7F4D" />
+          <Text style={styles.iconCount}>{shareCount}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.iconGroup}
+          activeOpacity={0.7}
+          onPress={onBookmark}
+        >
+          <Icon
+            name={isSaved ? 'bookmark' : 'bookmark-outline'}
+            size={20}
+            color="#FF7F4D"
+          />
         </TouchableOpacity>
       </View>
 
@@ -418,75 +314,72 @@ export default function PostCard({
       {renderCaption()}
 
       {/* Timestamp */}
-      <Text style={styles.timestamp}>{formatTimestamp(post.createdAt)}</Text>
+      {timestamp ? <Text style={styles.timestamp}>{timestamp}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: Colors.white.primary,
-    marginHorizontal: 12,
-    marginVertical: 10,
-    borderRadius: 18,
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
     overflow: 'hidden',
-    shadowColor: '#000',
+    shadowColor: '#000000',
     shadowOpacity: 0.08,
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 6,
+    marginHorizontal: 12,
+    marginVertical: 10,
   },
-  postImageContainer: {
+  imageContainer: {
     width: '100%',
-    borderRadius: 18,
+    height: 340,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
     overflow: 'hidden',
-    backgroundColor: Colors.white.tertiary,
+    backgroundColor: '#F5F5F5',
   },
   postImage: {
     width: '100%',
-    backgroundColor: Colors.white.tertiary,
+    height: '100%',
   },
-  profileRow: {
+  postImagePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  creatorSection: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 10,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
   },
-  profileInfo: {
+  creatorLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  profilePhoto: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.white.tertiary,
+  profileImage: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 2,
+    borderColor: '#FFE3D6',
+    backgroundColor: '#F5F5F5',
     marginRight: 10,
-  },
-  profilePhotoPlaceholder: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.brand.primary,
-    marginRight: 10,
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
   },
-  profilePhotoText: {
-    color: Colors.white.primary,
-    fontFamily: Fonts.semibold,
-    fontSize: 16,
-  },
-  profileTextContainer: {
+  creatorInfo: {
     flex: 1,
   },
   username: {
-    fontFamily: Fonts.semibold,
+    fontFamily: Fonts.bold,
     fontSize: 14,
-    color: Colors.black.primary,
+    color: '#000000',
     marginBottom: 2,
   },
   locationRow: {
@@ -497,63 +390,121 @@ const styles = StyleSheet.create({
   location: {
     fontFamily: Fonts.regular,
     fontSize: 12,
-    color: Colors.black.qua,
+    color: '#8E8E8E',
+  },
+  creatorRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   viewDetailsButton: {
-    backgroundColor: '#F9CBAF', // Peach color
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    backgroundColor: '#FFD4C3',
+    paddingHorizontal: 18,
+    paddingVertical: 6,
     borderRadius: 20,
   },
   viewDetailsText: {
     fontFamily: Fonts.semibold,
-    fontSize: 12,
-    color: Colors.black.primary,
+    fontSize: 13,
+    color: '#FF7F4D',
   },
-  engagementStrip: {
+  followSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    position: 'relative',
+  },
+  followButton: {
+    backgroundColor: '#FF7F4D',
+    paddingHorizontal: 18,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  followButtonLoading: {
+    opacity: 0.6,
+  },
+  followButtonText: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    color: '#FFFFFF',
+  },
+  dropdownButton: {
+    padding: 4,
+    marginLeft: 4,
+  },
+  dropdown: {
+    position: 'absolute',
+    top: 32,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    shadowColor: '#000000',
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 4,
+    minWidth: 140,
+    zIndex: 1000,
+  },
+  dropdownItem: {
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  engagementLeft: {
+  dropdownItemText: {
+    fontFamily: Fonts.regular,
+    fontSize: 14,
+    color: '#000000',
+  },
+  iconRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 20,
-    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 18,
   },
-  engagementButton: {
+  iconGroup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
-  engagementText: {
+  iconCount: {
     fontFamily: Fonts.medium,
     fontSize: 14,
-    color: Colors.black.secondary,
+    color: '#000000',
   },
-  moreButton: {
-    marginLeft: 16,
-  },
-  caption: {
-    fontFamily: Fonts.regular,
-    fontSize: 14,
-    color: Colors.black.primary,
+  captionContainer: {
     paddingHorizontal: 16,
     paddingBottom: 8,
+  },
+  captionText: {
+    fontFamily: Fonts.regular,
+    fontSize: 14,
+    color: '#000000',
     lineHeight: 20,
   },
   hashtag: {
-    fontFamily: Fonts.medium,
-    color: Colors.brand.primary,
+    fontFamily: Fonts.regular,
+    fontSize: 14,
+    color: '#1F76FF',
   },
   timestamp: {
-    fontFamily: Fonts.regular,
-    fontSize: 12,
-    color: Colors.black.qua,
     paddingHorizontal: 16,
     paddingBottom: 16,
+    fontFamily: Fonts.regular,
+    fontSize: 12,
+    color: '#969696',
   },
+});
+
+// Memoize PostCard to prevent unnecessary re-renders
+export default React.memo(PostCard, (prevProps, nextProps) => {
+  // Custom comparison function for better performance
+  return (
+    prevProps.post.id === nextProps.post.id &&
+    prevProps.post.likeCount === nextProps.post.likeCount &&
+    prevProps.post.commentCount === nextProps.post.commentCount &&
+    prevProps.post.shareCount === nextProps.post.shareCount &&
+    prevProps.isLiked === nextProps.isLiked &&
+    prevProps.isSaved === nextProps.isSaved &&
+    prevProps.currentUserId === nextProps.currentUserId
+  );
 });
 

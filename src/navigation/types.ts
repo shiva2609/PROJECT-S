@@ -52,6 +52,84 @@ export type RootStackParamList = {
     profilePhoto?: string;
   };
   DrawerNavigator: undefined;
+  PhotoSelect: {
+    mode?: 'post' | 'story' | 'reel';
+  };
+  CropAdjust: {
+    contentType?: 'post' | 'reel';
+    selectedImages: Array<{
+      uri: string;
+      width?: number;
+      height?: number;
+      id: string;
+      createdAt?: number;
+      type?: 'image' | 'video';
+    }>;
+    imageUri?: string;
+    currentImageIndex?: number;
+    allowMultiple?: boolean;
+    croppedMedia?: Array<{
+      originalUri: string;
+      cropData: {
+        ratio: '1:1' | '4:5' | '16:9';
+        zoomScale: number;
+        offsetX: number;
+        offsetY: number;
+        frameWidth: number;
+        frameHeight: number;
+      };
+      finalCroppedUri?: string;
+      type: 'image' | 'video';
+    }>;
+  };
+  PostPreview: {
+    croppedMedia: Array<{
+      originalUri: string;
+      cropData: {
+        ratio: '1:1' | '4:5' | '16:9';
+        zoomScale: number;
+        offsetX: number;
+        offsetY: number;
+        frameWidth: number;
+        frameHeight: number;
+      };
+      finalCroppedUri?: string;
+      type: 'image' | 'video';
+    }>;
+    postType: 'post' | 'reel';
+    currentIndex?: number;
+  };
+  AddPostDetails: {
+    croppedImageUri?: string;
+    originalImageUri?: string;
+    croppedMedia?: Array<{
+      originalUri: string;
+      cropData: {
+        ratio: '1:1' | '4:5' | '16:9';
+        zoomScale: number;
+        offsetX: number;
+        offsetY: number;
+        frameWidth: number;
+        frameHeight: number;
+      };
+      finalCroppedUri?: string;
+      type: 'image' | 'video';
+    }>;
+    contentType?: 'post' | 'reel';
+    selectedImages?: Array<{
+      uri: string;
+      width?: number;
+      height?: number;
+      id: string;
+      createdAt?: number;
+      type?: 'image' | 'video';
+    }>;
+    transformData?: {
+      scale: number;
+      translateX: number;
+      translateY: number;
+    };
+  };
 };
 
 declare global {
