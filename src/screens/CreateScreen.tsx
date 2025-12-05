@@ -6,7 +6,7 @@
  * based on account permissions.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,14 +17,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSelector } from 'react-redux';
+import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { colors } from '../utils/colors';
-import { RootState } from '../store';
-import { auth, db } from '../api/authService';
-import { doc, getDoc } from 'firebase/firestore';
-import { AccountType, getAccountTypeMetadata, CreateOption } from '../types/account';
-import { uploadImageAsync } from '../api/firebaseService';
+import { db } from '../api/authService';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { AccountType, getAccountTypeMetadata, CreateOption, VerificationStatus } from '../types/account';
+import { useAuth } from '../contexts/AuthContext';
 
 // Creator Components
 import PostAndReelCreator from '../components/create/PostAndReelCreator';
@@ -41,41 +40,89 @@ import TeamCreator from '../components/create/TeamCreator';
 type CreateMode = CreateOption | null;
 
 export default function CreateScreen({ navigation }: any) {
-  const reduxUser = useSelector((s: RootState) => s.user.currentUser);
+  const { user } = useAuth();
   const [accountType, setAccountType] = useState<AccountType>('Traveler');
-  const [verificationStatus, setVerificationStatus] = useState<string>('none');
+  const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('none');
   const [loading, setLoading] = useState(true);
   const [createMode, setCreateMode] = useState<CreateMode>(null);
 
+  // Real-time listener for accountType changes
   useEffect(() => {
-    loadUserAccountData();
-  }, []);
-
-  const loadUserAccountData = async () => {
-    try {
-      const currentUser = auth.currentUser;
-      if (!currentUser) {
-        setLoading(false);
-        return;
-      }
-
-      const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        const accType = (userData.accountType || userData.role || 'Traveler') as AccountType;
-        const verStatus = userData.verificationStatus || 'none';
-        setAccountType(accType);
-        setVerificationStatus(verStatus);
-      }
-    } catch (error) {
-      console.error('Error loading user account data:', error);
-    } finally {
+    if (!user) {
+      setAccountType('Traveler');
+      setVerificationStatus('none');
       setLoading(false);
+      return;
     }
-  };
+
+    console.log('📊 CreateScreen - Setting up real-time accountType listener for:', user.uid);
+
+    const userRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(
+      userRef,
+      (snap) => {
+        if (snap.exists()) {
+          const userData = snap.data();
+          const accType = (userData.accountType || userData.role || 'Traveler') as AccountType;
+          const verStatus = (userData.verificationStatus || 'none') as VerificationStatus;
+          
+          console.log('📊 CreateScreen - AccountType updated:', {
+            accountType: accType,
+            verificationStatus: verStatus,
+            uid: user.uid,
+            createOptions: getAccountTypeMetadata(accType).createOptions,
+          });
+          
+          setAccountType(accType);
+          setVerificationStatus(verStatus);
+          
+          // Reset createMode if current mode is not available for new accountType
+          const metadata = getAccountTypeMetadata(accType);
+          setCreateMode((currentMode) => {
+            if (currentMode && !metadata.createOptions.includes(currentMode)) {
+              console.log('📊 CreateScreen - Resetting createMode, not available for new accountType');
+              return null;
+            }
+            return currentMode;
+          });
+        } else {
+          console.log('⚠️ CreateScreen - User document not found, defaulting to Traveler');
+          setAccountType('Traveler');
+          setVerificationStatus('none');
+          setCreateMode(null);
+        }
+        setLoading(false);
+      },
+      (error) => {
+        console.error('❌ CreateScreen - Error fetching user data:', error);
+        setAccountType('Traveler');
+        setVerificationStatus('none');
+        setLoading(false);
+      }
+    );
+
+    return () => {
+      console.log('📊 CreateScreen - Cleaning up accountType listener');
+      unsubscribe();
+    };
+  }, [user]);
+
+  // Reload data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('📊 CreateScreen - Screen focused, current accountType:', accountType);
+    }, [accountType])
+  );
 
   const accountMetadata = getAccountTypeMetadata(accountType);
-  const isVerified = verificationStatus === 'verified' || accountType === 'Traveler';
+  
+  // Debug logging
+  console.log('📊 CreateScreen - Render state:', {
+    accountType,
+    verificationStatus,
+    createOptions: accountMetadata.createOptions,
+    createOptionsCount: accountMetadata.createOptions.length,
+  });
 
   if (loading) {
     return (
@@ -119,16 +166,6 @@ export default function CreateScreen({ navigation }: any) {
           </View>
         </View>
 
-        {!isVerified && accountType !== 'Traveler' && (
-          <View style={styles.warningBox}>
-            <Icon name="alert-circle" size={20} color={colors.danger} />
-            <Text style={styles.warningText}>
-              Your {accountMetadata.displayName} account is pending verification.
-              Some features may be limited.
-            </Text>
-          </View>
-        )}
-
         <Text style={styles.subtitle}>What would you like to create?</Text>
 
         <View style={styles.optionsGrid}>
@@ -136,8 +173,17 @@ export default function CreateScreen({ navigation }: any) {
             <TouchableOpacity
               key={option}
               style={styles.optionCard}
-              onPress={() => setCreateMode(option)}
-              disabled={!isVerified && accountType !== 'Traveler'}
+              onPress={() => {
+                // Navigate to specific screens for Post and Reel
+                if (option === 'Post') {
+                  navigation.navigate('CreatePostScreen');
+                } else if (option === 'Reel') {
+                  navigation.navigate('CreateReelScreen');
+                } else {
+                  // For other options, use the existing component-based flow
+                  setCreateMode(option);
+                }
+              }}
             >
               <Icon name={getIconForOption(option)} size={32} color={colors.primary} />
               <Text style={styles.optionText}>{option}</Text>
@@ -184,6 +230,7 @@ function getIconForOption(option: CreateOption): string {
     Package: 'briefcase-outline',
     Stay: 'bed-outline',
     Ride: 'car-outline',
+    Event: 'calendar-outline',
     Course: 'school-outline',
     'Local Tour': 'map-outline',
     'Affiliate Link': 'link-outline',
@@ -237,20 +284,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 12,
     fontWeight: '600',
-  },
-  warningBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF2F2',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 24,
-    gap: 8,
-  },
-  warningText: {
-    flex: 1,
-    color: colors.danger,
-    fontSize: 14,
   },
   subtitle: {
     fontSize: 18,

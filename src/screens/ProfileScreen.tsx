@@ -28,7 +28,7 @@ import { useProfileData } from '../hooks/useProfileData';
 import { Fonts } from '../theme/fonts';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../api/authService';
-import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, arrayRemove, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import InputModal from '../components/profile/InputModal';
 
 // Design System Colors - Sanchari Brand
@@ -44,7 +44,7 @@ const DESIGN_COLORS = {
   starColor: '#FF5C02', // Orange stars for ratings
 };
 
-type TabType = 'posts' | 'bio' | 'memories' | 'references';
+type TabType = 'posts' | 'bio' | 'memories' | 'references' | 'saved';
 
 const { width } = Dimensions.get('window');
 const POST_SIZE = (width - 40 - 6) / 3; // 3 columns with 2px gaps and 20px padding
@@ -63,6 +63,9 @@ export default function ProfileScreen({ navigation }: any) {
     reviews,
     loading,
   } = useProfileData();
+  
+  const [savedPosts, setSavedPosts] = useState<any[]>([]);
+  const [savedPostsLoading, setSavedPostsLoading] = useState(false);
 
   // Modal states
   const [locationModalVisible, setLocationModalVisible] = useState(false);
@@ -70,9 +73,36 @@ export default function ProfileScreen({ navigation }: any) {
   const [interestModalVisible, setInterestModalVisible] = useState(false);
   const [countryModalVisible, setCountryModalVisible] = useState(false);
 
-  // Determine available tabs (references only if reviews exist)
+  // Fetch saved posts
+  React.useEffect(() => {
+    if (!user || activeTab !== 'saved') return;
+
+    setSavedPostsLoading(true);
+    const postsRef = collection(db, 'posts');
+    const q = query(postsRef, where('savedBy', 'array-contains', user.uid));
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const saved = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setSavedPosts(saved);
+        setSavedPostsLoading(false);
+      },
+      (error) => {
+        console.error('Error fetching saved posts:', error);
+        setSavedPostsLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user, activeTab]);
+
+  // Determine available tabs (references only if reviews exist, saved always available)
   const availableTabs = useMemo(() => {
-    const tabs: TabType[] = ['posts', 'bio', 'memories'];
+    const tabs: TabType[] = ['posts', 'bio', 'memories', 'saved'];
     if (reviews.length > 0) {
       tabs.push('references');
     }
@@ -90,7 +120,7 @@ export default function ProfileScreen({ navigation }: any) {
   }, [activeTab]);
 
   const handleEditProfile = () => {
-    navigation?.navigate('Account');
+    navigation?.navigate('EditProfile');
   };
 
   // Firebase update functions
@@ -318,12 +348,21 @@ export default function ProfileScreen({ navigation }: any) {
   };
 
   const renderBioTab = () => {
-    const { location, aboutMe, interests, countriesVisited } = profileData || {};
+    const { location, aboutMe, interests, countriesVisited, bio } = profileData || {};
 
     return (
       <>
         <ScrollView style={styles.bioContent} contentContainerStyle={styles.bioContentInner}>
           <View style={styles.bioCard}>
+            {/* Bio Section - Read-only, auto-generated */}
+            {bio && (
+              <View style={styles.bioSection}>
+                <Text style={styles.bioSectionTitle}>Bio</Text>
+                <Text style={styles.bioTextReadOnly}>{bio}</Text>
+                <Text style={styles.bioHint}>Auto-generated from your profile</Text>
+              </View>
+            )}
+
             {/* Location Section */}
             <View style={styles.bioSection}>
               <Text style={styles.bioSectionTitle}>Location</Text>
@@ -344,7 +383,7 @@ export default function ProfileScreen({ navigation }: any) {
               )}
             </View>
 
-            {/* About Section */}
+            {/* About Section - Keep for additional details */}
             <View style={styles.bioSection}>
               <Text style={styles.bioSectionTitle}>
                 About {profileData?.fullname || profileData?.username || 'You'}
@@ -537,6 +576,56 @@ export default function ProfileScreen({ navigation }: any) {
     );
   };
 
+  const renderSavedPostsTab = () => {
+    if (savedPostsLoading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={DESIGN_COLORS.primary} />
+        </View>
+      );
+    }
+
+    if (savedPosts.length === 0) {
+      return (
+        <View style={styles.emptyContainer}>
+          <Icon name="bookmark-outline" size={48} color={DESIGN_COLORS.border} />
+          <Text style={styles.emptyText}>No saved posts yet</Text>
+          <Text style={styles.emptySubtext}>Bookmark posts you love to find them later!</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.postsGrid}>
+        {savedPosts.map((post, index) => {
+          const imageUrl = post.imageURL || post.imageUrl || post.coverImage || (post.gallery && post.gallery[0]);
+          return (
+            <TouchableOpacity
+              key={post.id}
+              style={[
+                styles.postItem,
+                { marginRight: index % 3 === 2 ? 0 : 2, marginBottom: 2 },
+              ]}
+              activeOpacity={0.9}
+              onPress={() => {
+                // Navigate to post detail
+                navigation?.navigate('PostDetail', { postId: post.id });
+              }}
+            >
+              {imageUrl ? (
+                <Image source={{ uri: imageUrl }} style={styles.postImage} />
+              ) : (
+                <View style={styles.postPlaceholder}>
+                  <Text style={styles.placeholderText}>📷</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
+  };
+
   const renderReferencesTab = () => {
     const overallRating = useMemo(() => {
       if (reviews.length === 0) return 0;
@@ -629,6 +718,12 @@ export default function ProfileScreen({ navigation }: any) {
         return (
           <Animated.View style={{ opacity: fadeAnim, flex: 1 }}>
             {renderReferencesTab()}
+          </Animated.View>
+        );
+      case 'saved':
+        return (
+          <Animated.View style={{ opacity: fadeAnim, flex: 1 }}>
+            {renderSavedPostsTab()}
           </Animated.View>
         );
       default:
@@ -878,6 +973,21 @@ const styles = StyleSheet.create({
     color: '#3C3C3B',
     lineHeight: 20,
     textAlign: 'left',
+  },
+  bioTextReadOnly: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: '#3C3C3B',
+    lineHeight: 20,
+    textAlign: 'left',
+    fontStyle: 'italic',
+  },
+  bioHint: {
+    fontSize: 11,
+    fontFamily: Fonts.regular,
+    color: DESIGN_COLORS.secondaryText,
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   bioLocation: {
     fontSize: 14,

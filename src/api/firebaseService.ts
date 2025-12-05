@@ -484,10 +484,38 @@ export async function createPost(params: {
 		caption: params.caption ?? '',
 		likeCount: 0,
 		commentCount: 0,
+		shareCount: 0,
+		likedBy: [],
+		savedBy: [],
+		sharedBy: [],
 		createdAt: serverTimestamp(), // Always use serverTimestamp
 	};
     const ref = await withRetry(() => addDoc(collection(db(), 'posts'), base));
 	return { id: ref.id, ...base } as Post;
+}
+
+export async function createReel(params: {
+	userId: string;
+	username: string;
+	videoUrl: string;
+	caption?: string;
+}): Promise<any> {
+	const base = {
+		createdBy: params.userId, // Primary field
+		userId: params.userId, // Legacy field for backward compatibility
+		username: params.username,
+		videoUrl: params.videoUrl,
+		caption: params.caption ?? '',
+		likeCount: 0,
+		commentCount: 0,
+		shareCount: 0,
+		likedBy: [],
+		savedBy: [],
+		sharedBy: [],
+		createdAt: serverTimestamp(), // Always use serverTimestamp
+	};
+    const ref = await withRetry(() => addDoc(collection(db(), 'reels'), base));
+	return { id: ref.id, ...base };
 }
 
 export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {

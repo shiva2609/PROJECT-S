@@ -36,6 +36,7 @@ export type RootStackParamList = {
   Home: undefined;
   Dashboard: undefined;
   Account: undefined;
+  EditProfile: undefined;
   AdminVerification: undefined;
   SuperAdminDashboard: undefined;
   RoleUpgrade: undefined;

@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    padding: 8,
     borderBottomWidth: 1,
     borderBottomColor: colors.surface,
   },
