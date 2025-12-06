@@ -31,6 +31,8 @@ import {
 } from 'firebase/firestore';
 import UserRowCard from '../components/followers/UserRowCard';
 import { useProfileData } from '../hooks/useProfileData';
+import { unfollowUser, removeFollower } from '../api/firebaseService';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 interface FollowerUser {
   id: string;
@@ -65,6 +67,13 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
   const [following, setFollowing] = useState<FollowerUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserFollowingIds, setCurrentUserFollowingIds] = useState<Set<string>>(new Set());
+  const [confirmationModal, setConfirmationModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   // Update active tab when initialTab changes
   useEffect(() => {
@@ -211,28 +220,57 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
   };
 
   const handleUnfollowPress = async (userId: string) => {
-    // Unfollow functionality is handled by useFollow hook in UserRowCard
-    // This is just for any additional logic if needed
+    if (!currentUser?.uid) return;
+    
+    // Show confirmation modal
+    setConfirmationModal({
+      visible: true,
+      title: 'Unfollow',
+      message: `Are you sure you want to unfollow this user? You won't see their posts in your Following feed.`,
+      confirmLabel: 'Unfollow',
+      onConfirm: async () => {
+        setConfirmationModal(null);
+        
+        // Optimistic: Remove from list immediately
+        setFollowing((prev) => prev.filter((user) => user.id !== userId));
+        
+        try {
+          await unfollowUser(currentUser.uid, userId);
+          console.log('✅ User unfollowed successfully');
+        } catch (error: any) {
+          console.error('❌ Error unfollowing user:', error);
+          // Re-fetch to restore state on error
+          fetchFollowing();
+        }
+      },
+    });
   };
 
   const handleRemoveFollowerPress = async (userId: string) => {
-    // TODO: Implement remove follower functionality
-    // This would remove the follower relationship
-    Alert.alert(
-      'Remove Follower',
-      'Are you sure you want to remove this follower?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            // Implement remove follower logic here
-            console.log('Remove follower:', userId);
-          },
-        },
-      ]
-    );
+    if (!currentUser?.uid) return;
+    
+    // Show confirmation modal
+    setConfirmationModal({
+      visible: true,
+      title: 'Remove Follower',
+      message: `Are you sure you want to remove this follower? They won't be able to see your posts.`,
+      confirmLabel: 'Remove',
+      onConfirm: async () => {
+        setConfirmationModal(null);
+        
+        // Optimistic: Remove from list immediately
+        setFollowers((prev) => prev.filter((user) => user.id !== userId));
+        
+        try {
+          await removeFollower(currentUser.uid, userId);
+          console.log('✅ Follower removed successfully');
+        } catch (error: any) {
+          console.error('❌ Error removing follower:', error);
+          // Re-fetch to restore state on error
+          fetchFollowers();
+        }
+      },
+    });
   };
 
   const currentList = activeTab === 'followers' ? followers : following;
@@ -352,6 +390,18 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
           </>
         )}
       </ScrollView>
+
+      {/* Confirmation Modal */}
+      {confirmationModal && (
+        <ConfirmationModal
+          visible={confirmationModal.visible}
+          title={confirmationModal.title}
+          message={confirmationModal.message}
+          confirmLabel={confirmationModal.confirmLabel}
+          onConfirm={confirmationModal.onConfirm}
+          onCancel={() => setConfirmationModal(null)}
+        />
+      )}
     </SafeAreaView>
   );
 }

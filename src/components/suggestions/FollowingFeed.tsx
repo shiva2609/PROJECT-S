@@ -100,6 +100,12 @@ export default function FollowingFeed({
     }
   };
 
+  const handlePostRemoved = (postId: string) => {
+    // Optimistic: Remove post from feed immediately
+    // This will be handled by the parent component's state management
+    // For now, we'll rely on the real-time listener to update
+  };
+
   const renderPost = ({ item, index }: { item: Post; index: number }) => {
     if (!item || !item.id) {
       console.warn('⚠️ [FollowingFeed] Invalid post item at index', index, item);
@@ -108,6 +114,9 @@ export default function FollowingFeed({
 
     const isLiked = likedPosts.has(item.id);
     const isSaved = savedPosts.has(item.id);
+    const postAuthorId = item.createdBy || item.userId;
+    // In Following feed, all posts are from followed users
+    const isFollowing = true;
 
     // CRITICAL: Convert Post to PostCard format using ONLY final cropped bitmaps
     // DO NOT use imageURL or imageUrl - those might be original images
@@ -152,6 +161,9 @@ export default function FollowingFeed({
         onProfilePress={() => onUserPress && onUserPress(item.createdBy || item.userId || '')}
         onPostDetailPress={() => onPostPress && onPostPress(item)}
         currentUserId={user?.uid}
+        isFollowing={isFollowing}
+        inForYou={false} // Following feed is not "For You"
+        onPostRemoved={handlePostRemoved}
       />
     );
   };

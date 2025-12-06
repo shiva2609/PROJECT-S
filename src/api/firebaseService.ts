@@ -25,6 +25,7 @@ import {
     arrayRemove,
     increment,
     runTransaction,
+    deleteDoc,
     Firestore,
 } from 'firebase/firestore';
 import {
@@ -522,6 +523,146 @@ export async function createReel(params: {
 	return { id: ref.id, ...base };
 }
 
+/**
+ * Delete a post completely from everywhere
+ * - Deletes from posts collection
+ * - Deletes media from Firebase Storage
+ * - Decrements postsCount in user document
+ * - Deletes from likes/bookmarks collections if they exist
+ */
+export async function deletePost(postId: string, ownerId: string): Promise<void> {
+	try {
+		// Step 1: Get post data to extract media URLs
+		const postRef = doc(db(), 'posts', postId);
+		const postSnap = await getDoc(postRef);
+		
+		if (!postSnap.exists()) {
+			throw new Error('Post not found');
+		}
+		
+		const postData = postSnap.data() as any;
+		
+		// Step 2: Delete media from Firebase Storage
+		const mediaUrls: string[] = [];
+		
+		// Collect all media URLs
+		if (postData.mediaUrls && Array.isArray(postData.mediaUrls)) {
+			mediaUrls.push(...postData.mediaUrls);
+		}
+		if (postData.imageUrl) {
+			mediaUrls.push(postData.imageUrl);
+		}
+		if (postData.mediaUrl) {
+			mediaUrls.push(postData.mediaUrl);
+		}
+		if (postData.coverImage) {
+			mediaUrls.push(postData.coverImage);
+		}
+		if (postData.finalCroppedUrl) {
+			mediaUrls.push(postData.finalCroppedUrl);
+		}
+		if (postData.media && Array.isArray(postData.media)) {
+			postData.media.forEach((item: any) => {
+				if (item.url) mediaUrls.push(item.url);
+				if (item.uri) mediaUrls.push(item.uri);
+			});
+		}
+		
+		// Remove duplicates
+		const uniqueMediaUrls = [...new Set(mediaUrls)];
+		
+		// Delete each media file from Storage
+		for (const url of uniqueMediaUrls) {
+			if (!url || typeof url !== 'string' || !url.includes('firebasestorage')) continue;
+			
+			try {
+				// Extract storage path from URL
+				// URL format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encodedPath}?alt=media&token=...
+				const urlObj = new URL(url);
+				const pathMatch = urlObj.pathname.match(/\/o\/(.+)/);
+				if (pathMatch && pathMatch[1]) {
+					const encodedPath = pathMatch[1];
+					const storagePath = decodeURIComponent(encodedPath);
+					
+					// Delete using React Native Firebase Storage
+					const storageRef = rnfbStorage().ref(storagePath);
+					await storageRef.delete();
+					console.log('✅ Deleted media from Storage:', storagePath);
+				}
+			} catch (storageError: any) {
+				// Log but don't fail - file might already be deleted
+				console.warn('⚠️ Could not delete media from Storage:', url, storageError.message);
+			}
+		}
+		
+		// Step 3: Delete from main posts collection
+		await deleteDoc(postRef);
+		console.log('✅ Deleted post from posts collection');
+		
+		// Step 4: Delete from user's posts subcollection (if exists)
+		try {
+			const userPostRef = doc(db(), 'users', ownerId, 'posts', postId);
+			const userPostSnap = await getDoc(userPostRef);
+			if (userPostSnap.exists()) {
+				await deleteDoc(userPostRef);
+				console.log('✅ Deleted post from user posts subcollection');
+			}
+		} catch (error: any) {
+			// Subcollection might not exist, that's okay
+			console.log('ℹ️ User posts subcollection not found or already deleted');
+		}
+		
+		// Step 5: Delete from explore/feed collections (if they exist)
+		const feedCollections = ['explore', 'feed/global', 'user_feed'];
+		for (const collectionPath of feedCollections) {
+			try {
+				const feedRef = doc(db(), collectionPath, postId);
+				const feedSnap = await getDoc(feedRef);
+				if (feedSnap.exists()) {
+					await deleteDoc(feedRef);
+					console.log(`✅ Deleted post from ${collectionPath}`);
+				}
+			} catch (error: any) {
+				// Collection might not exist, that's okay
+				console.log(`ℹ️ ${collectionPath} not found or already deleted`);
+			}
+		}
+		
+		// Step 6: Delete from likes/bookmarks collections (if they exist as separate docs)
+		const interactionCollections = ['likes', 'bookmarks'];
+		for (const collectionPath of interactionCollections) {
+			try {
+				const interactionRef = doc(db(), collectionPath, postId);
+				const interactionSnap = await getDoc(interactionRef);
+				if (interactionSnap.exists()) {
+					await deleteDoc(interactionRef);
+					console.log(`✅ Deleted post from ${collectionPath}`);
+				}
+			} catch (error: any) {
+				// Collection might not exist, that's okay
+				console.log(`ℹ️ ${collectionPath} not found or already deleted`);
+			}
+		}
+		
+		// Step 7: Decrement postsCount in user document
+		try {
+			const userRef = doc(db(), 'users', ownerId);
+			await updateDoc(userRef, {
+				postsCount: increment(-1),
+			});
+			console.log('✅ Decremented postsCount');
+		} catch (error: any) {
+			// postsCount might not exist, that's okay
+			console.log('ℹ️ Could not decrement postsCount (field might not exist)');
+		}
+		
+		console.log('✅ Post deleted successfully from all locations');
+	} catch (error: any) {
+		console.error('❌ Error deleting post:', error);
+		throw error;
+	}
+}
+
 export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
 	const q = query(collection(db(), 'posts'), orderBy('createdAt', 'desc'));
     return onSnapshot(q, (snap) => {
@@ -814,6 +955,228 @@ export async function getCurrentUserProfile(): Promise<UserProfile | null> {
 	return snap.exists() ? (snap.data() as UserProfile) : null;
 }
 
+/**
+ * Report a post/user
+ * Creates a report entry in /reports collection
+ * 
+ * Future: Add analytics.reportCount++ when analytics system is implemented
+ */
+export async function reportPost(
+	reporterId: string,
+	reportedUserId: string,
+	postId: string
+): Promise<void> {
+	try {
+		const reportRef = doc(collection(db(), 'reports'));
+		await setDoc(reportRef, {
+			reporterId,
+			reportedUserId,
+			postId,
+			createdAt: serverTimestamp(),
+		});
+		console.log('✅ Post reported successfully');
+		// TODO: analytics.reportCount++ (when analytics system is implemented)
+	} catch (error: any) {
+		console.error('❌ Error reporting post:', error);
+		throw error;
+	}
+}
+
+/**
+ * Block a user
+ * Adds userId to /users/{currentUser.uid}/blockedUsers array
+ * Also removes follow relationship if exists
+ * 
+ * Future: Add analytics.blockCount++ when analytics system is implemented
+ */
+export async function blockUser(currentUserId: string, blockedUserId: string): Promise<void> {
+	try {
+		const userRef = doc(db(), 'users', currentUserId);
+		
+		// Add to blockedUsers array
+		await updateDoc(userRef, {
+			blockedUsers: arrayUnion(blockedUserId),
+		});
+
+		// Remove follow relationship if exists
+		const followId = `${currentUserId}_${blockedUserId}`;
+		const followRef = doc(db(), 'follows', followId);
+		const followSnap = await getDoc(followRef);
+		
+		if (followSnap.exists()) {
+			await deleteDoc(followRef);
+			// Update counts
+			await runTransaction(db(), async (transaction) => {
+				const currentUserRef = doc(db(), 'users', currentUserId);
+				const blockedUserRef = doc(db(), 'users', blockedUserId);
+				
+				const currentUserDoc = await transaction.get(currentUserRef);
+				const blockedUserDoc = await transaction.get(blockedUserRef);
+				
+				if (currentUserDoc.exists()) {
+					const currentCount = currentUserDoc.data().followingCount || 0;
+					transaction.update(currentUserRef, {
+						followingCount: Math.max(0, currentCount - 1),
+					});
+				}
+
+				if (blockedUserDoc.exists()) {
+					const targetCount = blockedUserDoc.data().followersCount || 0;
+					transaction.update(blockedUserRef, {
+						followersCount: Math.max(0, targetCount - 1),
+					});
+				}
+			});
+		}
+
+		console.log('✅ User blocked successfully');
+		// TODO: analytics.blockCount++ (when analytics system is implemented)
+	} catch (error: any) {
+		console.error('❌ Error blocking user:', error);
+		throw error;
+	}
+}
+
+/**
+ * Hide a post
+ * Adds postId to /users/{currentUser.uid}/hiddenPosts array
+ * 
+ * Future: Add analytics.hideCount++ when analytics system is implemented
+ */
+export async function hidePost(currentUserId: string, postId: string): Promise<void> {
+	try {
+		const userRef = doc(db(), 'users', currentUserId);
+		await updateDoc(userRef, {
+			hiddenPosts: arrayUnion(postId),
+		});
+		console.log('✅ Post hidden successfully');
+		// TODO: analytics.hideCount++ (when analytics system is implemented)
+	} catch (error: any) {
+		console.error('❌ Error hiding post:', error);
+		throw error;
+	}
+}
+
+/**
+ * Mute a user
+ * Adds userId to /users/{currentUser.uid}/mutedUsers array
+ */
+export async function muteUser(currentUserId: string, mutedUserId: string): Promise<void> {
+	try {
+		const userRef = doc(db(), 'users', currentUserId);
+		await updateDoc(userRef, {
+			mutedUsers: arrayUnion(mutedUserId),
+		});
+		console.log('✅ User muted successfully');
+	} catch (error: any) {
+		console.error('❌ Error muting user:', error);
+		throw error;
+	}
+}
+
+/**
+ * Unfollow a user
+ * Removes from /follows collection and updates follower/following counts
+ * Note: This is a service function. The useFollow hook also provides unfollow functionality.
+ */
+export async function unfollowUser(currentUserId: string, targetUserId: string): Promise<void> {
+	try {
+		const followId = `${currentUserId}_${targetUserId}`;
+		const followRef = doc(db(), 'follows', followId);
+		
+		// Check if follow relationship exists
+		const followSnap = await getDoc(followRef);
+		if (!followSnap.exists()) {
+			console.log('ℹ️ Follow relationship does not exist');
+			return;
+		}
+		
+		// Delete follow document
+		await deleteDoc(followRef);
+		
+		// Update counts in transaction
+		await runTransaction(db(), async (transaction) => {
+			const currentUserRef = doc(db(), 'users', currentUserId);
+			const targetUserRef = doc(db(), 'users', targetUserId);
+			
+			const currentUserDoc = await transaction.get(currentUserRef);
+			const targetUserDoc = await transaction.get(targetUserRef);
+			
+			if (currentUserDoc.exists()) {
+				const currentCount = currentUserDoc.data().followingCount || 0;
+				transaction.update(currentUserRef, {
+					followingCount: Math.max(0, currentCount - 1),
+				});
+			}
+			
+			if (targetUserDoc.exists()) {
+				const targetCount = targetUserDoc.data().followersCount || 0;
+				transaction.update(targetUserRef, {
+					followersCount: Math.max(0, targetCount - 1),
+				});
+			}
+		});
+		
+		console.log('✅ User unfollowed successfully');
+	} catch (error: any) {
+		console.error('❌ Error unfollowing user:', error);
+		throw error;
+	}
+}
+
+/**
+ * Remove a follower
+ * Removes the follow relationship where targetUserId follows currentUserId
+ * This is the reverse of unfollow - removes someone who is following you
+ */
+export async function removeFollower(currentUserId: string, followerUserId: string): Promise<void> {
+	try {
+		// The follow relationship is: followerUserId follows currentUserId
+		const followId = `${followerUserId}_${currentUserId}`;
+		const followRef = doc(db(), 'follows', followId);
+		
+		// Check if follow relationship exists
+		const followSnap = await getDoc(followRef);
+		if (!followSnap.exists()) {
+			console.log('ℹ️ Follow relationship does not exist');
+			return;
+		}
+		
+		// Delete follow document
+		await deleteDoc(followRef);
+		
+		// Update counts in transaction
+		await runTransaction(db(), async (transaction) => {
+			const currentUserRef = doc(db(), 'users', currentUserId);
+			const followerUserRef = doc(db(), 'users', followerUserId);
+			
+			const currentUserDoc = await transaction.get(currentUserRef);
+			const followerUserDoc = await transaction.get(followerUserRef);
+			
+			// Decrement followersCount for current user (the one being unfollowed)
+			if (currentUserDoc.exists()) {
+				const currentCount = currentUserDoc.data().followersCount || 0;
+				transaction.update(currentUserRef, {
+					followersCount: Math.max(0, currentCount - 1),
+				});
+			}
+			
+			// Decrement followingCount for follower user (the one who was following)
+			if (followerUserDoc.exists()) {
+				const followerCount = followerUserDoc.data().followingCount || 0;
+				transaction.update(followerUserRef, {
+					followingCount: Math.max(0, followerCount - 1),
+				});
+			}
+		});
+		
+		console.log('✅ Follower removed successfully');
+	} catch (error: any) {
+		console.error('❌ Error removing follower:', error);
+		throw error;
+	}
+}
+
 export const firebaseApi = {
 	// Auth
 	signUpWithUsernamePassword,
@@ -827,6 +1190,7 @@ export const firebaseApi = {
 	uploadImageAsync,
 	// Posts
 	createPost,
+	deletePost,
 	listenToFeed,
 	likePost,
 	unlikePost,

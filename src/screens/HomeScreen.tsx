@@ -7,7 +7,7 @@ import { colors } from '../utils/colors';
 import { Colors } from '../theme/colors';
 import { Fonts } from '../theme/fonts';
 import { db } from '../api/authService';
-import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import SegmentedControl from '../components/SegmentedControl';
 import { useAuth } from '../contexts/AuthContext';
 import { MotiView } from '../utils/moti';
@@ -65,6 +65,9 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
   const [likingPosts, setLikingPosts] = useState<Set<string>>(new Set()); // Track posts being liked
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set()); // Track users being followed
+  const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set()); // Track blocked users
+  const [mutedUsers, setMutedUsers] = useState<Set<string>>(new Set()); // Track muted users
+  const [hiddenPosts, setHiddenPosts] = useState<Set<string>>(new Set()); // Track hidden posts
 
   const { visible: rewardVisible, claimed, points, claiming: rewardClaiming, error: rewardError, grantReward, dismiss: dismissReward, showReward } = useRewardOnboarding(user?.uid);
   const { showAlert: showTopicAlert, onClaimNow: handleTopicClaimNow, onRemindLater: handleTopicRemindLater } = useTopicClaimReminder(user?.uid, navigation);
@@ -89,6 +92,30 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     });
 
     return () => unsubscribeFollows();
+  }, [user]);
+
+  // Fetch blocked users, muted users, and hidden posts
+  useEffect(() => {
+    if (!user) return;
+
+    const userRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const userData = snapshot.data() as any;
+        setBlockedUsers(new Set(userData.blockedUsers || []));
+        setMutedUsers(new Set(userData.mutedUsers || []));
+        setHiddenPosts(new Set(userData.hiddenPosts || []));
+        console.log('🚫 [HomeScreen] Blocked/Muted/Hidden updated:', {
+          blocked: (userData.blockedUsers || []).length,
+          muted: (userData.mutedUsers || []).length,
+          hidden: (userData.hiddenPosts || []).length,
+        });
+      }
+    }, (error: any) => {
+      console.warn('Error fetching user preferences:', error.message || error);
+    });
+
+    return () => unsubscribe();
   }, [user]);
 
   // Real-time listener for posts
@@ -159,13 +186,29 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   // Filter posts for "For You" tab
   // INCLUDES: User's own posts + Posts from non-followed users (suggestion accounts)
   // EXCLUDES: Posts from followed users (those go to Following tab)
+  // EXCLUDES: Posts from blocked/muted users, hidden posts
   const forYouPosts = useMemo(() => {
     if (selectedTab !== 'For You') return [];
     
     // Filter: Include user's own posts + posts from non-followed users (suggestions)
+    // Exclude blocked/muted users and hidden posts
     const filtered = posts.filter((post) => {
       const postAuthorId = post.createdBy || post.userId;
       if (!postAuthorId) return false;
+      
+      // EXCLUDE: Hidden posts
+      if (hiddenPosts.has(post.id)) {
+        return false;
+      }
+      
+      // EXCLUDE: Blocked users
+      if (blockedUsers.has(postAuthorId)) {
+        return false;
+      }
+      
+      // EXCLUDE: Muted users (for future posts, but keep current post visible per requirements)
+      // Note: Mute only affects future posts, so we don't filter here
+      // But we could add: if (mutedUsers.has(postAuthorId)) return false;
       
       // INCLUDE: User's own posts
       if (postAuthorId === user?.uid) {
@@ -181,7 +224,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     console.log('📱 [HomeScreen] - User own posts:', filtered.filter(p => (p.createdBy || p.userId) === user?.uid).length);
     console.log('📱 [HomeScreen] - Suggestion accounts:', filtered.filter(p => (p.createdBy || p.userId) !== user?.uid).length);
     return filtered;
-  }, [posts, followingIds, selectedTab, user]);
+  }, [posts, followingIds, selectedTab, user, blockedUsers, mutedUsers, hiddenPosts]);
 
   // Listen to stories
   useEffect(() => {
@@ -343,9 +386,26 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     );
   };
 
+  const handlePostRemoved = (postId: string) => {
+    // Optimistic: Remove post from feed immediately
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+    setLikedPosts((prev) => {
+      const next = new Set(prev);
+      next.delete(postId);
+      return next;
+    });
+    setSavedPosts((prev) => {
+      const next = new Set(prev);
+      next.delete(postId);
+      return next;
+    });
+  };
+
   const renderPost = ({ item, index }: { item: Post; index: number }) => {
     const isLiked = likedPosts.has(item.id);
     const isSaved = savedPosts.has(item.id);
+    const postAuthorId = item.createdBy || item.userId;
+    const isFollowing = postAuthorId ? followingIds.has(postAuthorId) : false;
 
     return (
       <MotiView
@@ -362,8 +422,15 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
           onShare={() => handleShare(item)}
           onBookmark={() => handleBookmark(item.id)}
           onProfilePress={() => navProp?.navigate('Profile', { userId: item.createdBy || item.userId })}
-          onPostDetailPress={() => navProp?.navigate('PostDetail', { postId: item.id })}
+          onPostDetailPress={() => navProp?.navigate('PostDetail', { 
+            posts: posts, 
+            index: index,
+            postId: item.id 
+          })}
           currentUserId={user?.uid}
+          isFollowing={isFollowing}
+          inForYou={selectedTab === 'For You'}
+          onPostRemoved={handlePostRemoved}
         />
       </MotiView>
     );
@@ -497,7 +564,12 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
               navigation={navProp}
               onUserPress={(userId) => navProp?.navigate('Profile', { userId })}
               onPostPress={(post) => {
-                navProp?.navigate('PostDetail', { postId: post.id });
+                const postIndex = posts.findIndex((p) => p.id === post.id);
+                navProp?.navigate('PostDetail', { 
+                  posts: posts, 
+                  index: postIndex >= 0 ? postIndex : 0,
+                  postId: post.id 
+                });
               }}
             />
           )}

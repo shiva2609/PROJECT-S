@@ -163,7 +163,7 @@ const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio,
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { width: containerWidth, height: containerHeight }]}>
       <FlatList
         ref={flatListRef}
         data={media}
@@ -220,7 +220,7 @@ PostCarousel.displayName = 'PostCarousel';
 const styles = StyleSheet.create({
   container: {
     position: 'relative',
-    width: '100%',
+    overflow: 'hidden', // Ensure counter stays within bounds
   },
   mediaContainer: {
     backgroundColor: 'black',
@@ -234,6 +234,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    zIndex: 10, // Ensure it's above the media
+    maxWidth: 50, // Prevent overflow
   },
   indexText: {
     fontFamily: Fonts.semibold,

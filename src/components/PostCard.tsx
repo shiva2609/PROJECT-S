@@ -9,12 +9,17 @@ import {
   Dimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../api/authService';
 import { useFollow } from '../hooks/useFollow';
 import { Post } from '../api/firebaseService';
 import { formatTimestamp, parseHashtags } from '../utils/postHelpers';
 import { Fonts } from '../theme/fonts';
+import { Colors } from '../theme/colors';
 import PostCarousel, { MediaItem } from './PostCarousel';
 import { normalizePost } from '../utils/postUtils';
+import VerifiedBadge from './VerifiedBadge';
+import PostDropdown from './PostDropdown';
 
 /**
  * Calculate image height using Instagram's exact formula
@@ -57,7 +62,11 @@ interface PostCardProps {
   onBookmark: () => void;
   onProfilePress: () => void;
   onPostDetailPress: () => void;
+  onOptionsPress?: (post: Post) => void;
   currentUserId?: string;
+  isFollowing?: boolean; // Whether current user follows post creator
+  inForYou?: boolean; // Whether post appears in "For You" feed
+  onPostRemoved?: (postId: string) => void; // Callback when post is removed from feed
 }
 
 function PostCard({
@@ -70,22 +79,42 @@ function PostCard({
   onBookmark,
   onProfilePress,
   onPostDetailPress,
+  onOptionsPress,
   currentUserId,
+  isFollowing: isFollowingProp,
+  inForYou = false,
+  onPostRemoved,
 }: PostCardProps) {
   const creatorId = post.createdBy || post.userId;
-  const { isFollowing, toggleFollow, isLoading: followLoading } = useFollow(creatorId || '');
+  const { isFollowing: isFollowingFromHook, toggleFollow, isLoading: followLoading } = useFollow(creatorId || '');
+  // Use prop if provided, otherwise use hook value
+  const isFollowing = isFollowingProp !== undefined ? isFollowingProp : isFollowingFromHook;
   const [showDropdown, setShowDropdown] = useState(false);
-  const dropdownOpacity = useRef(new Animated.Value(0)).current;
-  const dropdownRef = useRef<View>(null);
-
-  // Animate dropdown
+  const [isVerified, setIsVerified] = useState(false);
+  
+  // Check if verified is in post data, otherwise fetch from user document
   useEffect(() => {
-    Animated.timing(dropdownOpacity, {
-      toValue: showDropdown ? 1 : 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-  }, [showDropdown]);
+    // First check if verified is stored in post
+    if ((post as any).verified === true) {
+      setIsVerified(true);
+      return;
+    }
+    
+    // If not in post, fetch from user document
+    if (creatorId) {
+      const userRef = doc(db, 'users', creatorId);
+      getDoc(userRef).then((snapshot) => {
+        if (snapshot.exists()) {
+          const userData = snapshot.data();
+          const verified = userData.verificationStatus === 'verified' || userData.verified === true;
+          setIsVerified(verified);
+        }
+      }).catch(() => {
+        // Silently fail if user document not found
+      });
+    }
+  }, [post, creatorId]);
+
 
 
   // Normalize post to get mediaUrls array (Instagram-like multi-image support)
@@ -235,9 +264,10 @@ function PostCard({
           width: mediaWidth,
           height: mediaHeight,
           backgroundColor: 'black', // prevent ash/white gaps during load
-          overflow: 'hidden',
+          overflow: 'hidden', // Ensure counter stays within card bounds
           borderTopLeftRadius: 22,
           borderTopRightRadius: 22,
+          position: 'relative',
         }}>
           <PostCarousel 
             media={normalizedMedia} 
@@ -268,7 +298,15 @@ function PostCard({
             </View>
           )}
           <View style={styles.creatorInfo}>
-            <Text style={styles.username}>{username}</Text>
+            <View style={styles.usernameRow}>
+              <Text style={styles.username}>{username}</Text>
+              {/* Verified Badge */}
+              {isVerified && (
+                <View style={styles.verifiedBadge}>
+                  <VerifiedBadge size={14} />
+                </View>
+              )}
+            </View>
             {location ? (
               <View style={styles.locationRow}>
                 <Icon name="location-outline" size={12} color="#8E8E8E" />
@@ -280,107 +318,93 @@ function PostCard({
 
         {/* Right Section - Dynamic */}
         <View style={styles.creatorRight}>
-          {isOwnPost ? null : isFollowing ? (
-            // User follows creator - Show View Details button if hasDetails
-            hasDetails ? (
-              <TouchableOpacity
-                style={styles.viewDetailsButton}
-                activeOpacity={0.8}
-                onPress={onPostDetailPress}
-              >
-                <Text style={styles.viewDetailsText}>View Details</Text>
-              </TouchableOpacity>
-            ) : null
-          ) : (
-            // User does NOT follow - Show Follow button + dropdown
-            <View style={styles.followSection}>
-              <TouchableOpacity
-                style={[styles.followButton, followLoading && styles.followButtonLoading]}
-                activeOpacity={0.8}
-                onPress={toggleFollow}
-                disabled={followLoading}
-              >
-                <Text style={styles.followButtonText}>Follow</Text>
-              </TouchableOpacity>
-              {hasDetails && (
-                <TouchableOpacity
-                  style={styles.dropdownButton}
-                  activeOpacity={0.8}
-                  onPress={() => setShowDropdown(!showDropdown)}
-                >
-                  <Icon name="chevron-down" size={16} color="#000000" />
-                </TouchableOpacity>
-              )}
-              {hasDetails && showDropdown && (
-                <Animated.View
-                  ref={dropdownRef}
-                  style={[
-                    styles.dropdown,
-                    { opacity: dropdownOpacity },
-                  ]}
-                >
-                  <TouchableOpacity
-                    style={styles.dropdownItem}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      setShowDropdown(false);
-                      onPostDetailPress();
-                    }}
-                  >
-                    <Text style={styles.dropdownItemText}>View Details</Text>
-                  </TouchableOpacity>
-                </Animated.View>
-              )}
-            </View>
-          )}
+          {isOwnPost ? null : !isFollowing ? (
+            // User does NOT follow - Show Follow button
+            <TouchableOpacity
+              style={[styles.followButton, followLoading && styles.followButtonLoading]}
+              activeOpacity={0.8}
+              onPress={toggleFollow}
+              disabled={followLoading}
+            >
+              <Text style={styles.followButtonText}>Follow</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
       {/* Icon Row */}
       <View style={styles.iconRow}>
         <TouchableOpacity
-          style={styles.iconGroup}
+          style={styles.actionPill}
           activeOpacity={0.7}
           onPress={onLike}
         >
           <Icon
             name={isLiked ? 'heart' : 'heart-outline'}
-            size={20}
-            color="#FF7F4D"
+            size={18}
+            color={Colors.brand.primary}
           />
-          <Text style={styles.iconCount}>{likeCount}</Text>
+          <Text style={styles.actionCount}>{likeCount}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.iconGroup}
+          style={styles.actionPill}
           activeOpacity={0.7}
           onPress={onComment}
         >
-          <Icon name="chatbubble-outline" size={20} color="#FF7F4D" />
-          <Text style={styles.iconCount}>{commentCount}</Text>
+          <Icon name="chatbubble-outline" size={18} color={Colors.brand.primary} />
+          <Text style={styles.actionCount}>{commentCount}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.iconGroup}
+          style={styles.actionPill}
           activeOpacity={0.7}
           onPress={onShare}
         >
-          <Icon name="paper-plane-outline" size={20} color="#FF7F4D" />
-          <Text style={styles.iconCount}>{shareCount}</Text>
+          <Icon name="paper-plane-outline" size={18} color={Colors.brand.primary} />
+          <Text style={styles.actionCount}>{shareCount}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.iconGroup}
+          style={styles.actionPill}
           activeOpacity={0.7}
           onPress={onBookmark}
         >
           <Icon
             name={isSaved ? 'bookmark' : 'bookmark-outline'}
-            size={20}
-            color="#FF7F4D"
+            size={18}
+            color={Colors.brand.primary}
           />
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.actionPill}
+          activeOpacity={0.7}
+          onPress={() => {
+            if (onOptionsPress) {
+              onOptionsPress(post);
+            } else if (currentUserId) {
+              setShowDropdown(true);
+            }
+          }}
+        >
+          <Icon name="ellipsis-vertical" size={18} color={Colors.brand.primary} />
+        </TouchableOpacity>
       </View>
+
+      {/* Post Dropdown */}
+      {currentUserId && creatorId && (
+        <PostDropdown
+          post={post}
+          postUserId={creatorId}
+          currentUserId={currentUserId}
+          isFollowing={isFollowing}
+          inForYou={inForYou}
+          visible={showDropdown}
+          onClose={() => setShowDropdown(false)}
+          onPostRemoved={onPostRemoved}
+        />
+      )}
 
       {/* Caption */}
       {renderCaption()}
@@ -448,11 +472,20 @@ const styles = StyleSheet.create({
   creatorInfo: {
     flex: 1,
   },
+  usernameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5, // 4-6px gap between username and badge
+    marginBottom: 2,
+  },
   username: {
     fontFamily: Fonts.bold,
     fontSize: 14,
     color: '#000000',
-    marginBottom: 2,
+  },
+  verifiedBadge: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   locationRow: {
     flexDirection: 'row',
@@ -498,49 +531,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#FFFFFF',
   },
-  dropdownButton: {
-    padding: 4,
-    marginLeft: 4,
-  },
-  dropdown: {
-    position: 'absolute',
-    top: 32,
-    right: 0,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    shadowColor: '#000000',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 4,
-    minWidth: 140,
-    zIndex: 1000,
-  },
-  dropdownItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  dropdownItemText: {
-    fontFamily: Fonts.regular,
-    fontSize: 14,
-    color: '#000000',
-  },
   iconRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 18,
+    paddingTop: 10,
+    paddingBottom: 12,
+    gap: 11, // 10-12px gap between pills
   },
-  iconGroup: {
+  actionPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 102, 0, 0.12)', // theme.orange with light opacity
+    borderRadius: 50, // Fully rounded
+    paddingHorizontal: 12, // 10-14px range
+    paddingVertical: 7, // 6-8px range
+    gap: 6, // Gap between icon and count
   },
-  iconCount: {
-    fontFamily: Fonts.medium,
-    fontSize: 14,
-    color: '#000000',
+  actionCount: {
+    fontFamily: Fonts.semibold, // Poppins-SemiBold
+    fontSize: 13.5, // 13-14px range
+    color: Colors.brand.primary, // theme.orange (solid)
   },
   captionContainer: {
     paddingHorizontal: 16,
