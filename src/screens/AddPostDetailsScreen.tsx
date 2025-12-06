@@ -40,18 +40,10 @@ interface AddPostDetailsScreenProps {
   navigation: any;
   route: {
     params: {
-      croppedImageUri?: string;
-      originalImageUri?: string;
-      croppedMedia?: CropData[];
+      finalMedia?: CropData[]; // REAL cropped bitmaps - no fallbacks
+      croppedMedia?: CropData[]; // Legacy - will be removed
       contentType?: 'post' | 'reel';
-      selectedImages?: Array<{
-        uri: string;
-        width?: number;
-        height?: number;
-        id: string;
-        createdAt?: number;
-        type?: 'image' | 'video';
-      }>;
+      // Removed: croppedImageUri, originalImageUri, selectedImages - no longer used
     };
   };
 }
@@ -60,30 +52,41 @@ export default function AddPostDetailsScreen({
   navigation,
   route,
 }: AddPostDetailsScreenProps) {
-  const { user } = useAuth();
-  const { croppedImageUri, croppedMedia = [], contentType = 'post', selectedImages = [] } = route.params;
+  console.log('🟢 [AddPostDetailsScreen] Component mounted/rendered');
+  console.log('🟢 [AddPostDetailsScreen] Route params:', {
+    hasFinalMedia: !!route.params?.finalMedia,
+    finalMediaLength: route.params?.finalMedia?.length || 0,
+    hasCroppedMedia: !!route.params?.croppedMedia,
+    croppedMediaLength: route.params?.croppedMedia?.length || 0,
+    contentType: route.params?.contentType,
+  });
   
-  // Use croppedMedia if available, otherwise fallback to single croppedImageUri
+  const { user } = useAuth();
+  const { finalMedia = [], croppedMedia = [], contentType = 'post' } = route.params;
+  
+  useEffect(() => {
+    console.log('🟢 [AddPostDetailsScreen] useEffect - Component mounted');
+    return () => {
+      console.log('🔴 [AddPostDetailsScreen] useEffect cleanup - Component unmounting');
+    };
+  }, []);
+  
+  // Use finalMedia (REAL cropped bitmaps) - NO fallbacks to original URIs
   const [mediaItems, setMediaItems] = useState<CropData[]>(() => {
+    // Prefer finalMedia (new format with real bitmaps)
+    if (finalMedia && finalMedia.length > 0) {
+      console.log('🟢 [AddPostDetailsScreen] Using finalMedia:', finalMedia.length, 'items');
+      return finalMedia;
+    }
+    
+    // Legacy support for croppedMedia (will be removed)
     if (croppedMedia && croppedMedia.length > 0) {
+      console.log('⚠️ [AddPostDetailsScreen] Using legacy croppedMedia format');
       return croppedMedia;
     }
-    if (croppedImageUri) {
-      return [{
-        id: croppedImageUri,
-        finalUri: croppedImageUri,
-        ratio: '4:5',
-        cropData: {
-          ratio: '4:5',
-          zoomScale: 1,
-          offsetX: 0,
-          offsetY: 0,
-          frameWidth: 0,
-          frameHeight: 0,
-        },
-        type: 'image' as const,
-      }];
-    }
+    
+    // NO fallback - if no media, return empty array
+    console.warn('⚠️ [AddPostDetailsScreen] No media provided - empty array');
     return [];
   });
 
@@ -96,10 +99,14 @@ export default function AddPostDetailsScreen({
 
   // Update mediaItems when route params change (from CropAdjustScreen)
   useEffect(() => {
-    if (croppedMedia && croppedMedia.length > 0) {
+    if (finalMedia && finalMedia.length > 0) {
+      console.log('🟢 [AddPostDetailsScreen] finalMedia updated:', finalMedia.length, 'items');
+      setMediaItems(finalMedia);
+    } else if (croppedMedia && croppedMedia.length > 0) {
+      console.log('⚠️ [AddPostDetailsScreen] Using legacy croppedMedia');
       setMediaItems(croppedMedia);
     }
-  }, [croppedMedia]);
+  }, [finalMedia, croppedMedia]);
 
   const getAspectRatioValue = (ratio: string): number => {
     switch (ratio) {
@@ -111,14 +118,26 @@ export default function AddPostDetailsScreen({
   };
 
   const uploadImage = async (imageUri: string): Promise<string> => {
+    console.log('📤 [AddPostDetailsScreen] uploadImage called');
+    console.log('📤 [AddPostDetailsScreen] Upload params:', {
+      imageUri: imageUri.substring(0, 50) + '...',
+      userId: user?.uid,
+      platform: Platform.OS,
+    });
+    
     const fileName = `post_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    const reference = storage().ref(`/posts/${user?.uid}/${fileName}`);
+    const storagePath = `/posts/${user?.uid}/${fileName}`;
+    console.log('📤 [AddPostDetailsScreen] Storage path:', storagePath);
+    
+    const reference = storage().ref(storagePath);
 
     let uploadUri = imageUri;
     if (Platform.OS === 'ios' && uploadUri.startsWith('file://')) {
       uploadUri = uploadUri.replace('file://', '');
+      console.log('📤 [AddPostDetailsScreen] iOS: Removed file:// prefix');
     }
 
+    console.log('📤 [AddPostDetailsScreen] Starting putFile upload...');
     const task = reference.putFile(uploadUri);
 
     return new Promise((resolve, reject) => {
@@ -129,15 +148,22 @@ export default function AddPostDetailsScreen({
             (taskSnapshot.bytesTransferred / taskSnapshot.totalBytes) * 100
           );
           setProgress(percent);
+          if (percent % 25 === 0) { // Log every 25% to avoid spam
+            console.log(`📤 [AddPostDetailsScreen] Upload progress: ${percent}%`);
+          }
         },
         (error) => {
+          console.error('❌ [AddPostDetailsScreen] Upload error:', error);
           reject(error);
         },
         async () => {
           try {
+            console.log('📤 [AddPostDetailsScreen] Upload complete, getting download URL...');
             const url = await reference.getDownloadURL();
+            console.log('✅ [AddPostDetailsScreen] Download URL obtained:', url.substring(0, 50) + '...');
             resolve(url);
           } catch (urlError: any) {
+            console.error('❌ [AddPostDetailsScreen] Error getting download URL:', urlError);
             reject(urlError);
           }
         }
@@ -149,50 +175,93 @@ export default function AddPostDetailsScreen({
     const item = mediaItems[index];
     if (!item) return;
 
-    // Navigate to CropAdjustScreen for this specific image
-    // Pass finalUri so it opens the already-cropped image for re-editing
+    // Navigate to CropAdjustScreen for re-editing
+    // Pass the finalUri as the image to edit (it's already a cropped bitmap)
     navigateToScreen(navigation, 'CropAdjust', {
       contentType,
-      selectedImages: selectedImages.length > 0 ? selectedImages : mediaItems.map(m => ({
-        uri: m.finalUri, // Use finalUri, not originalUri
+      selectedImages: mediaItems.map(m => ({
+        uri: m.finalUri, // Use finalUri (cropped bitmap) for re-editing
         id: m.id,
         type: m.type,
       })),
-      imageUri: item.finalUri, // Use finalUri for editing
+      imageUri: item.finalUri, // Use finalUri (cropped bitmap) for editing
       currentImageIndex: index,
       allowMultiple: mediaItems.length > 1,
-      croppedMedia: mediaItems,
+      croppedMedia: mediaItems, // Pass current media for context
     });
   };
 
   const handlePreviewImage = (index: number) => {
-    // Navigate to PreviewScreen
-    navigateToScreen(navigation, 'PostPreview', {
-      croppedMedia: mediaItems,
-      postType: contentType,
-      currentIndex: index,
-    });
+    // Preview is now handled inline - no navigation to separate preview screen
+    // This prevents the ghost "Processing" screen from appearing
+    setPreviewIndex(index);
   };
 
   const handlePost = async () => {
+    console.log('🔵 [AddPostDetailsScreen] POST button clicked - START');
+    console.log('🔵 [AddPostDetailsScreen] Current screen state:', {
+      mediaItemsCount: mediaItems.length,
+      hasUser: !!user,
+      currentScreen: 'AddPostDetailsScreen',
+    });
+
     if (!user) {
+      console.log('❌ [AddPostDetailsScreen] No user, aborting');
       Alert.alert('Error', 'Please log in to create a post');
       return;
     }
 
     if (mediaItems.length === 0) {
+      console.log('❌ [AddPostDetailsScreen] No media items, aborting');
       Alert.alert('Error', 'No media to post');
       return;
     }
 
+    console.log('🔵 [AddPostDetailsScreen] Setting uploading state to true');
     setUploading(true);
     setProgress(0);
 
     try {
-      // Upload first cropped image (for now, handle multiple later)
+      if (mediaItems.length === 0) {
+        console.log('❌ [AddPostDetailsScreen] No media items, aborting');
+        Alert.alert('Error', 'No media to upload');
+        return;
+      }
+      
       const firstItem = mediaItems[0];
-      const imageUriToUpload = firstItem.finalUri; // Use only finalUri
-      const imageUrl = await uploadImage(imageUriToUpload);
+      if (!firstItem) {
+        console.log('❌ [AddPostDetailsScreen] First item is null, aborting');
+        Alert.alert('Error', 'No media to upload');
+        return;
+      }
+      
+      console.log('🔵 [AddPostDetailsScreen] Starting image uploads...');
+      console.log('🔵 [AddPostDetailsScreen] Upload details:', {
+        totalImages: mediaItems.length,
+        firstItemRatio: firstItem.ratio,
+      });
+      
+      // Upload ALL images to Firebase Storage
+      const mediaUrls: string[] = [];
+      for (let i = 0; i < mediaItems.length; i++) {
+        const item = mediaItems[i];
+        if (!item?.finalUri) {
+          console.warn(`⚠️ [AddPostDetailsScreen] Skipping item ${i} - no finalUri`);
+          continue;
+        }
+        
+        console.log(`📤 [AddPostDetailsScreen] Uploading image ${i + 1}/${mediaItems.length}...`);
+        const imageUrl = await uploadImage(item.finalUri);
+        mediaUrls.push(imageUrl);
+        console.log(`✅ [AddPostDetailsScreen] Image ${i + 1} uploaded: ${imageUrl.substring(0, 50)}...`);
+      }
+      
+      if (mediaUrls.length === 0) {
+        throw new Error('Failed to upload any images');
+      }
+      
+      console.log('✅ [AddPostDetailsScreen] All images uploaded successfully');
+      console.log(`✅ [AddPostDetailsScreen] Total URLs: ${mediaUrls.length}`);
 
       // Get current user
       const currentUser = auth().currentUser;
@@ -210,53 +279,123 @@ export default function AddPostDetailsScreen({
       // Determine if post has details
       const hasDetails = !!(description.trim() || location.trim() || tagArray.length > 0);
 
-      // Create post document
+      // Create post document with mediaUrls array (multi-image support)
+      // CRITICAL: mediaUrls contains the FINAL cropped bitmap URLs (exact adjusted frames)
+      const firstImageUrl = mediaUrls[0] || '';
+      
+      console.log('🔵 [AddPostDetailsScreen] Creating post document with final cropped bitmaps:');
+      console.log('🔵 [AddPostDetailsScreen] mediaUrls count:', mediaUrls.length);
+      console.log('🔵 [AddPostDetailsScreen] firstImageUrl (finalCroppedUrl):', firstImageUrl.substring(0, 80) + '...');
+      console.log('🔵 [AddPostDetailsScreen] Aspect ratio:', firstItem.cropData.ratio);
+      
+      // CRITICAL: Build media array for compatibility (contains FINAL cropped bitmap URLs)
+      // This ensures PostCard and other components can read from either mediaUrls or media array
+      // IMPORTANT: mediaUrls contains the uploaded final cropped bitmap URLs from Firebase Storage
+      // These are NOT original images - they are the exact bitmaps exported from CropAdjustScreen
+      const mediaArray = mediaUrls.map((url, index) => {
+        // CRITICAL: url is a Firebase Storage URL pointing to the final cropped bitmap
+        // This is NOT the original gallery image - it's the processed bitmap with fixed aspect ratio
+        console.log(`🔵 [AddPostDetailsScreen] Media array item ${index}: ${url.substring(0, 50)}...`);
+        return {
+          type: 'image' as const,
+          url: url, // FINAL cropped bitmap URL from Firebase Storage (primary field)
+          uri: url, // FINAL cropped bitmap URL from Firebase Storage (backward compatibility)
+          id: `media-${index}`,
+        };
+      });
+      
       const postData = {
         type: 'post',
+        postId: `post_${Date.now()}_${Math.random().toString(36).substring(7)}`, // Unique postId
+        ownerId: currentUser.uid,
         createdBy: currentUser.uid,
         userId: currentUser.uid,
         username: currentUser.displayName || currentUser.email || 'User',
-        imageUrl,
+        // PRIMARY: mediaUrls array contains FINAL cropped bitmap URLs (exact adjusted frames)
+        mediaUrls: mediaUrls, // Array of all uploaded FINAL cropped bitmap URLs
+        // CRITICAL: media array also contains FINAL cropped bitmap URLs (for compatibility)
+        media: mediaArray, // Array of media objects with FINAL cropped bitmap URLs
+        // CRITICAL: finalCroppedUrl is the PRIMARY field for single image posts (REAL cropped bitmap)
+        finalCroppedUrl: firstImageUrl, // FINAL cropped bitmap URL (exact adjusted frame)
+        // Legacy fields for backward compatibility
+        imageUrl: firstImageUrl, // Legacy field (FINAL cropped bitmap URL)
         caption: description.trim(),
         location: location.trim() || undefined,
         placeName: location.trim() || undefined,
         details: hasDetails ? description.trim() : undefined,
         tags: tagArray,
+        ratio: firstItem.cropData.ratio, // Aspect ratio of FIRST image
         likeCount: 0,
-        commentCount: 0,
+        commentsCount: 0,
+        commentCount: 0, // Legacy field
         shareCount: 0,
         likedBy: [],
         savedBy: [],
         aspectRatio: getAspectRatioValue(firstItem.cropData.ratio),
         createdAt: firestore.FieldValue.serverTimestamp(),
       };
+      
+      // CRITICAL: Log the post data to verify all URLs are final cropped bitmaps
+      console.log('🔵 [AddPostDetailsScreen] Post data structure:', {
+        mediaUrlsCount: postData.mediaUrls.length,
+        mediaArrayCount: postData.media.length,
+        finalCroppedUrl: postData.finalCroppedUrl?.substring(0, 50) + '...',
+        imageUrl: postData.imageUrl?.substring(0, 50) + '...',
+        ratio: postData.ratio,
+        aspectRatio: postData.aspectRatio,
+      });
 
+      console.log('🔵 [AddPostDetailsScreen] Creating Firestore document...');
       await firestore().collection('posts').add(postData);
+      console.log('✅ [AddPostDetailsScreen] Post document created successfully');
 
-      Alert.alert('Success', 'Post created successfully!', [
-        {
-          text: 'OK',
-          onPress: () => {
-            // Navigate back to home
-            const rootNav = (navigation as any).getParent?.() || (navigation as any).getParent?.('Stack') || navigation;
-            rootNav.reset({
-              index: 0,
-              routes: [{ name: 'MainTabs', params: { screen: 'Home' } }],
-            });
-          },
-        },
-      ]);
+      // Navigate directly to home without alert to prevent ghost screens
+      // Use setTimeout to ensure navigation happens after state updates
+      console.log('🔵 [AddPostDetailsScreen] Preparing navigation to Home...');
+      console.log('🔵 [AddPostDetailsScreen] Current navigation state:', {
+        canGoBack: navigation.canGoBack?.(),
+        getState: navigation.getState?.(),
+      });
+      
+      setTimeout(() => {
+        try {
+          console.log('🔵 [AddPostDetailsScreen] Executing navigation reset...');
+          const rootNav = (navigation as any).getParent?.() || (navigation as any).getParent?.('Stack') || navigation;
+          console.log('🔵 [AddPostDetailsScreen] Root navigator obtained:', {
+            hasReset: typeof rootNav.reset === 'function',
+            navigatorType: rootNav.constructor?.name,
+          });
+          
+          rootNav.reset({
+            index: 0,
+            routes: [{ name: 'MainTabs', params: { screen: 'Home' } }],
+          });
+          
+          console.log('✅ [AddPostDetailsScreen] Navigation reset completed - should be on Home now');
+        } catch (navError) {
+          console.error('❌ [AddPostDetailsScreen] Navigation error:', navError);
+        }
+      }, 100);
     } catch (error: any) {
-      console.error('Error creating post:', error);
+      console.error('❌ [AddPostDetailsScreen] Error creating post:', error);
+      console.error('❌ [AddPostDetailsScreen] Error details:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack?.substring(0, 200),
+      });
       Alert.alert('Error', error.message || 'Failed to create post');
     } finally {
+      console.log('🔵 [AddPostDetailsScreen] Finally block - resetting upload state');
       setUploading(false);
       setProgress(0);
+      console.log('✅ [AddPostDetailsScreen] POST flow completed');
     }
   };
 
+  // INSTAGRAM LOGIC: Use ONLY final rendered bitmaps (no original images, no transform re-application)
+  // finalUri contains the final cropped bitmap with exact dimensions (1080x1080, 1080x1350, or 1920x1080)
   const currentPreviewItem = mediaItems[previewIndex];
-  const previewImageUri = currentPreviewItem?.finalUri; // Use only finalUri
+  const previewImageUri = currentPreviewItem?.finalUri; // FINAL rendered bitmap - no fallback
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -287,17 +426,13 @@ export default function AddPostDetailsScreen({
         {mediaItems.length > 0 && previewImageUri && (
           <>
             {/* Main Preview */}
-            <TouchableOpacity
-              style={styles.imagePreview}
-              activeOpacity={0.9}
-              onPress={() => handlePreviewImage(previewIndex)}
-            >
+            <View style={styles.imagePreview}>
               <Image
                 source={{ uri: previewImageUri }}
                 style={styles.previewImage}
                 resizeMode="cover"
               />
-            </TouchableOpacity>
+            </View>
 
             {/* Thumbnail Strip for Multiple Images */}
             {mediaItems.length > 1 && (

@@ -81,10 +81,13 @@ export type RootStackParamList = {
       finalCroppedUri?: string;
       type: 'image' | 'video';
     }>;
+    lockedRatio?: '1:1' | '4:5' | '16:9'; // NEW: Locked ratio from PhotoSelectScreen (Instagram-style: one ratio per post)
   };
   PostPreview: {
     croppedMedia: Array<{
-      originalUri: string;
+      // NOTE: originalUri is deprecated - use finalUri (final cropped bitmap) instead
+      originalUri?: string; // Deprecated - only for legacy support
+      finalUri: string; // FINAL cropped bitmap (primary field)
       cropData: {
         ratio: '1:1' | '4:5' | '16:9';
         zoomScale: number;
@@ -93,17 +96,20 @@ export type RootStackParamList = {
         frameWidth: number;
         frameHeight: number;
       };
-      finalCroppedUri?: string;
+      finalCroppedUri?: string; // Legacy alias for finalUri
       type: 'image' | 'video';
     }>;
     postType: 'post' | 'reel';
     currentIndex?: number;
   };
   AddPostDetails: {
-    croppedImageUri?: string;
-    originalImageUri?: string;
-    croppedMedia?: Array<{
-      originalUri: string;
+    // NEW FLOW: PhotoSelect → CropAdjust → AddPostDetails
+    // This screen receives finalMedia (final rendered bitmaps) from CropAdjustScreen
+    // NO original images, NO transform re-application - just final bitmaps
+    finalMedia?: Array<{
+      id: string;
+      finalUri: string; // FINAL rendered bitmap (1080x1080, 1080x1350, or 1920x1080)
+      ratio: '1:1' | '4:5' | '16:9';
       cropData: {
         ratio: '1:1' | '4:5' | '16:9';
         zoomScale: number;
@@ -112,10 +118,27 @@ export type RootStackParamList = {
         frameWidth: number;
         frameHeight: number;
       };
-      finalCroppedUri?: string;
       type: 'image' | 'video';
     }>;
     contentType?: 'post' | 'reel';
+    // Legacy fields (deprecated - use finalMedia instead)
+    // These fields are kept for backward compatibility but should NOT be used
+    croppedImageUri?: string; // Deprecated - use finalMedia[].finalUri
+    originalImageUri?: string; // Deprecated - original images are never used after crop
+    croppedMedia?: Array<{
+      originalUri?: string; // Deprecated - original images are never used after crop
+      finalUri: string; // FINAL cropped bitmap (primary field)
+      cropData: {
+        ratio: '1:1' | '4:5' | '16:9';
+        zoomScale: number;
+        offsetX: number;
+        offsetY: number;
+        frameWidth: number;
+        frameHeight: number;
+      };
+      finalCroppedUri?: string; // Legacy alias for finalUri
+      type: 'image' | 'video';
+    }>;
     selectedImages?: Array<{
       uri: string;
       width?: number;

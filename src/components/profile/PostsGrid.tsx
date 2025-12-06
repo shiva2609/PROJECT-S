@@ -6,8 +6,10 @@
 
 import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions } from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Post } from '../../hooks/useProfileData';
+import { normalizePost } from '../../utils/postUtils';
 
 interface PostsGridProps {
   posts: Post[];
@@ -30,7 +32,16 @@ export default function PostsGrid({ posts, onPostPress }: PostsGridProps) {
   return (
     <View style={styles.container}>
       {posts.map((post, index) => {
-        const imageUrl = post.imageURL || post.coverImage || (post.gallery && post.gallery[0]);
+        // CRITICAL: Use ONLY final cropped bitmaps - NO fallback to original images
+        // Normalize post to get mediaUrls (contains final rendered bitmap URLs)
+        const normalizedPost = normalizePost(post as any);
+        const mediaUrls = normalizedPost.mediaUrls || [];
+        
+        // Use first image from mediaUrls (final cropped bitmap) or finalCroppedUrl
+        // DO NOT fallback to imageUrl, coverImage, or gallery - those might be original images
+        const thumbnailUrl = mediaUrls[0] || (post as any).finalCroppedUrl || '';
+        const hasMultipleImages = mediaUrls.length > 1;
+        
         return (
           <TouchableOpacity
             key={post.id}
@@ -38,8 +49,20 @@ export default function PostsGrid({ posts, onPostPress }: PostsGridProps) {
             onPress={() => onPostPress?.(post)}
             activeOpacity={0.9}
           >
-            {imageUrl ? (
-              <Image source={{ uri: imageUrl }} style={styles.postImage} />
+            {thumbnailUrl ? (
+              <>
+                <Image 
+                  source={{ uri: thumbnailUrl }} 
+                  style={styles.postImage}
+                  resizeMode="cover"
+                />
+                {/* Multiple images indicator */}
+                {hasMultipleImages && (
+                  <View style={styles.multipleImagesIndicator}>
+                    <Icon name="layers" size={16} color={Colors.white.primary} />
+                  </View>
+                )}
+              </>
             ) : (
               <View style={styles.postPlaceholder}>
                 <Text style={styles.placeholderText}>📷</Text>
@@ -95,6 +118,17 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Regular',
     color: Colors.black.qua,
     textAlign: 'center',
+  },
+  multipleImagesIndicator: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 12,
+    padding: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

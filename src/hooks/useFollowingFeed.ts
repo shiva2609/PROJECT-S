@@ -124,6 +124,13 @@ export function useFollowingFeed() {
               commentCount: data.commentCount || 0,
               createdAt: data.createdAt,
               metadata: data.metadata,
+              // CRITICAL: Preserve aspectRatio and ratio fields - these are set by the user during upload
+              aspectRatio: data.aspectRatio,
+              ratio: data.ratio,
+              // Preserve all other fields that might be needed
+              finalCroppedUrl: data.finalCroppedUrl,
+              mediaUrls: data.mediaUrls,
+              imageUrl: data.imageUrl,
             });
             return { post: normalized as Post, doc };
           })
@@ -182,6 +189,7 @@ export function useFollowingFeed() {
       }
 
       const result = await fetchPosts(ids);
+      console.log('📱 [useFollowingFeed] Loaded posts:', result.posts.length, 'posts from', ids.length, 'followed users');
       setPosts(result.posts);
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore);
@@ -230,14 +238,43 @@ export function useFollowingFeed() {
 
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const newFollowingIds = snapshot.docs.map(doc => doc.data().followingId);
+      console.log('👥 [useFollowingFeed] Following IDs updated:', newFollowingIds.length, 'users');
       
-      // If following list changed, reload posts
-      if (newFollowingIds.length !== followingIds.length ||
-          !newFollowingIds.every(id => followingIds.includes(id))) {
+      // Always update followingIds and reload posts when snapshot changes
+      // This ensures posts are loaded even if followingIds was empty initially
+      const idsChanged = newFollowingIds.length !== followingIds.length ||
+          !newFollowingIds.every(id => followingIds.includes(id)) ||
+          !followingIds.every(id => newFollowingIds.includes(id));
+      
+      if (idsChanged) {
+        console.log('🔄 [useFollowingFeed] Following list changed, reloading posts...');
         setFollowingIds(newFollowingIds);
-        await loadPosts();
+        // Reload posts with new following IDs
+        if (newFollowingIds.length > 0) {
+          setLoading(true);
+          try {
+            const result = await fetchPosts(newFollowingIds);
+            console.log('📱 [useFollowingFeed] Loaded posts from listener:', result.posts.length, 'posts');
+            setPosts(result.posts);
+            setLastDoc(result.lastDoc);
+            setHasMore(result.hasMore);
+          } catch (error: any) {
+            console.error('Error loading posts from listener:', error);
+          } finally {
+            setLoading(false);
+          }
+        } else {
+          setPosts([]);
+          setHasMore(false);
+          setLoading(false);
+        }
       }
     }, (error: any) => {
+      // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+      if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+        console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+        return;
+      }
       if (error.code === 'failed-precondition') {
         console.warn('Firestore query error: ensure createdAt exists.');
       } else {
@@ -246,7 +283,7 @@ export function useFollowingFeed() {
     });
 
     return () => unsubscribe();
-  }, [user, followingIds.length, loadPosts]);
+  }, [user, fetchPosts]);
 
   // Initial load
   useEffect(() => {

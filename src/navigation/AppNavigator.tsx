@@ -50,6 +50,7 @@ import CropAdjustScreen from '../screens/CropAdjustScreen';
 import AddPostDetailsScreen from '../screens/AddPostDetailsScreen';
 import PostPreviewScreen from '../screens/PostPreviewScreen';
 import CreatePostScreen from '../screens/CreatePostScreen';
+import CreateReelScreen from '../screens/CreateReelScreen';
 import UnifiedEditScreen from '../screens/UnifiedEditScreen';
 import AddDetailsScreen from '../screens/AddDetailsScreen';
 import DrawerNavigator from './DrawerNavigator';
@@ -294,6 +295,7 @@ export default function AppNavigator() {
             gestureEnabled: true,
           }}
         />
+        {/* PostPreview kept for manual preview only - not used in create flow */}
         <Stack.Screen 
           name="PostPreview" 
           component={PostPreviewScreen}

@@ -28,6 +28,7 @@ interface FollowingSuggestionsProps {
   onUserPress?: (userId: string) => void;
   onViewMore?: (category: string, users: SuggestionCandidate[]) => void;
   compact?: boolean; // Hide header when compact
+  showContactsCard?: boolean; // Show contacts card when no suggestions (default: false)
 }
 
 export default function FollowingSuggestions({
@@ -35,6 +36,7 @@ export default function FollowingSuggestions({
   onUserPress,
   onViewMore,
   compact = false,
+  showContactsCard = false,
 }: FollowingSuggestionsProps) {
   const { categories, loading, refresh, updateSuggestionFollowState } = useSuggestions();
   const [contactsModalVisible, setContactsModalVisible] = useState(false);
@@ -54,28 +56,64 @@ export default function FollowingSuggestions({
     console.log('[FollowingSuggestions] Categories with users:', categoriesWithUsers.length, categoriesWithUsers.map(c => ({ title: c.title, count: c.users.length })));
   }, [categories]);
 
-  // ALWAYS render - show loading, placeholders, or actual suggestions
+  // Filter categories that have users (only render when there are actual suggestions)
+  const peopleWhoFollowYouIndex = categories.findIndex(
+    category => category.title === 'People Who Follow You' && category.users && category.users.length > 0
+  );
+  const peopleWhoFollowYouCategory = peopleWhoFollowYouIndex >= 0 ? categories[peopleWhoFollowYouIndex] : null;
+  
+  // Filter other categories that have users, excluding "People Who Follow You" and any duplicates
+  const seenTitles = new Set<string>();
+  const otherCategoriesWithUsers = categories.filter(
+    category => {
+      // Skip "People Who Follow You" (handled separately)
+      if (category.title === 'People Who Follow You') return false;
+      // Skip if no users
+      if (!category.users || category.users.length === 0) return false;
+      // Skip duplicates (same title already seen)
+      if (seenTitles.has(category.title)) {
+        console.log('[FollowingSuggestions] Skipping duplicate category:', category.title);
+        return false;
+      }
+      seenTitles.add(category.title);
+      return true;
+    }
+  );
+  
+  // Build list of categories to render
+  const categoriesToRender: typeof categories = [];
+  if (peopleWhoFollowYouCategory) {
+    categoriesToRender.push(peopleWhoFollowYouCategory);
+  }
+  categoriesToRender.push(...otherCategoriesWithUsers);
+  
+  console.log('[FollowingSuggestions] Categories to render:', categoriesToRender.length, categoriesToRender.map(c => ({ title: c.title, count: c.users.length })));
+  
+  // Show loading state only if loading and no categories yet
   if (loading && categories.length === 0) {
-    return (
-      <View style={[styles.container, compact && styles.compactContainer]}>
-        <StackCardPlaceholder />
-        <ContactsPermissionCard onSuccess={refresh} />
-        <PlaceholderSuggestionCarousel />
-      </View>
-    );
+    return null; // Don't show loading placeholders - wait for actual suggestions
   }
 
-  // ALWAYS render - even if empty, show placeholders
+  // CRITICAL: If no suggestions and showContactsCard is true, show contacts card
+  if (categoriesToRender.length === 0) {
+    if (showContactsCard) {
+      console.log('[FollowingSuggestions] No suggestions available - showing contacts card');
+      return (
+        <View style={[styles.container, compact && styles.compactContainer]}>
+          <ContactsPermissionCard onSuccess={refresh} />
+        </View>
+      );
+    } else {
+      console.log('[FollowingSuggestions] No suggestions available - not rendering component');
+      return null; // Don't render anything if no suggestions and contacts card not requested
+    }
+  }
+
+  // Render suggestions - only when we have actual categories with users
   return (
     <View style={[styles.container, compact && styles.compactContainer]}>
-      {/* Stack Card Section - Always visible */}
-      <StackCardPlaceholder />
-
-      {/* Contacts Permission Card - Always visible */}
-      <ContactsPermissionCard onSuccess={refresh} />
-
       {/* Header (only if not compact) */}
-      {!compact && categories.length > 0 && (
+      {!compact && (
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Discover People</Text>
           <TouchableOpacity
@@ -88,74 +126,29 @@ export default function FollowingSuggestions({
         </View>
       )}
 
-      {/* Suggestions or Placeholders */}
-      {(() => {
-        // PRIORITY: Always show "People Who Follow You" category if it exists, regardless of other filters
-        // Use findIndex to get the first occurrence only (prevent duplicates)
-        const peopleWhoFollowYouIndex = categories.findIndex(
-          category => category.title === 'People Who Follow You' && category.users && category.users.length > 0
+      {/* Render ALL suggestion categories - "People Who Follow You" first (highest priority) */}
+      {categoriesToRender.map((category, index) => {
+        console.log('[FollowingSuggestions] Rendering category:', category.title, 'with', category.users.length, 'users');
+        return (
+          <View key={`${category.title}-${index}`} style={styles.categoryWrapper}>
+            <SuggestionCarousel
+              title={category.title}
+              users={category.users}
+              onUserPress={onUserPress}
+              onViewMore={onViewMore}
+              onFollowChange={handleFollowChange}
+              compact={compact}
+            />
+          </View>
         );
-        const peopleWhoFollowYouCategory = peopleWhoFollowYouIndex >= 0 ? categories[peopleWhoFollowYouIndex] : null;
-        
-        // Filter other categories that have users, excluding "People Who Follow You" and any duplicates
-        const seenTitles = new Set<string>();
-        const otherCategoriesWithUsers = categories.filter(
-          category => {
-            // Skip "People Who Follow You" (handled separately)
-            if (category.title === 'People Who Follow You') return false;
-            // Skip if no users
-            if (!category.users || category.users.length === 0) return false;
-            // Skip duplicates (same title already seen)
-            if (seenTitles.has(category.title)) {
-              console.log('[FollowingSuggestions] Skipping duplicate category:', category.title);
-              return false;
-            }
-            seenTitles.add(category.title);
-            return true;
-          }
-        );
-        
-        console.log('[FollowingSuggestions] Rendering - "People Who Follow You" category:', peopleWhoFollowYouCategory ? `${peopleWhoFollowYouCategory.users.length} users` : 'not found');
-        console.log('[FollowingSuggestions] Rendering - Other categories with users:', otherCategoriesWithUsers.length, otherCategoriesWithUsers.map(c => ({ title: c.title, count: c.users.length })));
-        
-        // ALWAYS render "People Who Follow You" if it exists (PRIORITY RULE)
-        const categoriesToRender: typeof categories = [];
-        
-        if (peopleWhoFollowYouCategory) {
-          categoriesToRender.push(peopleWhoFollowYouCategory);
-          console.log('[FollowingSuggestions] Adding "People Who Follow You" category (PRIORITY - always shown)');
-        }
-        
-        // Add other categories (no duplicates)
-        categoriesToRender.push(...otherCategoriesWithUsers);
-        
-        if (categoriesToRender.length > 0) {
-          // Render ALL categories - "People Who Follow You" first (highest priority)
-          return (
-            <React.Fragment>
-              {categoriesToRender.map((category, index) => {
-                console.log('[FollowingSuggestions] Rendering category:', category.title, 'with', category.users.length, 'users', category.users.map(u => u.id));
-                return (
-                  <View key={`${category.title}-${index}`} style={styles.categoryWrapper}>
-                    <SuggestionCarousel
-                      title={category.title}
-                      users={category.users}
-                      onUserPress={onUserPress}
-                      onViewMore={onViewMore}
-                      onFollowChange={handleFollowChange}
-                      compact={compact}
-                    />
-                  </View>
-                );
-              })}
-            </React.Fragment>
-          );
-        } else {
-          // Render placeholder carousel when no suggestions available
-          console.log('[FollowingSuggestions] No categories with users, showing placeholder');
-          return <PlaceholderSuggestionCarousel />;
-        }
-      })()}
+      })}
+      
+      {/* CRITICAL: Always show contacts card below suggestions when showContactsCard is true (when posts have ended) */}
+      {showContactsCard && (
+        <View style={styles.contactsCardWrapper}>
+          <ContactsPermissionCard onSuccess={refresh} />
+        </View>
+      )}
 
       <ContactsPermissionModal
         visible={contactsModalVisible}
@@ -166,7 +159,6 @@ export default function FollowingSuggestions({
       />
     </View>
   );
-
 }
 
 const styles = StyleSheet.create({
@@ -212,5 +204,9 @@ const styles = StyleSheet.create({
   },
   categoryWrapper: {
     marginBottom: 16,
+  },
+  contactsCardWrapper: {
+    marginTop: 8,
+    marginBottom: 8,
   },
 });

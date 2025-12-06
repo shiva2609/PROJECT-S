@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,10 @@ import {
   ActivityIndicator,
   Alert,
   Share,
+  FlatList,
+  Dimensions,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -19,6 +23,9 @@ import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../api/authService';
 import { toggleLikePost, toggleBookmarkPost, toggleSharePost, Post } from '../api/firebaseService';
 import { formatTimestamp, parseHashtags } from '../utils/postHelpers';
+import { normalizePost } from '../utils/postUtils';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function PostDetailScreen({ navigation, route }: any) {
   const { postId } = route.params;
@@ -27,6 +34,8 @@ export default function PostDetailScreen({ navigation, route }: any) {
   const [loading, setLoading] = useState(true);
   const [isLiked, setIsLiked] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
     if (!postId) {
@@ -38,9 +47,39 @@ export default function PostDetailScreen({ navigation, route }: any) {
     const unsubscribe = onSnapshot(postRef, (snapshot) => {
       if (snapshot.exists()) {
         const postData = { id: snapshot.id, ...snapshot.data() } as Post;
-        setPost(postData);
+        
+        // CRITICAL: Log raw post data to debug image URL issues
+        console.log('🔵 [PostDetailScreen] Raw post data from Firestore:', {
+          id: postData.id,
+          hasMediaUrls: Array.isArray(postData.mediaUrls) && postData.mediaUrls.length > 0,
+          mediaUrlsCount: postData.mediaUrls?.length || 0,
+          hasFinalCroppedUrl: !!(postData as any).finalCroppedUrl,
+          finalCroppedUrl: ((postData as any).finalCroppedUrl || '').substring(0, 50) + '...',
+          hasMediaArray: Array.isArray(postData.media) && postData.media.length > 0,
+          mediaArrayCount: postData.media?.length || 0,
+          hasImageUrl: !!postData.imageUrl,
+          imageUrl: (postData.imageUrl || '').substring(0, 50) + '...',
+          ratio: (postData as any).ratio,
+          aspectRatio: (postData as any).aspectRatio,
+        });
+        
+        // Normalize post to ensure mediaUrls exists (prioritizes final cropped bitmaps)
+        const normalizedPost = normalizePost(postData);
+        
+        // CRITICAL: Log normalized post data to verify correct URLs are used
+        console.log('🔵 [PostDetailScreen] Normalized post data:', {
+          id: normalizedPost.id,
+          mediaUrlsCount: normalizedPost.mediaUrls?.length || 0,
+          mediaUrls: normalizedPost.mediaUrls?.map((url: string) => url.substring(0, 50) + '...') || [],
+          finalCroppedUrl: ((normalizedPost as any).finalCroppedUrl || '').substring(0, 50) + '...',
+          ratio: (normalizedPost as any).ratio,
+          aspectRatio: (normalizedPost as any).aspectRatio,
+        });
+        
+        setPost(normalizedPost as Post);
         setIsLiked(user ? (postData.likedBy?.includes(user.uid) || false) : false);
         setIsSaved(user ? (postData.savedBy?.includes(user.uid) || false) : false);
+        setCurrentImageIndex(0); // Reset to first image when post changes
       }
       setLoading(false);
     }, (error) => {
@@ -60,7 +99,17 @@ export default function PostDetailScreen({ navigation, route }: any) {
       const newIsLiked = await toggleLikePost(postId, user.uid);
       setIsLiked(newIsLiked);
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to like post');
+      console.error('Error toggling like:', error);
+      // Handle version conflict errors gracefully (Firebase transaction retry failed)
+      if (error.code === 'failed-precondition' || error.message?.includes('version')) {
+        console.warn('⚠️ Version conflict detected, will retry automatically on next attempt');
+        // Don't show alert for version conflicts - Firebase will retry automatically
+        return;
+      }
+      // Only show alert for other errors
+      if (error.code !== 'failed-precondition') {
+        Alert.alert('Error', error.message || 'Failed to like post');
+      }
     }
   };
 
@@ -83,9 +132,11 @@ export default function PostDetailScreen({ navigation, route }: any) {
       if (user) {
         await toggleSharePost(post.id, user.uid);
       }
+      // Use final cropped bitmap URL for sharing (not original image)
+      const shareUrl = displayMediaUrls[0] || finalCroppedUrl || '';
       await Share.share({
-        message: `${post.caption || 'Check out this post!'}\n${post.imageUrl}`,
-        url: post.imageUrl,
+        message: `${post.caption || 'Check out this post!'}${shareUrl ? `\n${shareUrl}` : ''}`,
+        url: shareUrl,
       });
     } catch (error: any) {
       console.error('Error sharing post:', error);
@@ -119,12 +170,33 @@ export default function PostDetailScreen({ navigation, route }: any) {
     );
   }
 
-  const imageUrl = post.imageUrl || post.coverImage || '';
+  // CRITICAL: Use ONLY final cropped bitmaps - NO fallback to original images
+  // mediaUrls contains the final rendered bitmap URLs uploaded to Firebase Storage
+  // These are the exact images exported from CropAdjustScreen with fixed aspect ratios
+  const mediaUrls = (post as any).mediaUrls || [];
+  
+  // If mediaUrls is empty, check for finalCroppedUrl (single image posts)
+  // DO NOT fallback to imageUrl or coverImage - those might be original images
+  const finalCroppedUrl = (post as any).finalCroppedUrl;
+  const displayMediaUrls = mediaUrls.length > 0 
+    ? mediaUrls 
+    : (finalCroppedUrl ? [finalCroppedUrl] : []);
+  
   const profilePhoto = post.profilePhoto || '';
   const location = post.location || post.placeName || '';
   const username = post.username || 'User';
   const timestamp = formatTimestamp(post.createdAt);
   const captionParts = parseHashtags(post.caption || '');
+  
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const contentOffsetX = event.nativeEvent.contentOffset.x;
+    const index = Math.round(contentOffsetX / SCREEN_WIDTH);
+    setCurrentImageIndex(index);
+  };
+  
+  const handleDoubleTap = () => {
+    handleLike();
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -161,9 +233,73 @@ export default function PostDetailScreen({ navigation, route }: any) {
           </View>
         </TouchableOpacity>
 
-        {/* Post Image */}
-        {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.postImage} resizeMode="cover" />
+        {/* Post Images - Swipeable Carousel */}
+        {displayMediaUrls.length > 0 ? (
+          <View style={styles.imageCarouselContainer}>
+            <FlatList
+              ref={flatListRef}
+              data={displayMediaUrls}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              keyExtractor={(item, index) => `image-${index}`}
+              renderItem={({ item }) => {
+                // Calculate height based on post aspect ratio (if available)
+                // This ensures the final cropped bitmap displays at its native aspect ratio
+                const aspectRatio = post.aspectRatio;
+                const ratio = post.ratio;
+                let imageHeight = 400; // Default height
+                
+                if (aspectRatio && aspectRatio > 0) {
+                  // Use stored aspectRatio: height = width * (1 / aspectRatio)
+                  imageHeight = Math.round(SCREEN_WIDTH * (1 / aspectRatio));
+                } else if (ratio) {
+                  // Fallback to ratio string
+                  switch (ratio) {
+                    case '1:1':
+                      imageHeight = SCREEN_WIDTH;
+                      break;
+                    case '4:5':
+                      imageHeight = Math.round(SCREEN_WIDTH * 1.25);
+                      break;
+                    case '16:9':
+                      imageHeight = Math.round(SCREEN_WIDTH * 0.5625);
+                      break;
+                  }
+                }
+                
+                return (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={handleDoubleTap}
+                    style={[styles.imageContainer, { height: imageHeight }]}
+                  >
+                    <Image 
+                      source={{ uri: item }} 
+                      style={[styles.postImage, { height: imageHeight }]} 
+                      resizeMode="contain" 
+                    />
+                  </TouchableOpacity>
+                );
+              }}
+            />
+            {/* Pagination Dots */}
+            {displayMediaUrls.length > 1 && (
+              <View style={styles.paginationContainer}>
+                {displayMediaUrls.map((_item: string, index: number) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.paginationDot,
+                      index === currentImageIndex && styles.paginationDotActive,
+                    ]}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
         ) : (
           <View style={[styles.postImage, styles.postImagePlaceholder]}>
             <Icon name="image-outline" size={48} color={Colors.black.qua} />
@@ -314,14 +450,51 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.regular,
     color: Colors.black.qua,
   },
-  postImage: {
+  imageCarouselContainer: {
     width: '100%',
-    height: 400,
+    // Height will be calculated dynamically based on post aspect ratio
+    position: 'relative',
     backgroundColor: Colors.white.tertiary,
   },
+  imageContainer: {
+    width: SCREEN_WIDTH,
+    // Height is set dynamically in renderItem based on aspect ratio
+  },
+  postImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: Colors.white.tertiary,
+    // CRITICAL: Use contain to maintain exact aspect ratio of final cropped bitmap
+    // Do NOT use cover - that would crop the final bitmap
+  },
   postImagePlaceholder: {
+    width: '100%',
+    height: 400,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: Colors.white.tertiary,
+  },
+  paginationContainer: {
+    position: 'absolute',
+    bottom: 12,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+  },
+  paginationDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  paginationDotActive: {
+    backgroundColor: Colors.white.primary,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   engagementStrip: {
     flexDirection: 'row',

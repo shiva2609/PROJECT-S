@@ -1,3 +1,25 @@
+/**
+ * INSTAGRAM-STYLE CROP/ADJUST SCREEN
+ * 
+ * NEW FLOW: PhotoSelect → CropAdjust → AddPostDetails → Upload
+ * 
+ * KEY CHANGES (Instagram-style implementation):
+ * 1. Ratio is LOCKED on first image selection (one ratio per post)
+ * 2. Final bitmaps are generated IMMEDIATELY when user presses "Next"
+ * 3. Each image gets a final rendered bitmap with exact dimensions:
+ *    - 1:1 → 1080x1080
+ *    - 4:5 → 1080x1350
+ *    - 16:9 → 1920x1080
+ * 4. All subsequent screens use ONLY final bitmaps (no original images, no transform re-application)
+ * 5. Feed/PostCards display final bitmaps directly (no scaling logic, just aspect ratio matching)
+ * 
+ * OLD FLOW (removed):
+ * - Original images reused after selection
+ * - Cropping recalculated at preview/post time
+ * - Transform params stored and re-applied later
+ * - Feed cards applied transforms again
+ */
+
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -23,6 +45,7 @@ import ImagePicker from 'react-native-image-crop-picker';
 import { Colors } from '../theme/colors';
 import { Fonts } from '../theme/fonts';
 import { navigateToScreen } from '../utils/navigationHelpers';
+import { exportFinalBitmap } from '../utils/cropUtils';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const FRAME_PADDING = 20;
@@ -62,12 +85,13 @@ interface CropAdjustScreenProps {
       currentImageIndex?: number;
       allowMultiple?: boolean;
       croppedMedia?: CropData[];
+      lockedRatio?: AspectRatio; // NEW: Locked ratio from PhotoSelectScreen (Instagram-style)
     };
   };
 }
 
 export default function CropAdjustScreen({ navigation, route }: CropAdjustScreenProps) {
-  const { selectedImages = [], contentType = 'post', currentImageIndex = 0, croppedMedia = [] } = route.params;
+  const { selectedImages = [], contentType = 'post', currentImageIndex = 0, croppedMedia = [], lockedRatio } = route.params;
   
   // Validate max items
   useEffect(() => {
@@ -78,8 +102,12 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
     }
   }, [selectedImages.length]);
 
+  // INSTAGRAM LOGIC: Use locked ratio from PhotoSelectScreen (one ratio per post)
+  // If no locked ratio provided, default based on contentType
+  const defaultRatio: AspectRatio = lockedRatio || (contentType === 'post' ? '4:5' : '16:9');
+  
   const [currentIndex, setCurrentIndex] = useState(currentImageIndex);
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('4:5');
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(defaultRatio);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [loading, setLoading] = useState(false);
   const [cropping, setCropping] = useState(false);
@@ -93,10 +121,18 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
     }
     return [];
   });
+  
+  // INSTAGRAM LOGIC: Lock ratio - prevent changing it (all images in post use same ratio)
+  // If lockedRatio is provided, aspect ratio cannot be changed
+  const isRatioLocked = !!lockedRatio;
 
-  // Determine which image to use (finalUri if editing, originalUri if new)
+  // CRITICAL: Use ONLY final cropped bitmaps when editing existing crops
+  // For new crops, use original image URI (will be replaced with final bitmap after export)
+  // After export, currentImageUri will be the final cropped bitmap path
   const currentImage = selectedImages[currentIndex];
   const existingCrop = savedCrops[currentIndex];
+  // If editing existing crop, use finalUri (final cropped bitmap)
+  // If new crop, use original image URI (will be exported to final bitmap on "Next")
   const currentImageUri = existingCrop?.finalUri || currentImage?.uri || route.params.imageUri || '';
 
   // Calculate frame dimensions based on aspect ratio
@@ -303,6 +339,11 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
   });
 
   const handleRatioChange = (ratio: AspectRatio) => {
+    // INSTAGRAM LOGIC: If ratio is locked, don't allow changes
+    if (isRatioLocked) {
+      console.log('🔒 [CropAdjustScreen] Ratio is locked, cannot change');
+      return;
+    }
     setAspectRatio(ratio);
   };
 
@@ -354,11 +395,13 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
 
       // Use react-native-image-crop-picker to perform actual bitmap cropping
       // This library handles native module linking automatically
+      // NOTE: This function is legacy - main flow now uses exportFinalBitmap
       const croppedImage = await ImagePicker.openCropper({
         path: imageUri,
         width: outputWidth,
         height: outputHeight,
         cropping: true,
+        mediaType: 'photo',
         cropperToolbarTitle: 'Crop Image',
         cropperChooseText: 'Done',
         cropperCancelText: 'Cancel',
@@ -368,7 +411,6 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
         cropperStatusBarColor: '#FF7F4D',
         cropperToolbarColor: '#FF7F4D',
         cropperCircleOverlay: aspectRatio === '1:1',
-        aspectRatioPreserved: true,
         cropperToolbarWidgetColor: '#FFFFFF',
         showCropGuidelines: true,
         hideBottomControls: false,
@@ -405,14 +447,12 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
     setCropping(true);
 
     try {
-      // Perform actual bitmap cropping
-      const finalCroppedUri = await performRealCrop();
-
-      // Create crop data with final cropped URI and crop parameters
+      // INSTAGRAM LOGIC: Save crop parameters and generate final bitmap IMMEDIATELY
+      // This ensures we have a final rendered bitmap before moving to next screen
       const cropData: CropData = {
         id: currentImage?.id || currentImageUri,
-        finalUri: finalCroppedUri, // Will be actual cropped bitmap once native modules are set up
-        ratio: aspectRatio,
+        finalUri: currentImageUri, // Temporary - will be replaced with exported bitmap
+        ratio: aspectRatio, // Use locked ratio (same for all images)
         cropData: {
           ratio: aspectRatio,
           zoomScale: scale.value,
@@ -428,12 +468,46 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
       updatedCrops[currentIndex] = cropData;
       setSavedCrops(updatedCrops);
 
+      // INSTAGRAM LOGIC: Generate final bitmap IMMEDIATELY for current image
+      console.log(`🖼️ [CropAdjustScreen] Generating final bitmap for image ${currentIndex + 1}/${selectedImages.length}...`);
+      
+      const originalImage = selectedImages[currentIndex];
+      if (!originalImage) {
+        throw new Error('Original image not found');
+      }
+
+            // CRITICAL: Export final cropped bitmap from original image
+            // After this, originalImage.uri is NEVER used again - only croppedBitmapPath
+            const croppedBitmapPath = await exportFinalBitmap({
+              imageUri: originalImage.uri, // Use original image URI for export (last time it's used)
+              cropParams: {
+                zoom: cropData.cropData.zoomScale,
+                offsetX: cropData.cropData.offsetX,
+                offsetY: cropData.cropData.offsetY,
+              },
+              frameWidth: cropData.cropData.frameWidth,
+              frameHeight: cropData.cropData.frameHeight,
+              ratio: cropData.ratio, // Use locked ratio
+            });
+            
+            // After export, croppedBitmapPath is the ONLY image URI used going forward
+            // originalImage.uri is NEVER used again in the pipeline
+
+      console.log(`✅ [CropAdjustScreen] Bitmap ${currentIndex + 1} generated:`, croppedBitmapPath.substring(0, 50) + '...');
+
+      // Update saved crop with REAL final bitmap path
+      updatedCrops[currentIndex] = {
+        ...cropData,
+        finalUri: croppedBitmapPath, // REAL cropped bitmap - no fallback to original
+      };
+      setSavedCrops(updatedCrops);
+
       // Check if there are more images to process
       if (currentIndex < selectedImages.length - 1) {
-        // Move to next image
+        // Move to next image - ratio stays locked, generate bitmap for next image
         setCurrentIndex(currentIndex + 1);
         setCropping(false);
-        // Reset transforms for next image
+        // Reset transforms for next image (but keep same ratio)
         translateX.value = 0;
         translateY.value = 0;
         scale.value = 1;
@@ -441,18 +515,21 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
         savedTranslateY.value = 0;
         savedScale.value = 1;
       } else {
-        // All images processed, navigate to AddPostDetailsScreen with all cropped media
+        // All images processed - all final bitmaps are ready
+        console.log('✅ [CropAdjustScreen] All final bitmaps generated, navigating to AddPostDetails...');
         setCropping(false);
+        
+        // Navigate with processed media containing REAL cropped bitmaps
+        // CRITICAL: All images use the SAME locked ratio (Instagram-style)
         navigateToScreen(navigation, 'AddPostDetails', {
-          croppedMedia: updatedCrops,
+          finalMedia: updatedCrops, // All final bitmaps ready
           contentType: contentType,
-          selectedImages: selectedImages,
         });
       }
     } catch (error: any) {
       setCropping(false);
-      console.error('Error cropping image:', error);
-      Alert.alert('Error', error.message || 'Failed to crop image');
+      console.error('❌ [CropAdjustScreen] Error in handleNext:', error);
+      Alert.alert('Error', error.message || 'Failed to process image');
     }
   };
 
@@ -536,7 +613,7 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
           )}
         </View>
 
-        {/* Ratio Selector */}
+        {/* Ratio Selector - Disabled if ratio is locked (Instagram-style) */}
         <View style={styles.ratioContainer}>
           {(['1:1', '4:5', '16:9'] as AspectRatio[]).map((ratio) => (
             <TouchableOpacity
@@ -544,19 +621,27 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
               style={[
                 styles.ratioButton,
                 aspectRatio === ratio && styles.ratioButtonActive,
+                isRatioLocked && styles.ratioButtonLocked, // Visual indicator when locked
               ]}
               onPress={() => handleRatioChange(ratio)}
+              disabled={isRatioLocked} // Disable if locked
             >
               <Text
                 style={[
                   styles.ratioText,
                   aspectRatio === ratio && styles.ratioTextActive,
+                  isRatioLocked && aspectRatio !== ratio && styles.ratioTextLocked,
                 ]}
               >
                 {ratio}
               </Text>
             </TouchableOpacity>
           ))}
+          {isRatioLocked && (
+            <Text style={styles.lockedRatioHint}>
+              Ratio locked for all images
+            </Text>
+          )}
         </View>
       </SafeAreaView>
     </GestureHandlerRootView>
@@ -702,5 +787,18 @@ const styles = StyleSheet.create({
   },
   ratioTextActive: {
     color: Colors.white.primary,
+  },
+  ratioButtonLocked: {
+    opacity: 0.6, // Visual indicator when locked
+  },
+  ratioTextLocked: {
+    opacity: 0.5,
+  },
+  lockedRatioHint: {
+    marginTop: 8,
+    fontFamily: Fonts.regular,
+    fontSize: 12,
+    color: Colors.white.secondary,
+    textAlign: 'center',
   },
 });

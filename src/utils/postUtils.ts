@@ -93,3 +93,77 @@ export function ensurePostAuthorFields(postData: any, userId: string): any {
   };
 }
 
+/**
+ * Normalize post to support multi-image posts (Instagram-like)
+ * Ensures mediaUrls is always an array, converting from legacy fields if needed
+ * CRITICAL: Preserves aspectRatio and ratio fields - these are set by the user during upload and MUST NEVER be changed
+ */
+export function normalizePost(post: PostData): PostData {
+  const normalized = { ...post };
+
+  // CRITICAL: Preserve aspectRatio and ratio - these are set by the user during upload
+  // aspectRatio is the numeric value (1, 0.8, 1.777, etc.)
+  // ratio is the string value ('1:1', '4:5', '16:9')
+  // These MUST be preserved exactly as stored - never override or default
+  const preservedAspectRatio = (normalized as any).aspectRatio;
+  const preservedRatio = (normalized as any).ratio;
+
+  // CRITICAL: If mediaUrls already exists and is an array, use it (contains final cropped bitmaps)
+  if (Array.isArray(normalized.mediaUrls) && normalized.mediaUrls.length > 0) {
+    // Ensure aspectRatio and ratio are preserved
+    if (preservedAspectRatio !== undefined) {
+      (normalized as any).aspectRatio = preservedAspectRatio;
+    }
+    if (preservedRatio !== undefined) {
+      (normalized as any).ratio = preservedRatio;
+    }
+    return normalized; // Already normalized - mediaUrls contains final cropped bitmaps
+  }
+
+  // CRITICAL: Convert to mediaUrls array using ONLY final cropped bitmaps
+  // PRIORITY ORDER: 
+  // 1. finalCroppedUrl (REAL cropped bitmap from CropAdjustScreen) - HIGHEST PRIORITY
+  // 2. media array with url/uri fields (these should contain final cropped bitmaps from upload)
+  // 
+  // DO NOT use imageUrl, coverImage, or gallery as fallbacks - these might be original images
+  // Only use media array if it contains url/uri fields (which should be final cropped bitmaps)
+  const mediaUrls: string[] = [];
+
+  // Priority 1: finalCroppedUrl (REAL cropped bitmap from CropAdjustScreen) - HIGHEST PRIORITY
+  if ((normalized as any).finalCroppedUrl && typeof (normalized as any).finalCroppedUrl === 'string' && (normalized as any).finalCroppedUrl.length > 0) {
+    mediaUrls.push((normalized as any).finalCroppedUrl);
+  }
+  // Priority 2: Check for media array (should contain final cropped bitmap URLs from upload)
+  // Only use media array if it has url/uri fields (these should be final cropped bitmaps)
+  else if (Array.isArray(normalized.media) && normalized.media.length > 0) {
+    normalized.media.forEach((item: any) => {
+      // Use url or uri from media array (these should be final cropped bitmap URLs)
+      const url = item.url || item.uri;
+      if (url && typeof url === 'string' && url.length > 0) {
+        mediaUrls.push(url);
+      }
+    });
+  }
+  // Priority 3: Check for mediaUrl (single string - should be final cropped bitmap)
+  // Only use if media array is not available
+  else if (normalized.mediaUrl && typeof normalized.mediaUrl === 'string' && normalized.mediaUrl.length > 0) {
+    mediaUrls.push(normalized.mediaUrl);
+  }
+  // NOTE: We do NOT fallback to imageUrl, coverImage, or gallery
+  // These fields might contain original image URIs, which would break the fixed aspect ratio pipeline
+
+  // Set mediaUrls (always an array, even if empty)
+  normalized.mediaUrls = mediaUrls.length > 0 ? mediaUrls : [];
+
+  // CRITICAL: Always preserve aspectRatio and ratio - these are set by the user during upload
+  // Never override or default these values - they determine the post card's display ratio
+  if (preservedAspectRatio !== undefined) {
+    (normalized as any).aspectRatio = preservedAspectRatio;
+  }
+  if (preservedRatio !== undefined) {
+    (normalized as any).ratio = preservedRatio;
+  }
+
+  return normalized;
+}
+

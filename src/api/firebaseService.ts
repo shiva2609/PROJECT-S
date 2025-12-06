@@ -59,7 +59,11 @@ export interface Post {
 	userId: string;
 	createdBy?: string; // Primary field for post author
 	username: string;
-	imageUrl?: string; // Legacy field - use media array for multi-media support
+	imageUrl?: string; // Legacy field - use mediaUrls array for multi-image support
+	mediaUrl?: string; // Legacy field - single image URL (will be normalized to mediaUrls)
+	// NEW: mediaUrls is the primary field for multi-image posts (Instagram-like)
+	// Array of image URLs - mediaUrls[0] is used as grid thumbnail
+	mediaUrls?: string[];
 	// CRITICAL: media is ALWAYS an array, never a single string
 	// Each item has: { type: 'image' | 'video', url: string, uri?: string, id?: string }
 	media?: Array<{ 
@@ -82,7 +86,7 @@ export interface Post {
 	coverImage?: string;
 	details?: string; // Additional post details
 	aspectRatio?: number; // Store aspect ratio for proper display (legacy)
-	ratio?: '1:1' | '4:5' | '16:9'; // Store aspect ratio as string for proper display
+	ratio?: '1:1' | '4:5' | '16:9'; // Store aspect ratio as string for proper display (aspect of FIRST image)
 }
 
 export interface TripPackage {
@@ -531,6 +535,11 @@ export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
 			.filter((post): post is Post => post !== null);
 		onUpdate(posts);
     }, (error: any) => {
+		// Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+		if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+			console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+			return; // Don't log full error, just suppress it
+		}
 		if (error.code === 'failed-precondition') {
 			console.warn('Firestore query error: ensure createdAt exists.');
 		} else {
@@ -542,50 +551,53 @@ export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
 export async function toggleLikePost(postId: string, userId: string): Promise<boolean> {
 	const ref = doc(db(), 'posts', postId);
 	
-	return await runTransaction(db(), async (transaction) => {
-		const snap = await transaction.get(ref);
-		if (!snap.exists()) throw new Error('Post not found');
-		
-		const data = snap.data() as any;
-		const likedBy = data.likedBy || [];
-		const currentLikeCount = Math.max(0, data.likeCount || 0);
-		const isLiked = likedBy.includes(userId);
-		
-		// Prevent double-like/unlike by checking current state
-		if (isLiked) {
-			// Unlike: remove from array and decrement count (never go below 0)
-			// Double-check: ensure user is actually in the array
-			if (!likedBy.includes(userId)) {
-				// User not in array, nothing to do
+	// Use withRetry wrapper to handle version conflicts and other transient errors
+	return await withRetry(async () => {
+		return await runTransaction(db(), async (transaction) => {
+			const snap = await transaction.get(ref);
+			if (!snap.exists()) throw new Error('Post not found');
+			
+			const data = snap.data() as any;
+			const likedBy = data.likedBy || [];
+			const currentLikeCount = Math.max(0, data.likeCount || 0);
+			const isLiked = likedBy.includes(userId);
+			
+			// Prevent double-like/unlike by checking current state
+			if (isLiked) {
+				// Unlike: remove from array and decrement count (never go below 0)
+				// Double-check: ensure user is actually in the array
+				if (!likedBy.includes(userId)) {
+					// User not in array, nothing to do
+					return false;
+				}
+				
+				const newLikedBy = likedBy.filter((id: string) => id !== userId);
+				const newLikeCount = Math.max(0, currentLikeCount - 1);
+				
+				transaction.update(ref, {
+					likedBy: newLikedBy,
+					likeCount: newLikeCount,
+				});
 				return false;
-			}
-			
-			const newLikedBy = likedBy.filter((id: string) => id !== userId);
-			const newLikeCount = Math.max(0, currentLikeCount - 1);
-			
-			transaction.update(ref, {
-				likedBy: newLikedBy,
-				likeCount: newLikeCount,
-			});
-			return false;
-		} else {
-			// Like: add to array and increment count
-			// Double-check: ensure user is not already in the array
-			if (likedBy.includes(userId)) {
-				// User already in array, nothing to do
+			} else {
+				// Like: add to array and increment count
+				// Double-check: ensure user is not already in the array
+				if (likedBy.includes(userId)) {
+					// User already in array, nothing to do
+					return true;
+				}
+				
+				const newLikedBy = [...likedBy, userId];
+				const newLikeCount = currentLikeCount + 1;
+				
+				transaction.update(ref, {
+					likedBy: newLikedBy,
+					likeCount: newLikeCount,
+				});
 				return true;
 			}
-			
-			const newLikedBy = [...likedBy, userId];
-			const newLikeCount = currentLikeCount + 1;
-			
-			transaction.update(ref, {
-				likedBy: newLikedBy,
-				likeCount: newLikeCount,
-			});
-			return true;
-		}
-	});
+		});
+	}, { retries: 3, initialDelayMs: 100 }); // Retry up to 3 times with 100ms initial delay
 }
 
 export async function likePost(postId: string): Promise<void> {

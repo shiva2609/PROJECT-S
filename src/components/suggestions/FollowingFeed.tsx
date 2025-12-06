@@ -16,6 +16,10 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useFollowingFeed, Post } from '../../hooks/useFollowingFeed';
+import { useAuth } from '../../contexts/AuthContext';
+import { toggleLikePost, toggleBookmarkPost } from '../../api/firebaseService';
+import { normalizePost } from '../../utils/postUtils';
+import PostCard from '../PostCard';
 // FollowingSuggestions removed - now handled by FollowingScreen
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
@@ -35,7 +39,24 @@ export default function FollowingFeed({
   inline = false,
 }: FollowingFeedProps) {
   const { posts, loading, hasMore, loadMore, refresh, followingIds } = useFollowingFeed();
+  const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+  const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
+
+  // Update liked/saved posts when posts change
+  useEffect(() => {
+    if (user) {
+      const liked = new Set<string>();
+      const saved = new Set<string>();
+      posts.forEach((post) => {
+        if ((post as any).likedBy?.includes(user.uid)) liked.add(post.id);
+        if ((post as any).savedBy?.includes(user.uid)) saved.add(post.id);
+      });
+      setLikedPosts(liked);
+      setSavedPosts(saved);
+    }
+  }, [posts, user]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -49,62 +70,166 @@ export default function FollowingFeed({
     }
   };
 
+  const handleLike = async (postId: string) => {
+    if (!user) return;
+    try {
+      const isLiked = await toggleLikePost(postId, user.uid);
+      setLikedPosts((prev) => {
+        const next = new Set(prev);
+        if (isLiked) next.add(postId);
+        else next.delete(postId);
+        return next;
+      });
+    } catch (error: any) {
+      console.error('Error toggling like:', error);
+    }
+  };
+
+  const handleBookmark = async (postId: string) => {
+    if (!user) return;
+    try {
+      const isSaved = await toggleBookmarkPost(postId, user.uid);
+      setSavedPosts((prev) => {
+        const next = new Set(prev);
+        if (isSaved) next.add(postId);
+        else next.delete(postId);
+        return next;
+      });
+    } catch (error: any) {
+      console.error('Error toggling bookmark:', error);
+    }
+  };
+
   const renderPost = ({ item, index }: { item: Post; index: number }) => {
-    const imageUrl = item.imageURL || item.coverImage || (item.gallery && item.gallery[0]);
-    const likeCount = item.likeCount || 0;
-    const commentCount = item.commentCount || 0;
+    if (!item || !item.id) {
+      console.warn('⚠️ [FollowingFeed] Invalid post item at index', index, item);
+      return null;
+    }
+
+    const isLiked = likedPosts.has(item.id);
+    const isSaved = savedPosts.has(item.id);
+
+    // CRITICAL: Convert Post to PostCard format using ONLY final cropped bitmaps
+    // DO NOT use imageURL or imageUrl - those might be original images
+    // Normalize post to get mediaUrls (contains final rendered bitmap URLs)
+    const normalizedPost = normalizePost(item as any);
+    const mediaUrls = normalizedPost.mediaUrls || [];
+    
+    // Build postCardData with ONLY final cropped bitmaps
+    const postCardData = {
+      ...item,
+      // Use mediaUrls (final cropped bitmaps) or finalCroppedUrl
+      // DO NOT fallback to imageURL or imageUrl - those might be original images
+      finalCroppedUrl: (item as any).finalCroppedUrl || mediaUrls[0] || '',
+      mediaUrls: mediaUrls.length > 0 ? mediaUrls : ((item as any).finalCroppedUrl ? [(item as any).finalCroppedUrl] : []),
+      // Legacy imageUrl field for backward compatibility (use final cropped bitmap)
+      imageUrl: mediaUrls[0] || (item as any).finalCroppedUrl || '',
+      // CRITICAL: Preserve aspectRatio and ratio - these determine the post card's display ratio
+      aspectRatio: (item as any).aspectRatio,
+      ratio: (item as any).ratio,
+    };
+
+    // Log for debugging
+    if (index === 0 || index < 3) {
+      console.log(`📱 [FollowingFeed] Rendering post ${index + 1}:`, {
+        id: item.id,
+        hasImage: !!(postCardData.mediaUrls?.length || postCardData.finalCroppedUrl),
+        aspectRatio: postCardData.aspectRatio,
+        ratio: postCardData.ratio,
+        createdBy: item.createdBy || item.userId,
+      });
+    }
 
     return (
-      <TouchableOpacity
-        style={styles.postCard}
-        onPress={() => onPostPress && onPostPress(item)}
-        activeOpacity={0.9}
-      >
-        <View style={styles.postHeader}>
-          <View style={styles.postAvatar}>
-            <Text style={styles.postAvatarText}>
-              {(item.username || item.createdBy || 'U').charAt(0).toUpperCase()}
-            </Text>
-          </View>
-          <View style={styles.postUserInfo}>
-            <Text style={styles.postUsername}>{item.username || item.createdBy || 'User'}</Text>
-            {item.metadata?.location && (
-              <Text style={styles.postLocation}>{item.metadata.location}</Text>
-            )}
-          </View>
-        </View>
-
-        {imageUrl && (
-          <Image source={{ uri: imageUrl }} style={styles.postImage} />
-        )}
-
-        <View style={styles.postActions}>
-          <View style={styles.actionLeft}>
-            <View style={styles.actionBtn}>
-              <Icon name="heart-outline" size={20} color={Colors.black.secondary} />
-              <Text style={styles.actionText}>{likeCount}</Text>
-            </View>
-            <View style={styles.actionBtn}>
-              <Icon name="chatbubble-ellipses-outline" size={20} color={Colors.black.secondary} />
-              <Text style={styles.actionText}>{commentCount}</Text>
-            </View>
-            <View style={styles.actionBtn}>
-              <Icon name="share-social-outline" size={20} color={Colors.black.secondary} />
-            </View>
-          </View>
-        </View>
-
-        {item.caption && (
-          <Text style={styles.postCaption} numberOfLines={2}>
-            <Text style={styles.captionUsername}>{item.username || 'User'}</Text>
-            {' '}
-            {item.caption}
-          </Text>
-        )}
-      </TouchableOpacity>
+      <PostCard
+        post={postCardData as any}
+        isLiked={isLiked}
+        isSaved={isSaved}
+        onLike={() => handleLike(item.id)}
+        onComment={() => onPostPress && onPostPress(item)}
+        onShare={() => {}}
+        onBookmark={() => handleBookmark(item.id)}
+        onProfilePress={() => onUserPress && onUserPress(item.createdBy || item.userId || '')}
+        onPostDetailPress={() => onPostPress && onPostPress(item)}
+        currentUserId={user?.uid}
+      />
     );
   };
 
+  // CRITICAL: Always render posts when they exist, regardless of loading state
+  // Only show loading/empty states when there are truly no posts
+  
+  // If inline mode, render posts as regular Views (for use in parent ScrollView)
+  if (inline) {
+    console.log('📱 [FollowingFeed] Inline mode - posts:', posts.length, 'loading:', loading, 'followingIds:', followingIds.length);
+    
+    // Show loading only if no posts exist yet
+    if (loading && posts.length === 0) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.brand.primary} />
+        </View>
+      );
+    }
+    
+    // Show empty state only if no following IDs (no one followed yet)
+    if (followingIds.length === 0) {
+      return (
+        <View style={styles.inlineContainer}>
+          <View style={styles.emptyState}>
+            <Icon name="people-outline" size={64} color={Colors.black.qua} />
+            <Text style={styles.emptyTitle}>Start following people</Text>
+            <Text style={styles.emptySubtext}>
+              Follow people to see their posts in your feed
+            </Text>
+          </View>
+        </View>
+      );
+    }
+    
+    // Show empty state if no posts but following someone
+    if (posts.length === 0 && !loading) {
+      return (
+        <View style={styles.inlineContainer}>
+          <View style={styles.emptyState}>
+            <Icon name="images-outline" size={64} color={Colors.black.qua} />
+            <Text style={styles.emptyTitle}>No posts yet</Text>
+            <Text style={styles.emptySubtext}>
+              The people you follow haven't posted anything yet.
+            </Text>
+          </View>
+        </View>
+      );
+    }
+    
+    // CRITICAL: Always render posts when they exist
+    console.log('📱 [FollowingFeed] Rendering inline mode:', posts.length, 'posts');
+    return (
+      <View style={styles.inlineContainer}>
+        {posts.map((post, index) => {
+          console.log(`📱 [FollowingFeed] Rendering post ${index + 1}:`, post.id, 'by', post.createdBy || post.userId);
+          if (!post || !post.id) {
+            console.warn('⚠️ [FollowingFeed] Invalid post at index', index);
+            return null;
+          }
+          return (
+            <View key={post.id || `post-${index}`}>
+              {renderPost({ item: post, index })}
+            </View>
+          );
+        })}
+        {/* Show loading indicator only if loading more posts */}
+        {loading && posts.length > 0 && (
+          <View style={styles.loadMoreContainer}>
+            <ActivityIndicator size="small" color={Colors.brand.primary} />
+          </View>
+        )}
+        {/* Don't show "No more posts" here - it's shown in FollowingScreen as a card */}
+      </View>
+    );
+  }
+
+  // Non-inline mode (FlatList)
   // Show loading state
   if (loading && posts.length === 0) {
     return (
@@ -115,7 +240,6 @@ export default function FollowingFeed({
   }
 
   // Show empty state only if no following IDs (no one followed yet)
-  // But still render container so suggestions can appear below
   if (followingIds.length === 0) {
     return (
       <View style={styles.container}>
@@ -139,24 +263,6 @@ export default function FollowingFeed({
         <Text style={styles.emptySubtext}>
           The people you follow haven't posted anything yet.
         </Text>
-      </View>
-    );
-  }
-
-  // If inline mode, render posts as regular Views (for use in parent ScrollView)
-  if (inline) {
-    return (
-      <View style={styles.inlineContainer}>
-        {posts.map((post, index) => (
-          <View key={post.id}>
-            {renderPost({ item: post, index })}
-          </View>
-        ))}
-        {hasMore && (
-          <View style={styles.loadMoreContainer}>
-            <ActivityIndicator size="small" color={Colors.brand.primary} />
-          </View>
-        )}
       </View>
     );
   }
@@ -196,6 +302,9 @@ const styles = StyleSheet.create({
   },
   inlineContainer: {
     backgroundColor: Colors.white.secondary,
+    width: '100%',
+    // Ensure container takes up space and allows scrolling
+    minHeight: 200,
   },
   loadingContainer: {
     flex: 1,
@@ -290,6 +399,15 @@ const styles = StyleSheet.create({
   loadMoreContainer: {
     padding: 20,
     alignItems: 'center',
+  },
+  endIndicator: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  endIndicatorText: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: Colors.black.qua,
   },
   // Removed suggestionsBelow styles - suggestions now handled by FollowingScreen
   emptyState: {

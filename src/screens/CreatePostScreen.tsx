@@ -13,6 +13,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { launchImageLibrary, launchCamera, Asset, MediaType } from 'react-native-image-picker';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
@@ -39,11 +40,12 @@ interface CreatePostScreenProps {
 }
 
 export default function CreatePostScreen({ navigation, route }: CreatePostScreenProps) {
-  const { selectedImages, toggleSelectImage, setSelectedImages } = useCreateFlowStore();
+  const { selectedImages, toggleSelectImage, setSelectedImages, resetCreateFlow } = useCreateFlowStore();
   const [photos, setPhotos] = useState<Asset[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const isMountedRef = useRef(true);
+  const hasNavigatedFromCreateFlowRef = useRef(false); // Track if we're navigating within create flow
 
   // Request storage permission for Android
   const requestStoragePermission = useCallback(async (): Promise<boolean> => {
@@ -85,6 +87,29 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
     }
     return true;
   }, []);
+
+  // CRITICAL: Reset selection when screen is opened from outside (not from within create flow)
+  // This ensures fresh state when user enters Create screen, but preserves state when navigating back
+  // SELECTION BEHAVIOR:
+  // - When user enters Create screen from outside (e.g., from Home tab), selection is cleared
+  // - When user navigates back from crop/edit screens, selection is preserved
+  // - This provides a clean slate for new posts while maintaining workflow continuity
+  useFocusEffect(
+    useCallback(() => {
+      // Check if we're coming from within the create flow
+      // If flag is set, we're navigating back from a create flow screen - preserve state
+      if (hasNavigatedFromCreateFlowRef.current) {
+        console.log('🔄 [CreatePostScreen] Preserving selection - navigating back from create flow');
+        hasNavigatedFromCreateFlowRef.current = false; // Reset flag after check
+        return;
+      }
+      
+      // Otherwise, reset selection (user entered from outside)
+      console.log('🔄 [CreatePostScreen] Resetting selection - entering from outside create flow');
+      resetCreateFlow();
+      setSelectedIndex(0);
+    }, [resetCreateFlow])
+  );
 
   // Load photos from gallery
   useEffect(() => {
@@ -150,6 +175,8 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
     }
   }, [requestStoragePermission]);
 
+  // TOGGLE SELECTION: First tap = select, second tap = deselect
+  // This ensures proper toggle behavior for image selection
   const handleImagePress = useCallback((asset: Asset) => {
     if (!asset.uri) return;
 
@@ -157,14 +184,39 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
     const index = selectedImages.findIndex((img) => img.id === imageId);
 
     if (index >= 0) {
-      // If already selected, switch to it
-      setSelectedIndex(index);
+      // DESELECT: Image is already selected - remove it
+      console.log('❌ [CreatePostScreen] Deselecting image:', imageId.substring(0, 50) + '...');
+      toggleSelectImage({
+        id: imageId,
+        uri: imageId,
+        width: asset.width,
+        height: asset.height,
+        createdAt: asset.timestamp || Date.now(),
+      });
+      
+      // Update selected index if needed
+      const updatedImages = selectedImages.filter((img) => img.id !== imageId);
+      if (updatedImages.length > 0) {
+        // If there are still images, show the last one or adjust index
+        const newIndex = Math.min(index, updatedImages.length - 1);
+        setSelectedIndex(newIndex);
+      } else {
+        // No images left
+        setSelectedIndex(0);
+      }
     } else {
-      // If not selected, toggle selection
+      // SELECT: Image is not selected - add it (if under limit)
       if (selectedImages.length >= MAX_SELECTION) {
-        Alert.alert('Maximum Selection', `You can only select up to ${MAX_SELECTION} images.`);
+        // Show non-blocking warning (toast-like alert)
+        Alert.alert(
+          'Maximum Selection',
+          `You can select up to ${MAX_SELECTION} images only.`,
+          [{ text: 'OK' }]
+        );
         return;
       }
+      
+      console.log('✅ [CreatePostScreen] Selecting image:', imageId.substring(0, 50) + '...');
       toggleSelectImage({
         id: imageId,
         uri: imageId,
@@ -195,20 +247,34 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
           createdAt: result.assets[0].timestamp || Date.now(),
         };
 
-        if (selectedImages.length >= MAX_SELECTION) {
-          Alert.alert('Maximum Selection', `You can only select up to ${MAX_SELECTION} images.`);
-          return;
+        // Check if already selected (toggle behavior)
+        const exists = selectedImages.some((img) => img.id === capturedImage.id);
+        
+        if (exists) {
+          // Deselect if already selected
+          toggleSelectImage(capturedImage);
+          const updatedImages = selectedImages.filter((img) => img.id !== capturedImage.id);
+          setSelectedIndex(updatedImages.length > 0 ? updatedImages.length - 1 : 0);
+        } else {
+          // Select if not selected (check max limit)
+          if (selectedImages.length >= MAX_SELECTION) {
+            Alert.alert(
+              'Maximum Selection',
+              `You can select up to ${MAX_SELECTION} images only.`,
+              [{ text: 'OK' }]
+            );
+            return;
+          }
+          toggleSelectImage(capturedImage);
+          setSelectedIndex(selectedImages.length);
         }
-
-        toggleSelectImage(capturedImage);
-        setSelectedIndex(selectedImages.length);
       }
     } catch (error: any) {
       if (error.code !== 'E_CAMERA_CANCELLED') {
         Alert.alert('Error', 'Failed to capture photo');
       }
     }
-  }, [selectedImages.length, toggleSelectImage]);
+  }, [selectedImages, toggleSelectImage]);
 
   const handleNext = useCallback(() => {
     if (selectedImages.length === 0) {
@@ -216,6 +282,9 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
       return;
     }
 
+    // Mark that we're navigating within create flow (preserve state on back)
+    hasNavigatedFromCreateFlowRef.current = true;
+    
     // Navigate to UnifiedEditScreen
     navigateToScreen(navigation, 'UnifiedEdit');
   }, [selectedImages.length, navigation]);

@@ -28,6 +28,15 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function AddDetailsScreen({ navigation }: any) {
+  console.log('🟢 [AddDetailsScreen] Component mounted/rendered');
+  
+  useEffect(() => {
+    console.log('🟢 [AddDetailsScreen] useEffect - Component mounted');
+    return () => {
+      console.log('🔴 [AddDetailsScreen] useEffect cleanup - Component unmounting');
+    };
+  }, []);
+  
   const { user } = useAuth();
   const {
     selectedImages,
@@ -119,7 +128,11 @@ export default function AddDetailsScreen({ navigation }: any) {
     }
   }, [selectedImages, isMounted]);
 
-  // Render locked preview using same transform as edit screen
+  // LEGACY SCREEN: This screen is used by UnifiedEditScreen (legacy flow)
+  // NEW FLOW: PhotoSelect → CropAdjust → AddPostDetails (uses final bitmaps, no transform re-application)
+  // 
+  // For legacy compatibility, we still support transform preview, but the NEW flow should
+  // use AddPostDetailsScreen which uses final rendered bitmaps directly.
   const renderPreview = useMemo(() => {
     if (selectedImages.length === 0) return null;
 
@@ -135,7 +148,8 @@ export default function AddDetailsScreen({ navigation }: any) {
       );
     }
 
-    // Apply the same transform as in edit screen
+    // LEGACY: Apply transform for preview (only used by legacy UnifiedEditScreen flow)
+    // NEW FLOW: AddPostDetailsScreen uses final rendered bitmaps (no transform needed)
     const transform = getImageTransform(
       params,
       size.width,
@@ -199,15 +213,28 @@ export default function AddDetailsScreen({ navigation }: any) {
   };
 
   const handlePost = async () => {
+    console.log('🟢 [AddDetailsScreen] POST button clicked - START');
+    console.log('🟢 [AddDetailsScreen] Current screen state:', {
+      selectedImagesCount: selectedImages.length,
+      hasUser: !!user,
+      isMounted,
+      isPosting,
+      currentScreen: 'AddDetailsScreen',
+    });
+    
     // CRITICAL: Prevent duplicate posts from multiple button presses
     if (isPosting) {
-      console.log('Post already in progress, ignoring duplicate request');
+      console.log('🟢 [AddDetailsScreen] Post already in progress, ignoring duplicate request');
       return;
     }
 
-    if (!isMounted) return;
+    if (!isMounted) {
+      console.log('🟢 [AddDetailsScreen] Component not mounted, aborting');
+      return;
+    }
 
     if (!user) {
+      console.log('❌ [AddDetailsScreen] No user, aborting');
       if (isMounted) {
         InteractionManager.runAfterInteractions(() => {
           Alert.alert('Error', 'Please log in to create a post');
@@ -217,6 +244,7 @@ export default function AddDetailsScreen({ navigation }: any) {
     }
 
     if (selectedImages.length === 0) {
+      console.log('❌ [AddDetailsScreen] No images, aborting');
       if (isMounted) {
         InteractionManager.runAfterInteractions(() => {
           Alert.alert('Error', 'No images to post');
@@ -226,15 +254,21 @@ export default function AddDetailsScreen({ navigation }: any) {
     }
 
     // Set posting flag immediately to prevent duplicates
+    console.log('🟢 [AddDetailsScreen] Setting posting/uploading/processing states to true');
     setIsPosting(true);
     setUploading(true);
     setProcessing(true);
     setProgress(0);
 
     try {
-      // Step 1: Process final crops (native cropping)
-      // Note: Currently using original images since native cropping has Activity issues
-      // The preview already shows the correct transform
+      console.log('🟢 [AddDetailsScreen] Starting post creation process...');
+      console.log('🟢 [AddDetailsScreen] Step 1: Processing final crops...');
+      
+      // LEGACY FLOW: Process final crops (this screen is used by UnifiedEditScreen)
+      // NEW FLOW: PhotoSelect → CropAdjust → AddPostDetails (final bitmaps generated in CropAdjustScreen)
+      // 
+      // For legacy compatibility, we still process crops here, but the NEW flow should
+      // use AddPostDetailsScreen which receives final rendered bitmaps from CropAdjustScreen
       const finalImageUris = await processFinalCrops(
         selectedImages,
         cropParams,
@@ -242,19 +276,25 @@ export default function AddDetailsScreen({ navigation }: any) {
         cropBoxDimensions.width,
         cropBoxDimensions.height
       );
+      
+      console.log('✅ [AddDetailsScreen] Step 1 complete - Final image URIs:', finalImageUris.length);
 
       if (finalImageUris.length === 0) {
         throw new Error('No images processed');
       }
 
       // Step 2: Upload all cropped images
+      console.log('🟢 [AddDetailsScreen] Step 2: Uploading images...');
       const uploadedUrls: string[] = [];
       for (let i = 0; i < finalImageUris.length; i++) {
+        console.log(`🟢 [AddDetailsScreen] Uploading image ${i + 1}/${finalImageUris.length}...`);
         const uploadedUrl = await uploadImage(finalImageUris[i]);
         uploadedUrls.push(uploadedUrl);
+        console.log(`✅ [AddDetailsScreen] Image ${i + 1} uploaded:`, uploadedUrl.substring(0, 50) + '...');
         // Update progress for each image
         setProgress(Math.round(((i + 1) / finalImageUris.length) * 50)); // 50% for uploads
       }
+      console.log('✅ [AddDetailsScreen] Step 2 complete - All images uploaded');
 
       const imageUrl = uploadedUrls[0]; // Primary image for backward compatibility
 
@@ -296,13 +336,19 @@ export default function AddDetailsScreen({ navigation }: any) {
       const captionValue = description.trim();
       const detailsValue = hasDetails ? description.trim() : null;
       
+      const firstImageUrl = uploadedUrls[0] || '';
+      
       const postData: any = {
         type: 'post',
         createdBy: currentUser.uid,
         userId: currentUser.uid,
         username: currentUser.displayName || currentUser.email || 'User',
+        // PRIMARY: mediaUrls array contains FINAL cropped bitmap URLs (for PostCard compatibility)
+        mediaUrls: uploadedUrls, // Array of all uploaded FINAL cropped bitmap URLs
+        // CRITICAL: finalCroppedUrl is the PRIMARY field for single image posts (REAL cropped bitmap)
+        finalCroppedUrl: firstImageUrl, // FINAL cropped bitmap URL (exact adjusted frame)
         // Legacy field for backward compatibility (old posts)
-        imageUrl: uploadedUrls[0] || '',
+        imageUrl: firstImageUrl,
         // ALWAYS store media as array - this is the primary field
         // media[].url contains the FINAL cropped image
         media: mediaArray,
@@ -313,7 +359,8 @@ export default function AddDetailsScreen({ navigation }: any) {
         savedBy: [],
         // Store ratio as string for proper aspect ratio handling
         ratio: globalRatio as '1:1' | '4:5' | '16:9',
-        // Legacy aspectRatio field for backward compatibility
+        // CRITICAL: aspectRatio must be stored for PostCard to render correctly
+        // This ensures consistent aspect ratio rendering across all sections
         aspectRatio: globalRatio === '1:1' ? 1 : globalRatio === '4:5' ? 0.8 : 16 / 9,
         createdAt: serverTimestamp(),
       };
@@ -333,27 +380,49 @@ export default function AddDetailsScreen({ navigation }: any) {
         postData.tags = tagArray;
       }
 
+      console.log('🟢 [AddDetailsScreen] Step 3: Creating Firestore document...');
       await addDoc(collection(db, 'posts'), postData);
+      console.log('✅ [AddDetailsScreen] Post document created successfully');
 
       // Navigate back to home immediately (no alert to avoid Activity error)
       if (isMounted) {
+        console.log('🟢 [AddDetailsScreen] Preparing navigation to Home...');
+        console.log('🟢 [AddDetailsScreen] Current navigation state:', {
+          canGoBack: navigation.canGoBack?.(),
+          getState: navigation.getState?.(),
+        });
+        
         // Use setTimeout to ensure navigation happens after state updates
         setTimeout(() => {
           if (isMounted) {
             try {
+              console.log('🟢 [AddDetailsScreen] Executing navigation reset...');
               const rootNav = (navigation as any).getParent?.() || (navigation as any).getParent?.('Stack') || navigation;
+              console.log('🟢 [AddDetailsScreen] Root navigator obtained:', {
+                hasReset: typeof rootNav.reset === 'function',
+                navigatorType: rootNav.constructor?.name,
+              });
+              
               rootNav.reset({
                 index: 0,
                 routes: [{ name: 'MainTabs', params: { screen: 'Home' } }],
               });
+              
+              console.log('✅ [AddDetailsScreen] Navigation reset completed - should be on Home now');
             } catch (navError) {
-              console.warn('Navigation error:', navError);
+              console.error('❌ [AddDetailsScreen] Navigation error:', navError);
             }
           }
         }, 100);
       }
     } catch (error: any) {
-      console.error('Error creating post:', error);
+      console.error('❌ [AddDetailsScreen] Error creating post:', error);
+      console.error('❌ [AddDetailsScreen] Error details:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack?.substring(0, 200),
+      });
+      
       // Don't show alert if component is unmounted or Activity unavailable
       // Just log the error and reset posting state
       if (isMounted) {
@@ -364,12 +433,13 @@ export default function AddDetailsScreen({ navigation }: any) {
               Alert.alert('Error', error.message || 'Failed to create post');
             } catch (alertError) {
               // Alert failed (Activity not available) - just log
-              console.error('Could not show alert:', alertError);
+              console.error('❌ [AddDetailsScreen] Could not show alert:', alertError);
             }
           }
         }, 500);
       }
     } finally {
+      console.log('🟢 [AddDetailsScreen] Finally block - resetting upload state');
       if (isMounted) {
         setUploading(false);
         setProcessing(false);
@@ -378,6 +448,7 @@ export default function AddDetailsScreen({ navigation }: any) {
         // Navigation will unmount the component anyway
         setIsPosting(false);
       }
+      console.log('✅ [AddDetailsScreen] POST flow completed');
     }
   };
 

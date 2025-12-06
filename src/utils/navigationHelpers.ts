@@ -9,6 +9,20 @@ import { CommonActions } from '@react-navigation/native';
  * Navigate to a screen, trying parent navigators if needed
  */
 export function navigateToScreen(navigation: any, screenName: string, params?: any) {
+  const currentState = navigation.getState?.();
+  const currentRoute = currentState?.routes?.[currentState?.index];
+  const currentRouteName = currentRoute?.name || 'unknown';
+  
+  console.log('🧭 [navigationHelpers] ========================================');
+  console.log('🧭 [navigationHelpers] navigateToScreen called:');
+  console.log('🧭 [navigationHelpers]   FROM:', currentRouteName);
+  console.log('🧭 [navigationHelpers]   TO:', screenName);
+  console.log('🧭 [navigationHelpers]   HAS_PARAMS:', !!params);
+  if (params) {
+    console.log('🧭 [navigationHelpers]   PARAMS_KEYS:', Object.keys(params));
+  }
+  console.trace('🧭 [navigationHelpers] Stack trace:');
+  console.log('🧭 [navigationHelpers] ========================================');
   if (!navigation) {
     console.error('Navigation object is null');
     return;
