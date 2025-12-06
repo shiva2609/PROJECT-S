@@ -53,10 +53,11 @@ type TabType = 'posts' | 'bio' | 'memories' | 'references' | 'saved';
 const { width } = Dimensions.get('window');
 const POST_SIZE = (width - 40 - 6) / 3; // 3 columns with 2px gaps and 20px padding
 
-export default function ProfileScreen({ navigation }: any) {
+export default function ProfileScreen({ navigation, route }: any) {
   const [activeTab, setActiveTab] = useState<TabType>('posts');
   const [fadeAnim] = useState(new Animated.Value(1));
   const { user } = useAuth();
+  const profileUserId = route?.params?.userId;
 
   const {
     profileData,
@@ -66,7 +67,7 @@ export default function ProfileScreen({ navigation }: any) {
     tripCollections,
     reviews,
     loading,
-  } = useProfileData();
+  } = useProfileData(profileUserId);
   
   const [savedPosts, setSavedPosts] = useState<any[]>([]);
   const [savedPostsLoading, setSavedPostsLoading] = useState(false);
@@ -81,8 +82,9 @@ export default function ProfileScreen({ navigation }: any) {
 
   // Fetch account type and verification status
   React.useEffect(() => {
-    if (!user) return;
-    const userRef = doc(db, 'users', user.uid);
+    const targetUserId = profileUserId || user?.uid;
+    if (!targetUserId) return;
+    const userRef = doc(db, 'users', targetUserId);
     const unsubscribe = onSnapshot(userRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
@@ -91,11 +93,11 @@ export default function ProfileScreen({ navigation }: any) {
       }
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, profileUserId]);
 
-  // Fetch saved posts
+  // Fetch saved posts (only for current user's own profile)
   React.useEffect(() => {
-    if (!user || activeTab !== 'saved') return;
+    if (!user || activeTab !== 'saved' || profileUserId) return;
 
     setSavedPostsLoading(true);
     const postsRef = collection(db, 'posts');
@@ -120,14 +122,18 @@ export default function ProfileScreen({ navigation }: any) {
     return () => unsubscribe();
   }, [user, activeTab]);
 
-  // Determine available tabs (references only if reviews exist, saved always available)
+  // Determine available tabs (references only if reviews exist, saved only for own profile)
   const availableTabs = useMemo(() => {
-    const tabs: TabType[] = ['posts', 'bio', 'memories', 'saved'];
+    const tabs: TabType[] = ['posts', 'bio', 'memories'];
+    if (!profileUserId) {
+      // Only show saved tab for own profile
+      tabs.push('saved');
+    }
     if (reviews.length > 0) {
       tabs.push('references');
     }
     return tabs;
-  }, [reviews.length]);
+  }, [reviews.length, profileUserId]);
 
   // Animate tab changes
   React.useEffect(() => {
@@ -310,20 +316,45 @@ export default function ProfileScreen({ navigation }: any) {
         {/* Stats Section - Below Header */}
         <View style={styles.statsSection}>
           <View style={styles.statsCard}>
-            <View style={styles.statItem}>
+            <TouchableOpacity
+              style={styles.statItem}
+              onPress={() => {
+                // Posts count - could navigate to posts grid or do nothing
+              }}
+              activeOpacity={0.7}
+            >
               <Text style={styles.statNumber}>{stats.postsCount}</Text>
               <Text style={styles.statLabel}>Posts</Text>
-            </View>
+            </TouchableOpacity>
             <View style={styles.statSeparator} />
-            <View style={styles.statItem}>
+            <TouchableOpacity
+              style={styles.statItem}
+              onPress={() => {
+                navigation?.navigate('Followers', {
+                  profileUserId: profileUserId || user?.uid,
+                  username: profileData?.username,
+                });
+              }}
+              activeOpacity={0.7}
+            >
               <Text style={styles.statNumber}>{stats.followersCount}</Text>
               <Text style={styles.statLabel}>Followers</Text>
-            </View>
+            </TouchableOpacity>
             <View style={styles.statSeparator} />
-            <View style={styles.statItem}>
+            <TouchableOpacity
+              style={styles.statItem}
+              onPress={() => {
+                navigation?.navigate('Followers', {
+                  profileUserId: profileUserId || user?.uid,
+                  username: profileData?.username,
+                  initialTab: 'following',
+                });
+              }}
+              activeOpacity={0.7}
+            >
               <Text style={styles.statNumber}>{stats.followingCount}</Text>
               <Text style={styles.statLabel}>Following</Text>
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -954,10 +985,10 @@ const styles = StyleSheet.create({
     marginRight: 0, // Gap handled by container gap
   },
   cardBio: {
-    fontSize: 13.5, // 13-14px range
+    fontSize: 12, // Reduced from 13.5px
     fontFamily: Fonts.regular, // Poppins-Regular
     color: '#444', // Bio color for contrast
-    lineHeight: 17, // Tight line-height (16-18)
+    lineHeight: 16, // Reduced line-height
     marginTop: 0, // No top margin
     marginBottom: 0, // No bottom margin
     textAlign: 'left', // Left align (Instagram style)
@@ -1159,10 +1190,10 @@ const styles = StyleSheet.create({
     textAlign: 'left',
   },
   bioText: {
-    fontSize: 14,
+    fontSize: 12.5, // Reduced from 14px
     fontFamily: Fonts.regular,
     color: '#3C3C3B',
-    lineHeight: 20,
+    lineHeight: 18, // Reduced line-height
     textAlign: 'left',
   },
   bioTextReadOnly: {

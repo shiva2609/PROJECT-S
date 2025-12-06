@@ -801,40 +801,49 @@ export default function EditProfileScreen({ navigation }: any) {
             onSelectionChange={(values) => setFormData({ ...formData, interests: values })}
             placeholder="Select interests"
           />
+
+          <View style={styles.fieldContainer}>
+            <Text style={styles.label}>About Me</Text>
+            <Text style={styles.hint}>This will be used to auto-generate your bio later. Recommended: 50-60 characters (max 60)</Text>
+            <TextInput
+              style={[
+                styles.input,
+                styles.textArea,
+                formData.aboutMe && formData.aboutMe.length > 60 && styles.inputError,
+              ]}
+              placeholder="Tell us about yourself, your travel experiences, and what makes you unique... (50-60 characters recommended)"
+              placeholderTextColor={Colors.black.qua}
+              value={formData.aboutMe}
+              onChangeText={(text) => {
+                // Limit to 60 characters
+                if (text.length <= 60) {
+                  setFormData({ ...formData, aboutMe: text });
+                }
+              }}
+              multiline
+              numberOfLines={3}
+              maxLength={60}
+            />
+            <View style={styles.characterCountContainer}>
+              <Text
+                style={[
+                  styles.characterCount,
+                  formData.aboutMe && formData.aboutMe.length < 50 && styles.characterCountWarning,
+                  formData.aboutMe && formData.aboutMe.length > 60 && styles.characterCountError,
+                ]}
+              >
+                {formData.aboutMe?.length || 0}/60 characters
+                {formData.aboutMe && formData.aboutMe.length < 50 && ' (Recommended: 80-90 characters)'}
+                {formData.aboutMe && formData.aboutMe.length > 60 && ' (Exceeds limit)'}
+              </Text>
+            </View>
+          </View>
         </Card>
 
         {/* Travel Information Section */}
         <Card style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Travel Information</Text>
           <Text style={styles.sectionDescription}>Optional travel-related details</Text>
-
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Traveler Type</Text>
-            <View style={styles.selectContainer}>
-              {TRAVELER_TYPES.map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={[
-                    styles.selectOption,
-                    formData.travelerType === type && styles.selectOptionSelected,
-                  ]}
-                  onPress={() => setFormData({ ...formData, travelerType: type })}
-                >
-                  <Text
-                    style={[
-                      styles.selectText,
-                      formData.travelerType === type && styles.selectTextSelected,
-                    ]}
-                  >
-                    {type}
-                  </Text>
-                  {formData.travelerType === type && (
-                    <Icon name="checkmark" size={18} color={Colors.brand.primary} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
 
           <View style={styles.fieldContainer}>
             <Text style={styles.label}>Travel Experience</Text>
@@ -892,20 +901,6 @@ export default function EditProfileScreen({ navigation }: any) {
               onChangeText={(text) => setFormData({ ...formData, favouriteDestinations: text })}
               multiline
               numberOfLines={3}
-            />
-          </View>
-
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>About Me</Text>
-            <Text style={styles.hint}>This will be used to auto-generate your bio later</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Tell us about yourself, your travel experiences, and what makes you unique..."
-              placeholderTextColor={Colors.black.qua}
-              value={formData.aboutMe}
-              onChangeText={(text) => setFormData({ ...formData, aboutMe: text })}
-              multiline
-              numberOfLines={6}
             />
           </View>
         </Card>
@@ -1690,6 +1685,25 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.regular,
     color: Colors.black.qua,
     marginTop: 4,
+  },
+  characterCountContainer: {
+    marginTop: 6,
+    alignItems: 'flex-end',
+  },
+  characterCount: {
+    fontSize: 11,
+    fontFamily: Fonts.regular,
+    color: Colors.black.qua,
+  },
+  characterCountWarning: {
+    color: Colors.accent.amber,
+  },
+  characterCountError: {
+    color: Colors.accent.red,
+  },
+  inputError: {
+    borderColor: Colors.accent.red,
+    borderWidth: 1,
   },
   radioGroup: {
     flexDirection: 'row',

@@ -47,6 +47,7 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 import PostDetailScreen from '../screens/PostDetailScreen';
 import CommentsScreen from '../screens/CommentsScreen';
 import CropAdjustScreen from '../screens/CropAdjustScreen';
+import FollowersScreen from '../screens/FollowersScreen';
 import AddPostDetailsScreen from '../screens/AddPostDetailsScreen';
 import PostPreviewScreen from '../screens/PostPreviewScreen';
 import CreatePostScreen from '../screens/CreatePostScreen';
@@ -324,6 +325,14 @@ export default function AppNavigator() {
         <Stack.Screen 
           name="AddDetails" 
           component={AddDetailsScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="Followers" 
+          component={FollowersScreen}
           options={{ 
             headerShown: false,
             gestureEnabled: true,
