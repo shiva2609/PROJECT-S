@@ -12,6 +12,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../api/authService';
 import { useFollow } from '../hooks/useFollow';
+import { useProfilePhoto } from '../hooks/useProfilePhoto';
+import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../services/userProfilePhotoService';
 import { Post } from '../api/firebaseService';
 import { formatTimestamp, parseHashtags } from '../utils/postHelpers';
 import { Fonts } from '../theme/fonts';
@@ -183,7 +185,8 @@ function PostCard({
     return [];
   }, [mediaUrls, post.media, (post as any).finalCroppedUrl]);
 
-  const profilePhoto = post.profilePhoto || '';
+  // Use unified profile photo hook
+  const profilePhoto = useProfilePhoto(creatorId);
   const location = post.location || post.placeName || '';
   const username = post.username || 'User';
   const timestamp = formatTimestamp(post.createdAt);
@@ -290,12 +293,20 @@ function PostCard({
           activeOpacity={0.8}
           onPress={onProfilePress}
         >
-          {profilePhoto ? (
-            <Image source={{ uri: profilePhoto }} style={styles.profileImage} />
-          ) : (
+          {isDefaultProfilePhoto(profilePhoto) ? (
             <View style={styles.profileImage}>
               <Icon name="person" size={20} color="#8E8E8E" />
             </View>
+          ) : (
+            <Image 
+              source={{ uri: profilePhoto }} 
+              defaultSource={{ uri: getDefaultProfilePhoto() }}
+              onError={() => {
+                // Offline/CDN failure - Image component will use defaultSource
+              }}
+              style={styles.profileImage} 
+              resizeMode="cover"
+            />
           )}
           <View style={styles.creatorInfo}>
             <View style={styles.usernameRow}>

@@ -17,6 +17,8 @@ import { Fonts } from '../../theme/fonts';
 import { Colors } from '../../theme/colors';
 import VerifiedBadge from '../VerifiedBadge';
 import { useFollow } from '../../hooks/useFollow';
+import { useProfilePhoto } from '../../hooks/useProfilePhoto';
+import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/userProfilePhotoService';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 interface UserRowCardProps {
@@ -54,6 +56,8 @@ export default function UserRowCard({
   const { isFollowing, unfollow } = useFollow(user.id);
   const [menuVisible, setMenuVisible] = useState(false);
   const isOwnProfile = user.id === currentUserId;
+  // Use unified profile photo hook
+  const profilePhoto = useProfilePhoto(user.id);
 
   const handleUserPress = () => {
     if (onUserPress && !isOwnProfile) {
@@ -144,18 +148,22 @@ export default function UserRowCard({
             onPress={handleUserPress}
             activeOpacity={0.8}
           >
-            {user.profilePic ? (
-              <Image
-                source={{ uri: user.profilePic }}
-                style={styles.profilePhotoImage}
-                resizeMode="cover"
-              />
-            ) : (
+            {isDefaultProfilePhoto(profilePhoto) ? (
               <View style={styles.profilePhotoPlaceholder}>
                 <Text style={styles.profilePhotoText}>
                   {user.username?.charAt(0).toUpperCase() || 'U'}
                 </Text>
               </View>
+            ) : (
+              <Image
+                source={{ uri: profilePhoto }}
+                defaultSource={{ uri: getDefaultProfilePhoto() }}
+                onError={() => {
+                  // Offline/CDN failure - Image component will use defaultSource
+                }}
+                style={styles.profilePhotoImage}
+                resizeMode="cover"
+              />
             )}
           </TouchableOpacity>
         </View>

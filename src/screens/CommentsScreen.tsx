@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -18,6 +19,8 @@ import { Fonts } from '../theme/fonts';
 import { useAuth } from '../contexts/AuthContext';
 import { listenToComments, addComment, Comment } from '../api/firebaseService';
 import { formatTimestamp } from '../utils/postHelpers';
+import { useProfilePhoto } from '../hooks/useProfilePhoto';
+import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../services/userProfilePhotoService';
 
 export default function CommentsScreen({ navigation, route }: any) {
   const { postId } = route.params;
@@ -77,12 +80,26 @@ export default function CommentsScreen({ navigation, route }: any) {
   };
 
   const renderComment = ({ item }: { item: Comment }) => {
+    // Use unified profile photo hook
+    const profilePhoto = useProfilePhoto(item.userId);
     const timestamp = formatTimestamp(item.createdAt);
     return (
       <View style={styles.commentItem}>
-        <View style={styles.commentAvatar}>
-          <Icon name="person" size={20} color={Colors.black.qua} />
-        </View>
+        {isDefaultProfilePhoto(profilePhoto) ? (
+          <View style={styles.commentAvatar}>
+            <Icon name="person" size={20} color={Colors.black.qua} />
+          </View>
+        ) : (
+          <Image 
+            source={{ uri: profilePhoto }} 
+            defaultSource={{ uri: getDefaultProfilePhoto() }}
+            onError={() => {
+              // Offline/CDN failure - Image component will use defaultSource
+            }}
+            style={styles.commentAvatar} 
+            resizeMode="cover"
+          />
+        )}
         <View style={styles.commentContent}>
           <View style={styles.commentHeader}>
             <Text style={styles.commentUsername}>{item.username || 'User'}</Text>
@@ -215,8 +232,6 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     backgroundColor: Colors.white.tertiary,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginRight: 12,
   },
   commentContent: {

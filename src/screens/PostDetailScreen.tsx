@@ -250,7 +250,7 @@ export default function PostDetailScreen({ navigation, route }: any) {
           onComment={() => navigation.navigate('Comments', { postId: item.id })}
           onShare={() => handleShare(item)}
           onBookmark={() => handleBookmark(item.id)}
-          onProfilePress={() => navigation.navigate('Profile', { userId: item.createdBy || item.userId })}
+          onProfilePress={() => navigation.push('ProfileScreen', { userId: item.createdBy || item.userId })}
           onPostDetailPress={() => {
             // In detail screen, clicking post detail does nothing (already in detail view)
             // Or could scroll to that post if it's in the list

@@ -47,6 +47,7 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 import PostDetailScreen from '../screens/PostDetailScreen';
 import CommentsScreen from '../screens/CommentsScreen';
 import CropAdjustScreen from '../screens/CropAdjustScreen';
+import ProfilePhotoCropScreen from '../screens/ProfilePhotoCropScreen';
 import FollowersScreen from '../screens/FollowersScreen';
 import AddPostDetailsScreen from '../screens/AddPostDetailsScreen';
 import PostPreviewScreen from '../screens/PostPreviewScreen';
@@ -281,6 +282,14 @@ export default function AppNavigator() {
           }}
         />
         <Stack.Screen 
+          name="ProfilePhotoCrop" 
+          component={ProfilePhotoCropScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
           name="AddPostDetails" 
           component={AddPostDetailsScreen}
           options={{ 
@@ -333,6 +342,14 @@ export default function AppNavigator() {
         <Stack.Screen 
           name="Followers" 
           component={FollowersScreen}
+          options={{ 
+            headerShown: false,
+            gestureEnabled: true,
+          }}
+        />
+        <Stack.Screen 
+          name="ProfileScreen" 
+          component={ProfileScreen}
           options={{ 
             headerShown: false,
             gestureEnabled: true,

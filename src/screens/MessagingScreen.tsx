@@ -23,6 +23,8 @@ import { db } from '../api/authService';
 import ItineraryCard from '../components/itinerary/ItineraryCard';
 import { ItineraryResponse } from '../api/generateItinerary';
 import { markChatAsRead } from '../api/notificationService';
+import { useProfilePhoto } from '../hooks/useProfilePhoto';
+import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../services/userProfilePhotoService';
 
 interface MessagingScreenProps {
   navigation: any;
@@ -51,7 +53,9 @@ interface CopilotMessage {
 
 export default function MessagingScreen({ navigation, route }: MessagingScreenProps) {
   const { user } = useAuth();
-  const { userId, username, profilePhoto, isCopilot } = route.params;
+  const { userId, username, isCopilot } = route.params;
+  // Use unified profile photo hook
+  const profilePhoto = useProfilePhoto(isCopilot ? null : userId);
   
   const [messages, setMessages] = useState<(ChatMessage | CopilotMessage)[]>([]);
   const [messageText, setMessageText] = useState('');
@@ -227,17 +231,22 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
               <View style={[styles.messageAvatar, { backgroundColor: '#FF5C02' }]}>
                 <Icon name="compass-outline" size={20} color="#FFFFFF" />
               </View>
-            ) : profilePhoto ? (
-              <Image
-                source={{ uri: profilePhoto }}
-                style={styles.messageAvatar}
-              />
-            ) : (
+            ) : isDefaultProfilePhoto(profilePhoto) ? (
               <View style={[styles.messageAvatar, styles.messageAvatarPlaceholder]}>
                 <Text style={styles.messageAvatarText}>
                   {username.charAt(0).toUpperCase()}
                 </Text>
               </View>
+            ) : (
+              <Image
+                source={{ uri: profilePhoto }}
+                defaultSource={{ uri: getDefaultProfilePhoto() }}
+                onError={() => {
+                  // Offline/CDN failure - Image component will use defaultSource
+                }}
+                style={styles.messageAvatar}
+                resizeMode="cover"
+              />
             )
           )}
           
