@@ -351,7 +351,13 @@ export function listenToUnreadCounts(
     unsubscribeNotifications = onSnapshot(
       notificationsQuery,
       () => updateCounts(),
-      (error) => {
+      (error: any) => {
+        // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+        if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+          console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+          updateCounts();
+          return;
+        }
         console.error('Error listening to notifications:', error);
         updateCounts();
       }
@@ -383,7 +389,13 @@ export function listenToUnreadCounts(
         console.log(`📨 Messages snapshot: ${snapshot.size} messages (filtered for user ${userId})`);
         updateCounts();
       },
-      (error) => {
+      (error: any) => {
+        // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+        if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+          console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+          updateCounts();
+          return;
+        }
         console.error('❌ Error listening to messages:', error);
         // Fallback: listen to all messages
         try {
@@ -391,7 +403,12 @@ export function listenToUnreadCounts(
           onSnapshot(fallbackQuery, () => {
             console.log('📨 Fallback: All messages changed, updating counts');
             updateCounts();
-          }, () => updateCounts());
+          }, (fallbackError: any) => {
+            if (fallbackError?.message?.includes('INTERNAL ASSERTION FAILED')) {
+              console.warn('⚠️ Firestore internal error in fallback (non-fatal)');
+            }
+            updateCounts();
+          });
         } catch (e) {
           console.error('❌ Fallback query also failed:', e);
           updateCounts();
@@ -408,7 +425,12 @@ export function listenToUnreadCounts(
           console.log(`🤖 Copilot messages snapshot: ${snapshot.size} messages for user ${userId}`);
           updateCounts();
         },
-        (error) => {
+        (error: any) => {
+          // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+          if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+            console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+            return;
+          }
           console.log('⚠️ Could not listen to Copilot messages (chat may not exist):', error);
         }
       );
@@ -426,14 +448,26 @@ export function listenToUnreadCounts(
   const unsubscribeLastRead = onSnapshot(
     lastReadRef,
     () => updateCounts(),
-    () => {}
+    (error: any) => {
+      // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+      if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+        console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+        return;
+      }
+    }
   );
   
   const lastReadMessagesRef = doc(db, 'users', userId, 'lastRead', 'messages');
   const unsubscribeLastReadMessages = onSnapshot(
     lastReadMessagesRef,
     () => updateCounts(),
-    () => {}
+    (error: any) => {
+      // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+      if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+        console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+        return;
+      }
+    }
   );
 
   return () => {

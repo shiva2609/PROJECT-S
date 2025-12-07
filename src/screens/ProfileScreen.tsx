@@ -30,6 +30,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { db } from '../api/authService';
 import { doc, updateDoc, arrayUnion, arrayRemove, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import InputModal from '../components/profile/InputModal';
+import { normalizePost, sortPostsByCreatedAt } from '../utils/postUtils';
+import { getAccountTypeMetadata } from '../types/account';
+import type { AccountType } from '../types/account';
+import VerifiedBadge from '../components/VerifiedBadge';
 
 // Design System Colors - Sanchari Brand
 const DESIGN_COLORS = {
@@ -49,10 +53,11 @@ type TabType = 'posts' | 'bio' | 'memories' | 'references' | 'saved';
 const { width } = Dimensions.get('window');
 const POST_SIZE = (width - 40 - 6) / 3; // 3 columns with 2px gaps and 20px padding
 
-export default function ProfileScreen({ navigation }: any) {
+export default function ProfileScreen({ navigation, route }: any) {
   const [activeTab, setActiveTab] = useState<TabType>('posts');
   const [fadeAnim] = useState(new Animated.Value(1));
   const { user } = useAuth();
+  const profileUserId = route?.params?.userId;
 
   const {
     profileData,
@@ -62,10 +67,12 @@ export default function ProfileScreen({ navigation }: any) {
     tripCollections,
     reviews,
     loading,
-  } = useProfileData();
+  } = useProfileData(profileUserId);
   
   const [savedPosts, setSavedPosts] = useState<any[]>([]);
   const [savedPostsLoading, setSavedPostsLoading] = useState(false);
+  const [accountType, setAccountType] = useState<AccountType>('Traveler');
+  const [isVerified, setIsVerified] = useState(false);
 
   // Modal states
   const [locationModalVisible, setLocationModalVisible] = useState(false);
@@ -73,9 +80,24 @@ export default function ProfileScreen({ navigation }: any) {
   const [interestModalVisible, setInterestModalVisible] = useState(false);
   const [countryModalVisible, setCountryModalVisible] = useState(false);
 
-  // Fetch saved posts
+  // Fetch account type and verification status
   React.useEffect(() => {
-    if (!user || activeTab !== 'saved') return;
+    const targetUserId = profileUserId || user?.uid;
+    if (!targetUserId) return;
+    const userRef = doc(db, 'users', targetUserId);
+    const unsubscribe = onSnapshot(userRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setAccountType((data.accountType || data.role || 'Traveler') as AccountType);
+        setIsVerified(data.verificationStatus === 'verified' || data.verified === true);
+      }
+    });
+    return () => unsubscribe();
+  }, [user, profileUserId]);
+
+  // Fetch saved posts (only for current user's own profile)
+  React.useEffect(() => {
+    if (!user || activeTab !== 'saved' || profileUserId) return;
 
     setSavedPostsLoading(true);
     const postsRef = collection(db, 'posts');
@@ -100,14 +122,18 @@ export default function ProfileScreen({ navigation }: any) {
     return () => unsubscribe();
   }, [user, activeTab]);
 
-  // Determine available tabs (references only if reviews exist, saved always available)
+  // Determine available tabs (references only if reviews exist, saved only for own profile)
   const availableTabs = useMemo(() => {
-    const tabs: TabType[] = ['posts', 'bio', 'memories', 'saved'];
+    const tabs: TabType[] = ['posts', 'bio', 'memories'];
+    if (!profileUserId) {
+      // Only show saved tab for own profile
+      tabs.push('saved');
+    }
     if (reviews.length > 0) {
       tabs.push('references');
     }
     return tabs;
-  }, [reviews.length]);
+  }, [reviews.length, profileUserId]);
 
   // Animate tab changes
   React.useEffect(() => {
@@ -219,53 +245,115 @@ export default function ProfileScreen({ navigation }: any) {
   const renderHeader = () => {
     const displayName = profileData?.fullname || 'User';
     const username = profileData?.username || 'user';
+    const userTag = profileData?.userTag || `@${username}`;
     const profilePic = profileData?.profilePic;
+    const aboutMe = profileData?.aboutMe || '';
+    const bio = profileData?.bio || '';
+    // Bio text - prefer aboutMe, fallback to auto-generated bio
+    const bioText = aboutMe || bio || '';
+    
+    // Get account type metadata
+    const accountMetadata = getAccountTypeMetadata(accountType);
+    const accountTypeDisplay = accountMetadata.displayName;
 
     return (
-      <View style={styles.headerContainer}>
-        {/* Left Side: Profile Picture and Name */}
-        <View style={styles.profileLeftContainer}>
-          <View style={styles.profilePicContainer}>
+      <View style={styles.headerWrapper}>
+        {/* Main Header Container with Layered Layout */}
+        <View style={styles.headerContainer}>
+          {/* Info Card - Behind the photo */}
+          <View style={styles.infoCard}>
+            {/* Content Container - Shifted to start beside photo */}
+            <View style={styles.cardContentContainer}>
+              {/* Username, Badge, Account Type, and Edit Button Row */}
+              <View style={styles.usernameRow}>
+                <View style={styles.usernameContainer}>
+                  {username && (
+                    <Text style={styles.cardUsername} numberOfLines={1}>
+                      {username}
+                    </Text>
+                  )}
+                  {/* Verified Badge */}
+                  {isVerified && (
+                    <View style={styles.verifiedBadge}>
+                      <VerifiedBadge size={18} />
+                    </View>
+                  )}
+                  {/* Account Type - On same row */}
+                  <Text style={styles.cardAccountType}>{accountTypeDisplay}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.cardEditButton}
+                  onPress={handleEditProfile}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.cardEditButtonText}>Edit</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Bio Text - Multi-line, max 3-4 lines */}
+              {bioText ? (
+                <Text style={styles.cardBio} numberOfLines={4}>
+                  {bioText}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+
+          {/* Profile Photo - In front of card with zIndex */}
+          <View style={styles.profilePhotoBox}>
             {profilePic ? (
-              <Image source={{ uri: profilePic }} style={styles.profilePic} />
+              <Image source={{ uri: profilePic }} style={styles.profilePhotoImage} resizeMode="cover" />
             ) : (
-              <View style={styles.profilePicPlaceholder}>
-                <Text style={styles.profilePicText}>
+              <View style={styles.profilePhotoPlaceholder}>
+                <Text style={styles.profilePhotoText}>
                   {displayName.charAt(0).toUpperCase()}
                 </Text>
               </View>
             )}
           </View>
-          {/* Name below profile photo */}
-          <Text style={styles.nameBelowPic}>{displayName}</Text>
         </View>
 
-        {/* Right Side: Stats and Edit Button */}
-        <View style={styles.profileRightContainer}>
-          {/* Stats Row - Horizontal */}
-          <View style={styles.statsRow}>
-            <View style={styles.statBlock}>
-              <Text style={styles.statNumber}>{stats.postsCount}</Text>
-              <Text style={styles.statLabel}>posts</Text>
-            </View>
-            <View style={styles.statBlock}>
-              <Text style={styles.statNumber}>{stats.followersCount}</Text>
-              <Text style={styles.statLabel}>followers</Text>
-            </View>
-            <View style={styles.statBlock}>
-              <Text style={styles.statNumber}>{stats.followingCount}</Text>
-              <Text style={styles.statLabel}>following</Text>
-            </View>
-          </View>
-
-          {/* Edit Profile Button - Centered below stats */}
-          <View style={styles.editButtonContainer}>
+        {/* Stats Section - Below Header */}
+        <View style={styles.statsSection}>
+          <View style={styles.statsCard}>
             <TouchableOpacity
-              style={styles.editButton}
-              onPress={handleEditProfile}
-              activeOpacity={0.8}
+              style={styles.statItem}
+              onPress={() => {
+                // Posts count - could navigate to posts grid or do nothing
+              }}
+              activeOpacity={0.7}
             >
-              <Text style={styles.editButtonText}>Edit profile</Text>
+              <Text style={styles.statNumber}>{stats.postsCount}</Text>
+              <Text style={styles.statLabel}>Posts</Text>
+            </TouchableOpacity>
+            <View style={styles.statSeparator} />
+            <TouchableOpacity
+              style={styles.statItem}
+              onPress={() => {
+                navigation?.navigate('Followers', {
+                  profileUserId: profileUserId || user?.uid,
+                  username: profileData?.username,
+                });
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statNumber}>{stats.followersCount}</Text>
+              <Text style={styles.statLabel}>Followers</Text>
+            </TouchableOpacity>
+            <View style={styles.statSeparator} />
+            <TouchableOpacity
+              style={styles.statItem}
+              onPress={() => {
+                navigation?.navigate('Followers', {
+                  profileUserId: profileUserId || user?.uid,
+                  username: profileData?.username,
+                  initialTab: 'following',
+                });
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statNumber}>{stats.followingCount}</Text>
+              <Text style={styles.statLabel}>Following</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -313,11 +401,24 @@ export default function ProfileScreen({ navigation }: any) {
       );
     }
 
+    // Ensure posts are sorted by createdAt descending (latest first)
+    // This ensures the grid displays from left to right, top to bottom with newest posts first
+    const sortedPosts = sortPostsByCreatedAt([...posts]);
+
     return (
       <View style={styles.postsGrid}>
-        {posts.map((post, index) => {
-          const imageUrl = post.imageURL || post.coverImage || (post.gallery && post.gallery[0]);
+        {sortedPosts.map((post, index) => {
+          // CRITICAL: Use ONLY final cropped bitmaps - NO fallback to original images
+          // Normalize post to get mediaUrls (contains final rendered bitmap URLs)
+          const normalizedPost = normalizePost(post as any);
+          const mediaUrls = normalizedPost.mediaUrls || [];
+          
+          // Use first image from mediaUrls (final cropped bitmap) or finalCroppedUrl
+          // DO NOT fallback to imageUrl, imageURL, coverImage, or gallery - those might be original images
+          const thumbnailUrl = mediaUrls[0] || (post as any).finalCroppedUrl || '';
+          const hasMultipleImages = mediaUrls.length > 1;
           const likeCount = post.likeCount || 0;
+          
           return (
             <TouchableOpacity
               key={post.id}
@@ -326,9 +427,22 @@ export default function ProfileScreen({ navigation }: any) {
                 { marginRight: index % 3 === 2 ? 0 : 2, marginBottom: 2 },
               ]}
               activeOpacity={0.9}
+              onPress={() => navigation?.navigate('PostDetail', { postId: post.id })}
             >
-              {imageUrl ? (
-                <Image source={{ uri: imageUrl }} style={styles.postImage} />
+              {thumbnailUrl ? (
+                <>
+                  <Image 
+                    source={{ uri: thumbnailUrl }} 
+                    style={styles.postImage}
+                    resizeMode="cover"
+                  />
+                  {/* Multiple images indicator */}
+                  {hasMultipleImages && (
+                    <View style={styles.multipleImagesIndicator}>
+                      <Icon name="layers" size={16} color={DESIGN_COLORS.cardBackground} />
+                    </View>
+                  )}
+                </>
               ) : (
                 <View style={styles.postPlaceholder}>
                   <Text style={styles.placeholderText}>📷</Text>
@@ -354,7 +468,7 @@ export default function ProfileScreen({ navigation }: any) {
       <>
         <ScrollView style={styles.bioContent} contentContainerStyle={styles.bioContentInner}>
           <View style={styles.bioCard}>
-            {/* Bio Section - Read-only, auto-generated */}
+            {/* Bio Section - Optional, auto-generated, shown with interests */}
             {bio && (
               <View style={styles.bioSection}>
                 <Text style={styles.bioSectionTitle}>Bio</Text>
@@ -739,8 +853,8 @@ export default function ProfileScreen({ navigation }: any) {
         showsVerticalScrollIndicator={false}
       >
         {/* Header Section */}
-        <View style={styles.headerWrapper}>
-          {renderHeader()}
+        {renderHeader()}
+        <View style={styles.tabsWrapper}>
           {renderTabs()}
         </View>
 
@@ -765,93 +879,190 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   headerWrapper: {
-    backgroundColor: DESIGN_COLORS.cardBackground,
-    marginBottom: 20,
+    backgroundColor: DESIGN_COLORS.background,
+    paddingTop: 16, // Reduced top spacing
+    paddingHorizontal: 16,
+    paddingBottom: 0,
   },
   headerContainer: {
     flexDirection: 'row',
-    paddingTop: 20,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    gap: 24,
+    width: '100%',
+    position: 'relative',
+    minHeight: 130, // Match photo height
+    marginBottom: 8, // Space between header and stats: ~8px
   },
-  profileLeftContainer: {
-    alignItems: 'center',
-  },
-  profilePicContainer: {
-    marginBottom: 12,
-  },
-  profilePic: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+  profilePhotoBox: {
+    width: 100, // Reduced from 120
+    height: 130, // Reduced from 160 - more compact
+    borderRadius: 12, // 10-14 range
+    overflow: 'hidden',
     backgroundColor: DESIGN_COLORS.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.08)',
+    zIndex: 2, // Above the card
   },
-  profilePicPlaceholder: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+  profilePhotoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  profilePhotoPlaceholder: {
+    width: '100%',
+    height: '100%',
     backgroundColor: DESIGN_COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  profilePicText: {
-    fontSize: 36,
+  profilePhotoText: {
+    fontSize: 48,
     fontFamily: Fonts.bold,
     color: DESIGN_COLORS.cardBackground,
   },
-  nameBelowPic: {
-    fontSize: 16,
-    fontFamily: Fonts.medium,
-    color: DESIGN_COLORS.primaryText,
-    textAlign: 'center',
+  infoCard: {
+    position: 'absolute',
+    left: 70, // Starts behind photo - card position unchanged
+    right: 16,
+    top: 8, // Reduced top offset
+    backgroundColor: '#FFFAEE', // Warm off-white / cream tone matching reference
+    borderRadius: 18, // 16-20 range
+    paddingHorizontal: 0, // No horizontal padding - handled by content container
+    paddingVertical: 12, // Premium padding
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    justifyContent: 'flex-start', // Start from top
+    alignItems: 'flex-start', // Left align content
+    minHeight: 110, // Match photo height
+    zIndex: 1, // Behind the photo
   },
-  profileRightContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingTop: 24,
-    paddingHorizontal: 16,
+  cardContentContainer: {
+    paddingLeft: 44, // Shift content to start beside photo (30px base + 14px spacing = 44px total)
+    paddingRight: 14, // Right padding
+    paddingTop: 11, // 10-12px range - separates content from card top
+    paddingBottom: 8, // Separates content from card bottom
+    width: '100%',
   },
-  statsRow: {
+  usernameRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
-    gap: 32,
-    marginBottom: 16,
-  },
-  statBlock: {
+    width: '100%',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 3, // Spacing before bio (2-4px)
   },
-  statNumber: {
-    fontSize: 18,
-    fontFamily: Fonts.bold,
-    color: DESIGN_COLORS.primaryText,
-    marginBottom: 4,
+  usernameContainer: {
+    flex: 1, // Take available space
+    flexDirection: 'row',
+    alignItems: 'center', // Align on same vertical baseline
+    marginRight: 8, // Space before button
+    flexWrap: 'wrap', // Allow wrapping if needed
+    gap: 5, // Small gap (4-6px) between elements
   },
-  statLabel: {
-    fontSize: 13,
-    fontFamily: Fonts.regular,
-    color: DESIGN_COLORS.secondaryText,
-    textTransform: 'lowercase',
+  cardUsername: {
+    fontSize: 19, // 18-20px range
+    fontFamily: Fonts.semibold, // Poppins-SemiBold
+    color: '#222', // Username color for contrast
+    textAlign: 'left', // Left align
+    lineHeight: 22, // Consistent line height for baseline alignment
+    marginRight: 0, // Gap handled by container gap
   },
-  editButtonContainer: {
-    alignItems: 'flex-start',
+  verifiedBadge: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 0, // Gap handled by container gap
   },
-  editButton: {
-    backgroundColor: '#FF5C02', // Sanchari Orange
-    paddingHorizontal: 68,
-    paddingVertical: 4,
-    borderRadius: 20,
+  cardAccountType: {
+    fontSize: 11, // Smaller font for account type
+    fontFamily: Fonts.medium, // Poppins-Medium
+    color: DESIGN_COLORS.primary, // Use theme primary color
+    textAlign: 'left',
+    lineHeight: 22, // Match username lineHeight for baseline alignment
+    marginRight: 0, // Gap handled by container gap
+  },
+  cardBio: {
+    fontSize: 12, // Reduced from 13.5px
+    fontFamily: Fonts.regular, // Poppins-Regular
+    color: '#444', // Bio color for contrast
+    lineHeight: 16, // Reduced line-height
+    marginTop: 0, // No top margin
+    marginBottom: 0, // No bottom margin
+    textAlign: 'left', // Left align (Instagram style)
+  },
+  cardEditButton: {
+    backgroundColor: DESIGN_COLORS.primary,
+    paddingVertical: 6, // Smaller height
+    paddingHorizontal: 14, // Compact padding
+    borderRadius: 16, // Rounded corners
+    alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.12, // Subtle shadow
     shadowRadius: 2,
     elevation: 2,
+    minWidth: 60, // Minimum width for touch target
+    height: 28, // Smaller, premium size
   },
-  editButtonText: {
-    textAlign: 'center',
-    fontSize: 14,
-    fontFamily: Fonts.semibold,
-    color: DESIGN_COLORS.cardBackground,
+  cardEditButtonText: {
+    fontSize: 12, // Smaller font
+    fontFamily: Fonts.semibold, // Poppins-SemiBold for premium look
+    color: '#FFFFFF', // Button text color
+    letterSpacing: 0.3, // Premium letter spacing
+  },
+  statsSection: {
+    paddingVertical: 0, // No vertical padding - handled by card
+    paddingHorizontal: 20, // Increased padding to make stats card 6-10px narrower than header
+    marginBottom: 10, // Space between stats and tabs: ~10px
+    marginTop: 0, // Spacing handled by headerContainer marginBottom
+    alignItems: 'center', // Center the stats card
+  },
+  statsCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: DESIGN_COLORS.cardBackground,
+    borderRadius: 8, // Reduced to match header proportion (header: 18, stats: 8)
+    paddingVertical: 2.5, // Reduced by ~40% (from 4px to 2.5px)
+    paddingHorizontal: 14, // Reduced padding - narrower than header
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+    marginBottom: 0, // Remove extra margin
+    marginTop: 0, // Remove extra margin
+  },
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statSeparator: {
+    width: 1,
+    height: 28, // Reduced height for tight spacing
+    backgroundColor: DESIGN_COLORS.border,
+    marginHorizontal: 12, // More horizontal spacing (Instagram style)
+  },
+  statNumber: {
+    fontSize: 15.5, // 15-16px range
+    fontFamily: Fonts.semibold, // Poppins-SemiBold
+    color: '#1A1A1A', // Dark black for visibility
+    marginBottom: 2, // Very tight vertical spacing
+  },
+  statLabel: {
+    fontSize: 12.5, // 12-13px range
+    fontFamily: Fonts.regular, // Poppins-Regular
+    color: '#4D4D4D', // Dark grey for visibility
+    textTransform: 'capitalize',
+  },
+  tabsWrapper: {
+    backgroundColor: DESIGN_COLORS.cardBackground,
+    marginBottom: 20,
+    marginTop: 0, // Stats section already has bottom margin
   },
   tabsContainer: {
     flexDirection: 'row',
@@ -935,6 +1146,17 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.semibold,
     color: DESIGN_COLORS.cardBackground,
   },
+  multipleImagesIndicator: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 12,
+    padding: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   bioContent: {
     flex: 1,
     width: '100%',
@@ -968,10 +1190,10 @@ const styles = StyleSheet.create({
     textAlign: 'left',
   },
   bioText: {
-    fontSize: 14,
+    fontSize: 12.5, // Reduced from 14px
     fontFamily: Fonts.regular,
     color: '#3C3C3B',
-    lineHeight: 20,
+    lineHeight: 18, // Reduced line-height
     textAlign: 'left',
   },
   bioTextReadOnly: {

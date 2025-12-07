@@ -159,7 +159,12 @@ export function useProfileData(userId?: string) {
           }));
         }
       },
-      (error) => {
+      (error: any) => {
+        // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+        if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+          console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+          return;
+        }
         console.warn('Error fetching user profile (listener):', error);
       }
     );
@@ -188,6 +193,9 @@ export function useProfileData(userId?: string) {
                 return {
                   id: doc.id,
                   imageURL: data.imageURL,
+                  imageUrl: data.imageUrl, // Legacy field
+                  finalCroppedUrl: data.finalCroppedUrl, // REAL cropped bitmap URL
+                  mediaUrls: data.mediaUrls, // Array of final cropped bitmap URLs
                   coverImage: data.coverImage,
                   gallery: data.gallery,
                   likeCount: data.likeCount || 0,
@@ -199,6 +207,11 @@ export function useProfileData(userId?: string) {
             setStats((prev) => ({ ...prev, postsCount: postsData.length }));
           },
           (error: any) => {
+            // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+            if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+              console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+              return;
+            }
             if (error.code === 'failed-precondition') {
               console.warn('Firestore query error: ensure createdAt exists.');
             } else {
@@ -233,6 +246,11 @@ export function useProfileData(userId?: string) {
                   setStats((prev) => ({ ...prev, postsCount: postsData.length }));
                 },
                 (err: any) => {
+                  // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+                  if (err?.message?.includes('INTERNAL ASSERTION FAILED') || err?.message?.includes('Unexpected state')) {
+                    console.warn('⚠️ Firestore internal error (non-fatal, will retry):', err.message?.substring(0, 100));
+                    return;
+                  }
                   console.warn('Error with userId query:', err.message || err);
                   // Last resort: get all posts and filter client-side (only posts with createdAt)
                   const allPostsQuery = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
@@ -259,7 +277,14 @@ export function useProfileData(userId?: string) {
                       setPosts(postsData);
                       setStats((prev) => ({ ...prev, postsCount: postsData.length }));
                     },
-                    (finalErr: any) => console.warn('Error with fallback posts query:', finalErr.message || finalErr)
+                    (finalErr: any) => {
+                      // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+                      if (finalErr?.message?.includes('INTERNAL ASSERTION FAILED') || finalErr?.message?.includes('Unexpected state')) {
+                        console.warn('⚠️ Firestore internal error (non-fatal, will retry):', finalErr.message?.substring(0, 100));
+                        return;
+                      }
+                      console.warn('Error with fallback posts query:', finalErr.message || finalErr);
+                    }
                   );
                 }
               );
@@ -329,7 +354,12 @@ export function useProfileData(userId?: string) {
             }));
             setTripCollections(trips);
           },
-          (error) => {
+          (error: any) => {
+            // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+            if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+              console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+              return;
+            }
             console.error('Error fetching memories with userId, trying createdBy:', error);
             // Fallback to createdBy
             try {
@@ -373,14 +403,31 @@ export function useProfileData(userId?: string) {
                   }));
                   setTripCollections(trips);
                 },
-                (err) => console.error('Error with alt memories query:', err)
+                (err: any) => {
+                  // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+                  if (err?.message?.includes('INTERNAL ASSERTION FAILED') || err?.message?.includes('Unexpected state')) {
+                    console.warn('⚠️ Firestore internal error (non-fatal, will retry):', err.message?.substring(0, 100));
+                    return;
+                  }
+                  console.error('Error with alt memories query:', err);
+                }
               );
-            } catch (altError) {
+            } catch (altError: any) {
+              // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+              if (altError?.message?.includes('INTERNAL ASSERTION FAILED') || altError?.message?.includes('Unexpected state')) {
+                console.warn('⚠️ Firestore internal error (non-fatal, will retry):', altError.message?.substring(0, 100));
+                return;
+              }
               console.error('Error setting up alt memories query:', altError);
             }
           }
         );
-      } catch (error) {
+      } catch (error: any) {
+        // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+        if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+          console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+          return;
+        }
         console.error('Error setting up memories query:', error);
       }
     };

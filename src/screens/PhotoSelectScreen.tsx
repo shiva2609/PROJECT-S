@@ -12,6 +12,7 @@ import {
   InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { launchImageLibrary, launchCamera, Asset, MediaType } from 'react-native-image-picker';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
@@ -25,6 +26,7 @@ const GRID_COLUMNS = 3;
 const GRID_SPACING = 2;
 const ITEM_SIZE = (SCREEN_WIDTH - GRID_SPACING * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
 const PREVIEW_HEIGHT = 350;
+const MAX_SELECTION = 5; // Maximum number of images that can be selected
 
 interface SelectedImage {
   uri: string;
@@ -52,7 +54,9 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
   const [loading, setLoading] = useState(true);
   const [contentType, setContentType] = useState<ContentType>('post');
   const [previewImage, setPreviewImage] = useState<SelectedImage | null>(null);
+  const [lockedRatio, setLockedRatio] = useState<'1:1' | '4:5' | '16:9' | null>(null); // Lock ratio on first selection (Instagram-style)
   const isMountedRef = useRef(true);
+  const hasNavigatedFromCreateFlowRef = useRef(false); // Track if we're navigating within create flow
 
   // Request storage permission for Android
   const requestStoragePermission = async (): Promise<boolean> => {
@@ -99,6 +103,30 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
     }
     return true;
   };
+
+  // CRITICAL: Reset selection when screen is opened from outside (not from within create flow)
+  // This ensures fresh state when user enters PhotoSelect screen, but preserves state when navigating back
+  // SELECTION BEHAVIOR:
+  // - When user enters PhotoSelect screen from outside (e.g., from Create tab), selection is cleared
+  // - When user navigates back from crop/edit screens, selection is preserved
+  // - This provides a clean slate for new posts while maintaining workflow continuity
+  useFocusEffect(
+    useCallback(() => {
+      // Check if we're coming from within the create flow
+      // If flag is set, we're navigating back from a create flow screen - preserve state
+      if (hasNavigatedFromCreateFlowRef.current) {
+        console.log('🔄 [PhotoSelectScreen] Preserving selection - navigating back from create flow');
+        hasNavigatedFromCreateFlowRef.current = false; // Reset flag after check
+        return;
+      }
+      
+      // Otherwise, reset selection (user entered from outside)
+      console.log('🔄 [PhotoSelectScreen] Resetting selection - entering from outside create flow');
+      setSelectedImages([]);
+      setPreviewImage(null);
+      setLockedRatio(null);
+    }, [])
+  );
 
   // Load photos from gallery - delay to ensure screen is attached to Activity
   useEffect(() => {
@@ -168,19 +196,7 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
 
         if (isMountedRef.current) {
           setPhotos(photos);
-          
-          // Auto-select first image and show in preview
-          if (photos.length > 0 && photos[0].uri) {
-            const firstImage: SelectedImage = {
-              uri: photos[0].uri,
-              width: photos[0].width,
-              height: photos[0].height,
-              id: photos[0].uri,
-              createdAt: photos[0].timestamp || Date.now(),
-            };
-            setSelectedImages([firstImage]);
-            setPreviewImage(firstImage);
-          }
+          // Don't auto-select - let user select manually (Instagram-like behavior)
         }
       } else {
         if (isMountedRef.current) {
@@ -199,36 +215,92 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
     }
   };
 
-  const toggleImageSelection = (asset: Asset) => {
-    if (!asset.uri) return;
+  // TOGGLE SELECTION: First tap = select, second tap = deselect
+  // Instagram-like toggle selection with max 5 images limit
+  // Lock aspect ratio on first selection (Instagram-style)
+  const toggleImageSelection = useCallback((asset: Asset) => {
+    if (!asset.uri) {
+      console.log('⚠️ [PhotoSelectScreen] toggleImageSelection: No URI');
+      return;
+    }
 
     const imageId = asset.uri;
-    const isSelected = selectedImages.some((img) => img.id === imageId);
-
-    if (isSelected) {
-      // Deselect
-      setSelectedImages((prev) => prev.filter((img) => img.id !== imageId));
-      // Update preview if this was the preview image
-      if (previewImage?.id === imageId) {
-        const remaining = selectedImages.filter((img) => img.id !== imageId);
-        setPreviewImage(remaining.length > 0 ? remaining[remaining.length - 1] : null);
+    console.log('🖼️ [PhotoSelectScreen] toggleImageSelection:', imageId.substring(0, 50) + '...');
+    
+    setSelectedImages((prev) => {
+      // Check if image is already selected
+      const exists = prev.find((img) => img.id === imageId);
+      
+      if (exists) {
+        // DESELECT: Remove from selection (always allowed, even at max limit)
+        console.log('❌ [PhotoSelectScreen] Deselecting image');
+        const updated = prev.filter((img) => img.id !== imageId);
+        
+        // If all images deselected, unlock ratio
+        if (updated.length === 0) {
+          setLockedRatio(null);
+        }
+        
+        // Update preview if this was the preview image (use functional update to avoid stale closure)
+        setPreviewImage((currentPreview) => {
+          if (currentPreview?.id === imageId) {
+            // If deselected image was preview, switch to last remaining image or null
+            const newPreview = updated.length > 0 ? updated[updated.length - 1] : null;
+            console.log('🔄 [PhotoSelectScreen] Preview updated after deselect:', newPreview ? 'new image' : 'null');
+            return newPreview;
+          }
+          return currentPreview;
+        });
+        
+        return updated;
+      } else {
+        // SELECT: Add to selection (check max limit first)
+        if (prev.length >= MAX_SELECTION) {
+          // Show non-blocking warning (toast-like alert)
+          Alert.alert(
+            'Maximum Selection',
+            `You can select up to ${MAX_SELECTION} images only.`,
+            [{ text: 'OK' }]
+          );
+          return prev; // Don't add - return previous state
+        }
+        
+        console.log('✅ [PhotoSelectScreen] Selecting image');
+        const newImage: SelectedImage = {
+          uri: asset.uri,
+          width: asset.width,
+          height: asset.height,
+          id: imageId,
+          createdAt: asset.timestamp || Date.now(),
+        };
+        
+        // INSTAGRAM LOGIC: Lock ratio on FIRST selection (default to 4:5 for posts)
+        if (prev.length === 0 && !lockedRatio) {
+          const defaultRatio: '1:1' | '4:5' | '16:9' = contentType === 'post' ? '4:5' : '16:9';
+          setLockedRatio(defaultRatio);
+          console.log('🔒 [PhotoSelectScreen] Ratio locked to:', defaultRatio, '(Instagram-style)');
+        }
+        
+        // Set as preview when selected (only if no preview exists or this is first selection)
+        setPreviewImage((currentPreview) => {
+          if (!currentPreview || prev.length === 0) {
+            console.log('🖼️ [PhotoSelectScreen] Setting new preview image');
+            return newImage;
+          }
+          console.log('🔄 [PhotoSelectScreen] Keeping existing preview');
+          return currentPreview; // Keep existing preview
+        });
+        
+        return [...prev, newImage];
       }
-    } else {
-      // Select
-      const newImage: SelectedImage = {
-        uri: asset.uri,
-        width: asset.width,
-        height: asset.height,
-        id: imageId,
-        createdAt: asset.timestamp || Date.now(),
-      };
-      setSelectedImages((prev) => [...prev, newImage]);
-      setPreviewImage(newImage);
-    }
-  };
+    });
+  }, [lockedRatio, contentType]);
 
   const handleZoom = () => {
-    if (!previewImage || selectedImages.length === 0) return;
+    if (!previewImage || selectedImages.length === 0) {
+      Alert.alert('No Selection', 'Please select at least one image to crop');
+      return;
+    }
 
     // Navigate to CropAdjustScreen with all selected images
     navigateToScreen(navigation, 'CropAdjust', {
@@ -257,13 +329,42 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
           createdAt: result.assets[0].timestamp || Date.now(),
         };
         
-        // Add to selected images and set as preview
+        // Toggle selection for captured image (Instagram-like behavior) with max limit check
         setSelectedImages((prev) => {
-          const exists = prev.some((img) => img.id === capturedImage.id);
-          if (exists) return prev;
-          return [...prev, capturedImage];
+          const exists = prev.find((img) => img.id === capturedImage.id);
+          if (exists) {
+            // Deselect if already selected (always allowed)
+            setPreviewImage((currentPreview) => {
+              const updated = prev.filter((img) => img.id !== capturedImage.id);
+              if (updated.length === 0) {
+                setLockedRatio(null);
+              }
+              return currentPreview?.id === capturedImage.id 
+                ? (updated.length > 0 ? updated[updated.length - 1] : null)
+                : currentPreview;
+            });
+            return prev.filter((img) => img.id !== capturedImage.id);
+          } else {
+            // Select if not selected (check max limit first)
+            if (prev.length >= MAX_SELECTION) {
+              Alert.alert(
+                'Maximum Selection',
+                `You can select up to ${MAX_SELECTION} images only.`,
+                [{ text: 'OK' }]
+              );
+              return prev; // Don't add - return previous state
+            }
+            
+            // Lock ratio on first selection
+            if (prev.length === 0 && !lockedRatio) {
+              const defaultRatio: '1:1' | '4:5' | '16:9' = contentType === 'post' ? '4:5' : '16:9';
+              setLockedRatio(defaultRatio);
+            }
+            
+            setPreviewImage(capturedImage);
+            return [...prev, capturedImage];
+          }
         });
-        setPreviewImage(capturedImage);
       }
     } catch (error: any) {
       if (error.code !== 'E_CAMERA_CANCELLED') {
@@ -278,27 +379,35 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
       return;
     }
 
-    // Navigate to CropAdjustScreen with contentType and selectedImages
+    // Mark that we're navigating within create flow (preserve state on back)
+    hasNavigatedFromCreateFlowRef.current = true;
+
+    // INSTAGRAM LOGIC: Pass locked ratio to crop screen (all images use same ratio)
+    const ratioToUse = lockedRatio || (contentType === 'post' ? '4:5' : '16:9');
+    
+    // Navigate to CropAdjustScreen with contentType, selectedImages, and LOCKED ratio
     navigateToScreen(navigation, 'CropAdjust', {
       contentType: contentType,
       selectedImages: selectedImages,
       imageUri: selectedImages[0].uri,
       currentImageIndex: 0,
       allowMultiple: selectedImages.length > 1,
+      lockedRatio: ratioToUse, // Pass locked ratio (Instagram-style: one ratio per post)
     });
   };
 
-  const getImageIndex = (asset: Asset): number => {
+  // Memoized helper functions for better performance
+  const getImageIndex = useCallback((asset: Asset): number => {
     if (!asset.uri) return -1;
     return selectedImages.findIndex((img) => img.id === asset.uri) + 1;
-  };
+  }, [selectedImages]);
 
-  const isImageSelected = (asset: Asset): boolean => {
+  const isImageSelected = useCallback((asset: Asset): boolean => {
     if (!asset.uri) return false;
     return selectedImages.some((img) => img.id === asset.uri);
-  };
+  }, [selectedImages]);
 
-  const renderPhotoItem = ({ item, index }: { item: Asset; index: number }) => {
+  const renderPhotoItem = useCallback(({ item, index }: { item: Asset; index: number }) => {
     const isSelected = isImageSelected(item);
     const imageIndex = getImageIndex(item);
 
@@ -306,19 +415,8 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
       <TouchableOpacity
         style={styles.photoItem}
         activeOpacity={0.9}
-        onPress={() => {
-          toggleImageSelection(item);
-          if (item.uri) {
-            const selectedImg: SelectedImage = {
-              uri: item.uri,
-              width: item.width,
-              height: item.height,
-              id: item.uri,
-              createdAt: item.timestamp || Date.now(),
-            };
-            setPreviewImage(selectedImg);
-          }
-        }}
+        onPress={() => toggleImageSelection(item)}
+        // Remove long press to avoid interference with toggle
       >
         {item.uri ? (
           <Image source={{ uri: item.uri }} style={styles.photoImage} resizeMode="cover" />
@@ -337,7 +435,7 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
         )}
       </TouchableOpacity>
     );
-  };
+  }, [selectedImages, toggleImageSelection, isImageSelected, getImageIndex]);
 
   if (loading) {
     return (
@@ -395,7 +493,12 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
               </Text>
             </View>
           )}
-          <TouchableOpacity style={styles.zoomButton} activeOpacity={0.8} onPress={handleZoom}>
+          <TouchableOpacity 
+            style={styles.zoomButton} 
+            activeOpacity={0.8} 
+            onPress={handleZoom}
+            disabled={selectedImages.length === 0}
+          >
             <View style={styles.zoomButtonBackground}>
               <Icon name="crop-outline" size={22} color="#FFFFFF" />
             </View>
@@ -433,10 +536,11 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
       <FlatList
         data={photos}
         renderItem={renderPhotoItem}
-        keyExtractor={(item, index) => item.uri || `photo-${index}`}
+        keyExtractor={(item, index) => item.uri || `photo-${item.timestamp || index}`}
         numColumns={GRID_COLUMNS}
         contentContainerStyle={styles.gridContainer}
         showsVerticalScrollIndicator={false}
+        extraData={selectedImages} // Force re-render when selection changes
         ListHeaderComponent={
           <TouchableOpacity
             style={styles.photoItem}

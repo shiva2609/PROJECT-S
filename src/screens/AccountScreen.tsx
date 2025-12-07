@@ -7,6 +7,7 @@ import { Fonts } from '../theme/fonts';
 import { useAuth } from '../contexts/AuthContext';
 import { listenToSavedPosts, Post } from '../api/firebaseService';
 import { formatTimestamp } from '../utils/postHelpers';
+import { normalizePost } from '../utils/postUtils';
 
 export default function AccountScreen({ navigation }: any) {
   const { user } = useAuth();
@@ -28,7 +29,14 @@ export default function AccountScreen({ navigation }: any) {
   }, [user]);
 
   const renderPost = ({ item }: { item: Post }) => {
-    const imageUrl = item.imageUrl || item.coverImage || '';
+    // CRITICAL: Use ONLY final cropped bitmaps - NO fallback to original images
+    // Normalize post to get mediaUrls (contains final rendered bitmap URLs)
+    const normalizedPost = normalizePost(item as any);
+    const mediaUrls = normalizedPost.mediaUrls || [];
+    
+    // Use first image from mediaUrls (final cropped bitmap) or finalCroppedUrl
+    // DO NOT fallback to imageUrl or coverImage - those might be original images
+    const imageUrl = mediaUrls[0] || (item as any).finalCroppedUrl || '';
     const username = item.username || 'User';
     const location = item.location || item.placeName || '';
     const timestamp = formatTimestamp(item.createdAt);

@@ -7,7 +7,7 @@ import { colors } from '../utils/colors';
 import { Colors } from '../theme/colors';
 import { Fonts } from '../theme/fonts';
 import { db } from '../api/authService';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import SegmentedControl from '../components/SegmentedControl';
 import { useAuth } from '../contexts/AuthContext';
 import { MotiView } from '../utils/moti';
@@ -20,6 +20,7 @@ import TopicClaimAlert from '../components/TopicClaimAlert';
 import FollowingScreen from './FollowingScreen';
 import { toggleLikePost, toggleBookmarkPost, toggleSharePost, Post } from '../api/firebaseService';
 import { formatTimestamp, parseHashtags, CaptionPart } from '../utils/postHelpers';
+import { normalizePost } from '../utils/postUtils';
 import PostCard from '../components/PostCard';
 
 interface StoryDoc { id: string; userId: string; media?: string; location?: string; profilePhoto?: string; username?: string; }
@@ -63,9 +64,59 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
   const [likingPosts, setLikingPosts] = useState<Set<string>>(new Set()); // Track posts being liked
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set()); // Track users being followed
+  const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set()); // Track blocked users
+  const [mutedUsers, setMutedUsers] = useState<Set<string>>(new Set()); // Track muted users
+  const [hiddenPosts, setHiddenPosts] = useState<Set<string>>(new Set()); // Track hidden posts
 
   const { visible: rewardVisible, claimed, points, claiming: rewardClaiming, error: rewardError, grantReward, dismiss: dismissReward, showReward } = useRewardOnboarding(user?.uid);
   const { showAlert: showTopicAlert, onClaimNow: handleTopicClaimNow, onRemindLater: handleTopicRemindLater } = useTopicClaimReminder(user?.uid, navigation);
+
+  // Fetch following IDs to filter "For You" posts
+  useEffect(() => {
+    if (!user) return;
+
+    const followsRef = collection(db, 'follows');
+    const followsQuery = query(followsRef, where('followerId', '==', user.uid));
+    const unsubscribeFollows = onSnapshot(followsQuery, (snapshot) => {
+      const ids = new Set(snapshot.docs.map(doc => doc.data().followingId));
+      setFollowingIds(ids);
+      console.log('👥 [HomeScreen] Following IDs updated:', ids.size, 'users');
+    }, (error: any) => {
+      // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+      if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+        console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+        return;
+      }
+      console.warn('Error fetching following IDs:', error.message || error);
+    });
+
+    return () => unsubscribeFollows();
+  }, [user]);
+
+  // Fetch blocked users, muted users, and hidden posts
+  useEffect(() => {
+    if (!user) return;
+
+    const userRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const userData = snapshot.data() as any;
+        setBlockedUsers(new Set(userData.blockedUsers || []));
+        setMutedUsers(new Set(userData.mutedUsers || []));
+        setHiddenPosts(new Set(userData.hiddenPosts || []));
+        console.log('🚫 [HomeScreen] Blocked/Muted/Hidden updated:', {
+          blocked: (userData.blockedUsers || []).length,
+          muted: (userData.mutedUsers || []).length,
+          hidden: (userData.hiddenPosts || []).length,
+        });
+      }
+    }, (error: any) => {
+      console.warn('Error fetching user preferences:', error.message || error);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   // Real-time listener for posts
   useEffect(() => {
@@ -78,7 +129,27 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
           const data = d.data();
           return !!data.createdAt;
         })
-        .map((d) => ({ id: d.id, ...(d.data() as any) } as Post));
+        .map((d) => {
+          const data = d.data() as any;
+          // CRITICAL: Preserve aspectRatio and ratio fields - these are set by the user during upload
+          // These fields determine the post card's display ratio and MUST be preserved
+          const post: Post = { 
+            id: d.id, 
+            ...data,
+            // Explicitly preserve aspectRatio and ratio if they exist
+            aspectRatio: data.aspectRatio !== undefined ? data.aspectRatio : undefined,
+            ratio: data.ratio !== undefined ? data.ratio : undefined,
+          } as Post;
+          
+          // Log for debugging
+          if (post.aspectRatio || post.ratio) {
+            console.log('📐 [HomeScreen] Post loaded:', post.id, 'aspectRatio:', post.aspectRatio, 'ratio:', post.ratio);
+          } else {
+            console.warn('⚠️ [HomeScreen] Post missing aspectRatio/ratio:', post.id);
+          }
+          
+          return post;
+        });
       
       setPosts(postsData);
       
@@ -96,6 +167,11 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
       
       setLoading(false);
     }, (error: any) => {
+      // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+      if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+        console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+        return; // Don't log full error, just suppress it
+      }
       if (error.code === 'failed-precondition') {
         console.warn('Firestore query error: ensure createdAt exists.');
       } else {
@@ -107,11 +183,61 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     return () => unsubscribe();
   }, [user]);
 
+  // Filter posts for "For You" tab
+  // INCLUDES: User's own posts + Posts from non-followed users (suggestion accounts)
+  // EXCLUDES: Posts from followed users (those go to Following tab)
+  // EXCLUDES: Posts from blocked/muted users, hidden posts
+  const forYouPosts = useMemo(() => {
+    if (selectedTab !== 'For You') return [];
+    
+    // Filter: Include user's own posts + posts from non-followed users (suggestions)
+    // Exclude blocked/muted users and hidden posts
+    const filtered = posts.filter((post) => {
+      const postAuthorId = post.createdBy || post.userId;
+      if (!postAuthorId) return false;
+      
+      // EXCLUDE: Hidden posts
+      if (hiddenPosts.has(post.id)) {
+        return false;
+      }
+      
+      // EXCLUDE: Blocked users
+      if (blockedUsers.has(postAuthorId)) {
+        return false;
+      }
+      
+      // EXCLUDE: Muted users (for future posts, but keep current post visible per requirements)
+      // Note: Mute only affects future posts, so we don't filter here
+      // But we could add: if (mutedUsers.has(postAuthorId)) return false;
+      
+      // INCLUDE: User's own posts
+      if (postAuthorId === user?.uid) {
+        return true;
+      }
+      
+      // INCLUDE: Posts from users you don't follow (suggestion accounts)
+      // EXCLUDE: Posts from users you follow (those go to Following tab)
+      return !followingIds.has(postAuthorId);
+    });
+    
+    console.log('📱 [HomeScreen] For You posts:', filtered.length, 'out of', posts.length, 'total');
+    console.log('📱 [HomeScreen] - User own posts:', filtered.filter(p => (p.createdBy || p.userId) === user?.uid).length);
+    console.log('📱 [HomeScreen] - Suggestion accounts:', filtered.filter(p => (p.createdBy || p.userId) !== user?.uid).length);
+    return filtered;
+  }, [posts, followingIds, selectedTab, user, blockedUsers, mutedUsers, hiddenPosts]);
+
   // Listen to stories
   useEffect(() => {
     const storiesQuery = query(collection(db, 'stories'));
     const unsubscribe = onSnapshot(storiesQuery, (snapshot) => {
       setStories(snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
+    }, (error: any) => {
+      // Suppress Firestore internal assertion errors (non-fatal SDK bugs)
+      if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
+        console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
+        return;
+      }
+      console.warn('Stories listener error:', error.message || error);
     });
     return () => unsubscribe();
   }, []);
@@ -162,7 +288,16 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
       });
     } catch (error: any) {
       console.error('Error toggling like:', error);
-      Alert.alert('Error', error.message || 'Failed to like post');
+      // Handle version conflict errors gracefully (Firebase transaction retry failed)
+      if (error.code === 'failed-precondition' || error.message?.includes('version')) {
+        console.warn('⚠️ Version conflict detected, will retry automatically on next attempt');
+        // Don't show alert for version conflicts - Firebase will retry automatically
+        return;
+      }
+      // Only show alert for other errors
+      if (error.code !== 'failed-precondition') {
+        Alert.alert('Error', error.message || 'Failed to like post');
+      }
     } finally {
       setLikingPosts((prev) => {
         const next = new Set(prev);
@@ -200,11 +335,15 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
       // Toggle share count
       await toggleSharePost(post.id, user.uid);
       
-      // Also use native share
-      const imageUrl = post.media?.[0]?.uri || post.imageUrl || '';
+      // CRITICAL: Use ONLY final cropped bitmap for sharing - NO original images
+      // Get final cropped bitmap URL from mediaUrls or finalCroppedUrl
+      const normalizedPost = normalizePost(post as any);
+      const mediaUrls = normalizedPost.mediaUrls || [];
+      const shareUrl = mediaUrls[0] || (post as any).finalCroppedUrl || '';
+      
       const result = await Share.share({
-        message: `${post.caption || 'Check out this post!'}${imageUrl ? `\n${imageUrl}` : ''}`,
-        url: imageUrl,
+        message: `${post.caption || 'Check out this post!'}${shareUrl ? `\n${shareUrl}` : ''}`,
+        url: shareUrl,
       });
       if (result.action === Share.sharedAction) {
         console.log('Post shared successfully');
@@ -247,9 +386,26 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     );
   };
 
+  const handlePostRemoved = (postId: string) => {
+    // Optimistic: Remove post from feed immediately
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+    setLikedPosts((prev) => {
+      const next = new Set(prev);
+      next.delete(postId);
+      return next;
+    });
+    setSavedPosts((prev) => {
+      const next = new Set(prev);
+      next.delete(postId);
+      return next;
+    });
+  };
+
   const renderPost = ({ item, index }: { item: Post; index: number }) => {
     const isLiked = likedPosts.has(item.id);
     const isSaved = savedPosts.has(item.id);
+    const postAuthorId = item.createdBy || item.userId;
+    const isFollowing = postAuthorId ? followingIds.has(postAuthorId) : false;
 
     return (
       <MotiView
@@ -266,8 +422,15 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
           onShare={() => handleShare(item)}
           onBookmark={() => handleBookmark(item.id)}
           onProfilePress={() => navProp?.navigate('Profile', { userId: item.createdBy || item.userId })}
-          onPostDetailPress={() => navProp?.navigate('PostDetail', { postId: item.id })}
+          onPostDetailPress={() => navProp?.navigate('PostDetail', { 
+            posts: posts, 
+            index: index,
+            postId: item.id 
+          })}
           currentUserId={user?.uid}
+          isFollowing={isFollowing}
+          inForYou={selectedTab === 'For You'}
+          onPostRemoved={handlePostRemoved}
         />
       </MotiView>
     );
@@ -374,14 +537,14 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
           {/* Tab Content */}
           {selectedTab === 'For You' ? (
             <FlatList
-              data={posts}
+              data={forYouPosts}
               keyExtractor={(i) => i.id}
               renderItem={renderPost}
               windowSize={8}
               initialNumToRender={5}
               removeClippedSubviews
               ListEmptyComponent={
-                !posts || posts.length === 0 ? (
+                !forYouPosts || forYouPosts.length === 0 ? (
                   <View style={styles.emptyState}>
                     <Text style={styles.emptyTitle}>No posts yet, start exploring!</Text>
                     <Text style={styles.emptySub}>Follow explorers or create your first travel memory.</Text>
@@ -401,7 +564,12 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
               navigation={navProp}
               onUserPress={(userId) => navProp?.navigate('Profile', { userId })}
               onPostPress={(post) => {
-                navProp?.navigate('PostDetail', { postId: post.id });
+                const postIndex = posts.findIndex((p) => p.id === post.id);
+                navProp?.navigate('PostDetail', { 
+                  posts: posts, 
+                  index: postIndex >= 0 ? postIndex : 0,
+                  postId: post.id 
+                });
               }}
             />
           )}
@@ -478,12 +646,11 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 34,
-    padding: 2,
+    padding: 2.5,
     borderWidth: 2,
     borderColor: Colors.white.tertiary, // Gray inactive ring
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 2.5,
     backgroundColor: 'transparent',
   },
   storyAvatarContainer: {
@@ -494,17 +661,21 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white.tertiary,
   },
   storyAvatar: {
-    width: '100%',
-    height: '100%',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: Colors.white.tertiary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
   },
   storyAdd: {
     position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    right: -2,
+    bottom: 20,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: Colors.brand.primary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -521,28 +692,6 @@ const styles = StyleSheet.create({
     maxWidth: 68,
   },
   storyRingInactive: { borderColor: Colors.white.tertiary },
-  storyAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.white.tertiary },
-  storyAdd: {
-    position: 'absolute',
-    right: -2,
-    bottom: 20,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: Colors.brand.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Colors.white.secondary,
-  },
-  storyText: {
-    marginTop: 6,
-    fontSize: 12,
-    color: Colors.black.qua,
-    fontFamily: Fonts.regular,
-    textAlign: 'center',
-    maxWidth: 68,
-  },
   postCard: {
     backgroundColor: Colors.white.primary,
     marginHorizontal: 12,

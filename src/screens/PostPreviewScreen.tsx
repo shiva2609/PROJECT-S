@@ -47,10 +47,29 @@ interface PostPreviewScreenProps {
 }
 
 export default function PostPreviewScreen({ navigation, route }: PostPreviewScreenProps) {
+  console.log('🟡 [PostPreviewScreen] ⚠️ COMPONENT MOUNTED - This might be the ghost screen!');
+  console.log('🟡 [PostPreviewScreen] Route params:', {
+    hasCroppedMedia: !!route.params?.croppedMedia,
+    croppedMediaLength: route.params?.croppedMedia?.length || 0,
+    postType: route.params?.postType,
+    currentIndex: route.params?.currentIndex,
+  });
+  console.log('🟡 [PostPreviewScreen] Navigation state:', {
+    canGoBack: navigation.canGoBack?.(),
+  });
+  
   const { croppedMedia, postType, currentIndex: initialIndex = 0 } = route.params;
   const { user } = useAuth();
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const scrollViewRef = useRef<ScrollView>(null);
+  
+  useEffect(() => {
+    console.log('🟡 [PostPreviewScreen] useEffect - Component mounted');
+    console.trace('🟡 [PostPreviewScreen] Stack trace of where this screen was navigated from:');
+    return () => {
+      console.log('🔴 [PostPreviewScreen] useEffect cleanup - Component unmounting');
+    };
+  }, []);
 
   useEffect(() => {
     if (initialIndex > 0) {

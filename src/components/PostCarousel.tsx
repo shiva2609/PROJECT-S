@@ -32,10 +32,10 @@ export interface MediaItem {
 
 interface PostCarouselProps {
   media: MediaItem[];
-  aspectRatio?: number; // Optional aspect ratio for container height (legacy)
-  ratio?: '1:1' | '4:5' | '16:9'; // Aspect ratio as string
-  width?: number; // Container width
-  height?: number; // Container height
+  aspectRatio?: number; // Numeric aspect ratio (PRIMARY - from post document)
+  ratio?: '1:1' | '4:5' | '16:9'; // Aspect ratio as string (fallback)
+  width?: number; // Container width (should be screenWidth)
+  height?: number; // Container height (calculated from aspectRatio)
 }
 
 const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio, width, height }) => {
@@ -43,17 +43,22 @@ const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio,
   const flatListRef = useRef<FlatList>(null);
   const videoRefs = useRef<{ [key: number]: any }>({});
 
-  // Use provided dimensions, or calculate from aspectRatio (legacy), or default
+  // Use provided dimensions (should be calculated in PostCard using Instagram formula)
+  // Instagram formula: width = screenWidth, height = screenWidth * (1 / aspectRatio)
   const containerWidth = width ?? SCREEN_WIDTH;
   const containerHeight = useMemo(() => {
-    if (height !== undefined) {
+    // PRIMARY: Use provided height (calculated in PostCard from aspectRatio)
+    if (height !== undefined && height > 0) {
       return height;
     }
+    // FALLBACK: Calculate from numeric aspectRatio if height not provided
     if (aspectRatio && aspectRatio > 0) {
-      return SCREEN_WIDTH / aspectRatio;
+      // Instagram formula: height = width * (1 / aspectRatio)
+      return Math.round(containerWidth * (1 / aspectRatio));
     }
-    return 340; // Default height
-  }, [aspectRatio, height]);
+    // LAST RESORT: Default to square (should not happen with proper post data)
+    return containerWidth;
+  }, [aspectRatio, height, containerWidth]);
 
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const contentOffsetX = event.nativeEvent.contentOffset.x;
@@ -94,6 +99,9 @@ const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio,
     const isVideo = item.type === 'video';
     const isActive = index === currentIndex;
 
+    // CRITICAL: Use exact container dimensions - DO NOT recalculate or change aspect ratio
+    // The container dimensions are calculated in PostCard from the stored aspectRatio
+    // This ensures consistent rendering across all sections (For You, Following, Profile, etc.)
     return (
       <View style={[styles.mediaContainer, { width: containerWidth, height: containerHeight }]}>
         {isVideo && Video ? (
@@ -155,7 +163,7 @@ const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio,
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { width: containerWidth, height: containerHeight }]}>
       <FlatList
         ref={flatListRef}
         data={media}
@@ -212,7 +220,7 @@ PostCarousel.displayName = 'PostCarousel';
 const styles = StyleSheet.create({
   container: {
     position: 'relative',
-    width: '100%',
+    overflow: 'hidden', // Ensure counter stays within bounds
   },
   mediaContainer: {
     backgroundColor: 'black',
@@ -226,6 +234,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    zIndex: 10, // Ensure it's above the media
+    maxWidth: 50, // Prevent overflow
   },
   indexText: {
     fontFamily: Fonts.semibold,

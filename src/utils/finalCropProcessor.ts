@@ -1,4 +1,5 @@
-import ImagePicker from 'react-native-image-crop-picker';
+// ImagePicker removed - was causing ghost "Processing" screen
+// Using ImageResizer instead for silent processing
 import { Platform } from 'react-native';
 import type { Asset, CropParams, AspectRatio } from '../store/useCreateFlowStore';
 import { computeCropRect } from './cropMath';
@@ -15,15 +16,18 @@ export async function processFinalCrops(
   cropBoxWidth: number,
   cropBoxHeight: number
 ): Promise<string[]> {
+  console.log('🟡 [finalCropProcessor] processFinalCrops called - processing', assets.length, 'images');
   const finalUris: string[] = [];
 
   for (const asset of assets) {
     const params = cropParams[asset.id];
     if (!params) {
-      // No crop params - use original
-      console.warn(`No crop params for asset ${asset.id}, using original`);
-      finalUris.push(asset.uri);
-      continue;
+      // CRITICAL: No crop params - this should not happen in the new flow
+      // In the new flow, CropAdjustScreen generates final bitmaps immediately
+      // This function is only used by legacy AddDetailsScreen flow
+      // Throw error instead of using original image
+      console.error(`❌ [finalCropProcessor] No crop params for asset ${asset.id} - cannot generate final bitmap`);
+      throw new Error(`Missing crop parameters for image ${asset.id}. Cannot generate final cropped bitmap.`);
     }
 
     try {
@@ -31,9 +35,10 @@ export async function processFinalCrops(
       const imageSize = await getImageSize(asset.uri);
       
       if (imageSize.width === 0 || imageSize.height === 0) {
-        console.warn(`Invalid image size for ${asset.id}, using original`);
-        finalUris.push(asset.uri);
-        continue;
+        // CRITICAL: Invalid image size - cannot generate final bitmap
+        // Throw error instead of using original image
+        console.error(`❌ [finalCropProcessor] Invalid image size for ${asset.id} - cannot generate final bitmap`);
+        throw new Error(`Invalid image dimensions for ${asset.id}. Cannot generate final cropped bitmap.`);
       }
 
       // Compute the exact crop rectangle based on user's adjustments
@@ -73,70 +78,118 @@ export async function processFinalCrops(
         imageUri = imageUri.replace('file://', '');
       }
 
-      // Perform native cropping using ImageCropPicker
-      // This creates the EXACT image the user saw in preview
+      // CRITICAL: Use the same cropping logic as exportFinalBitmap to actually CROP the image
+      // ImageResizer only resizes - it doesn't crop. We need to use a library that supports x/y crop coordinates
+      console.log('🟡 [finalCropProcessor] Using image manipulation library for precise cropping...');
+      console.log('🟡 [finalCropProcessor] Crop rect (x, y, width, height):', {
+        x: Math.round(cropRect.x),
+        y: Math.round(cropRect.y),
+        width: Math.round(cropRect.width),
+        height: Math.round(cropRect.height),
+      });
+      
+      // Prepare image URI (remove file:// prefix)
+      let processedUri = imageUri;
+      if (Platform.OS === 'android' && processedUri.startsWith('file://')) {
+        processedUri = processedUri.replace('file://', '');
+      }
+      if (Platform.OS === 'ios' && processedUri.startsWith('file://')) {
+        processedUri = processedUri.replace('file://', '');
+      }
+      
+      let finalImageUri: string;
+      let manipulationSuccess = false;
+      
+      // Method 1: Try react-native-photo-manipulator (React Native CLI - supports precise x/y crop)
       try {
-        const croppedImage = await ImagePicker.openCropper({
-          path: imageUri,
-          width: outputWidth,
-          height: outputHeight,
-          cropping: true,
-          cropperToolbarTitle: 'Processing',
-          cropperChooseText: 'Done',
-          cropperCancelText: 'Cancel',
-          compressImageQuality: 0.9,
-          freeStyleCropEnabled: false,
-          cropperActiveWidgetColor: '#FF7F4D',
-          cropperStatusBarColor: '#FF7F4D',
-          cropperToolbarColor: '#FF7F4D',
-          cropperCircleOverlay: globalRatio === '1:1',
-          aspectRatioPreserved: true,
-          cropperToolbarWidgetColor: '#FFFFFF',
-          showCropGuidelines: false,
-          hideBottomControls: true,
-          enableRotationGesture: false,
-          // Use the computed crop rect
-          cropperCropShape: globalRatio === '1:1' ? 'OVAL' : 'RECT',
-        });
+        const RNPhotoManipulator = require('react-native-photo-manipulator').default;
+        
+        console.log('🟡 [finalCropProcessor] Using react-native-photo-manipulator for precise cropping...');
+        
+        // Ensure crop rect is within image bounds
+        const safeCropRect = {
+          x: Math.max(0, Math.min(Math.round(cropRect.x), imageSize.width - 1)),
+          y: Math.max(0, Math.min(Math.round(cropRect.y), imageSize.height - 1)),
+          width: Math.min(Math.round(cropRect.width), imageSize.width - Math.max(0, Math.round(cropRect.x))),
+          height: Math.min(Math.round(cropRect.height), imageSize.height - Math.max(0, Math.round(cropRect.y))),
+        };
 
-        finalUris.push(croppedImage.path);
-      } catch (cropError: any) {
-        // Handle Activity errors gracefully - this is expected when Activity is not available
-        if (cropError.code === 'E_ACTIVITY_DOES_NOT_EXIST' || 
-            cropError.message?.includes('Activity') ||
-            cropError.message?.includes('Activity doesn\'t exist')) {
-          // Silently fallback to ImageResizer (no console.warn to reduce noise)
-          // Fallback: Use ImageResizer to at least resize to correct aspect ratio
-          try {
-            const ImageResizer = require('react-native-image-resizer').default;
-            const resizedImage = await ImageResizer.createResizedImage(
-              imageUri,
-              outputWidth,
-              outputHeight,
-              'JPEG',
-              90,
-              0
-            );
-            finalUris.push(resizedImage.uri);
-          } catch (resizeError: any) {
-            // If ImageResizer also fails, use original
-            console.warn('ImageResizer failed, using original image:', resizeError.message);
-            finalUris.push(asset.uri);
+        // Ensure width and height are positive and valid
+        if (safeCropRect.width <= 0 || safeCropRect.height <= 0) {
+          throw new Error('Invalid crop rectangle dimensions');
+        }
+        
+        // Ensure crop rect doesn't exceed image bounds
+        if (safeCropRect.x + safeCropRect.width > imageSize.width) {
+          safeCropRect.width = imageSize.width - safeCropRect.x;
+        }
+        if (safeCropRect.y + safeCropRect.height > imageSize.height) {
+          safeCropRect.height = imageSize.height - safeCropRect.y;
+        }
+        
+        console.log('🟡 [finalCropProcessor] Safe crop rect:', safeCropRect);
+        
+        // react-native-photo-manipulator API: crop(imageUri, cropRegion, targetSize)
+        const targetSize = { width: outputWidth, height: outputHeight };
+        const croppedImageUri = await RNPhotoManipulator.crop(processedUri, safeCropRect, targetSize);
+
+        finalImageUri = croppedImageUri;
+        manipulationSuccess = true;
+        console.log('✅ [finalCropProcessor] react-native-photo-manipulator crop complete:', finalImageUri.substring(0, 50) + '...');
+      } catch (photoManipError: any) {
+        console.log('⚠️ [finalCropProcessor] react-native-photo-manipulator not available:', photoManipError.message);
+        
+        // Method 2: Try expo-image-manipulator (if using Expo)
+        try {
+          const ImageManipulator = require('expo-image-manipulator').default;
+          
+          console.log('🟡 [finalCropProcessor] Trying expo-image-manipulator...');
+          
+          const safeCropRect = {
+            originX: Math.max(0, Math.min(Math.round(cropRect.x), imageSize.width - 1)),
+            originY: Math.max(0, Math.min(Math.round(cropRect.y), imageSize.height - 1)),
+            width: Math.min(Math.round(cropRect.width), imageSize.width - Math.max(0, Math.round(cropRect.x))),
+            height: Math.min(Math.round(cropRect.height), imageSize.height - Math.max(0, Math.round(cropRect.y))),
+          };
+
+          if (safeCropRect.width <= 0 || safeCropRect.height <= 0) {
+            throw new Error('Invalid crop rectangle dimensions');
           }
-        } else if (cropError.message?.includes('cancel') || cropError.code === 'E_PICKER_CANCELLED') {
-          // User cancelled - use original
-          finalUris.push(asset.uri);
-        } else {
-          // Other errors - log and use original
-          console.warn('Crop error, using original:', cropError.message || cropError);
-          finalUris.push(asset.uri);
+          
+          const manipulatedImage = await ImageManipulator.manipulateAsync(
+            processedUri,
+            [
+              { crop: safeCropRect },
+              { resize: { width: outputWidth, height: outputHeight } },
+            ],
+            { compress: 0.9, format: 'jpeg' }
+          );
+
+          finalImageUri = manipulatedImage.uri;
+          manipulationSuccess = true;
+          console.log('✅ [finalCropProcessor] expo-image-manipulator crop complete');
+        } catch (expoError: any) {
+          console.log('⚠️ [finalCropProcessor] expo-image-manipulator not available:', expoError.message);
         }
       }
+      
+      // Method 3: If no image manipulator available, throw error (don't use inaccurate fallback)
+      if (!manipulationSuccess) {
+        throw new Error(
+          'Image manipulation library not available. ' +
+          'For React Native CLI, please install: npm install react-native-photo-manipulator && npx pod-install. ' +
+          'For Expo, install: npx expo install expo-image-manipulator. ' +
+          'This is required for precise cropping with position adjustments (offsetX/offsetY).'
+        );
+      }
+      
+      console.log('✅ [finalCropProcessor] Final cropped bitmap generated:', finalImageUri.substring(0, 50) + '...');
+      finalUris.push(finalImageUri);
     } catch (error: any) {
-      // Handle any other errors
-      console.warn('Error processing image:', error.message || error);
-      // On error, use original
-      finalUris.push(asset.uri);
+      // CRITICAL: Any error during processing - cannot use original image
+      // Re-throw error instead of falling back to original
+      console.error(`❌ [finalCropProcessor] Error processing ${asset.id}:`, error.message || error);
+      throw new Error(`Failed to process image ${asset.id}: ${error.message || 'Unknown error'}`);
     }
   }
 
