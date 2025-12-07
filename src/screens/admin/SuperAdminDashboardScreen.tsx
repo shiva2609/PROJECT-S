@@ -437,7 +437,7 @@ export default function SuperAdminDashboardScreen({ navigation }: Props) {
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.headerIconButton}
-            onPress={() => navigation.navigate('Profile')}
+            onPress={() => navigation.push('ProfileScreen')}
           >
             <Icon name="person-circle-outline" size={22} color="#3C3C3B" />
           </TouchableOpacity>

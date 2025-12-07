@@ -9,7 +9,7 @@
  * - Equal tab spacing (1/3 or 1/4)
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useProfileData } from '../hooks/useProfileData';
+import { useProfilePhoto } from '../hooks/useProfilePhoto';
+import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../services/userProfilePhotoService';
 import { Fonts } from '../theme/fonts';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../api/authService';
@@ -34,6 +36,13 @@ import { normalizePost, sortPostsByCreatedAt } from '../utils/postUtils';
 import { getAccountTypeMetadata } from '../types/account';
 import type { AccountType } from '../types/account';
 import VerifiedBadge from '../components/VerifiedBadge';
+import { useSelector, useDispatch } from 'react-redux';
+import type { RootState } from '../store';
+import { fetchUserProfile, fetchUserPosts, fetchFollowState } from '../services/profileService';
+import { setUserPostsLoading } from '../store/userPostsSlice';
+import { setUserProfileLoading } from '../store/userProfileSlice';
+import FollowButton from '../components/profile/FollowButton';
+import { useFocusEffect } from '@react-navigation/native';
 
 // Design System Colors - Sanchari Brand
 const DESIGN_COLORS = {
@@ -57,22 +66,82 @@ export default function ProfileScreen({ navigation, route }: any) {
   const [activeTab, setActiveTab] = useState<TabType>('posts');
   const [fadeAnim] = useState(new Animated.Value(1));
   const { user } = useAuth();
-  const profileUserId = route?.params?.userId;
+  
+  // Read userId from route params - if not provided, use current user (Main Profile Tab)
+  const userId = route?.params?.userId;
+  const currentUserId = user?.uid || '';
+  const isOwnProfile = !userId || userId === currentUserId;
+  
+  // Determine which userId to use for data fetching
+  // Main Profile Tab: always use currentUserId (no route params)
+  // Visited Profile: use userId from route params
+  const targetUserId = userId || currentUserId;
 
+  // Get data from Redux slices
+  const profileData = useSelector((state: RootState) => 
+    targetUserId ? state.userProfile.userProfile[targetUserId] : null
+  );
+  const profileLoading = useSelector((state: RootState) => 
+    targetUserId ? state.userProfile.loading[targetUserId] : false
+  );
+  const posts = useSelector((state: RootState) => 
+    targetUserId ? state.userPosts.userPosts[targetUserId] || [] : []
+  );
+  const postsLoading = useSelector((state: RootState) => {
+    if (!targetUserId) return false;
+    // If loading state exists, use it; otherwise assume we haven't loaded yet (true)
+    const loadingState = state.userPosts.loading[targetUserId];
+    return loadingState !== undefined ? loadingState : true;
+  });
+  const followState = useSelector((state: RootState) => {
+    if (!targetUserId) {
+      return {
+        isFollowing: false,
+        isFollowedBack: false,
+        followerCount: 0,
+        followingCount: 0,
+        isLoading: false,
+      };
+    }
+    return state.userFollowState.userFollowState[targetUserId] || {
+      isFollowing: false,
+      isFollowedBack: false,
+      followerCount: 0,
+      followingCount: 0,
+      isLoading: false,
+    };
+  });
+
+  // Still use useProfileData for memories, tripCollections, and reviews
+  // (these can be moved to Redux later if needed)
   const {
-    profileData,
-    stats,
-    posts,
     memories,
     tripCollections,
     reviews,
-    loading,
-  } = useProfileData(profileUserId);
+  } = useProfileData(targetUserId);
   
   const [savedPosts, setSavedPosts] = useState<any[]>([]);
   const [savedPostsLoading, setSavedPostsLoading] = useState(false);
   const [accountType, setAccountType] = useState<AccountType>('Traveler');
   const [isVerified, setIsVerified] = useState(false);
+  
+  // Calculate stats from Redux data
+  // Use followState for follower count if available (more up-to-date after follow/unfollow)
+  const stats = useMemo(() => {
+    const followersCount = followState.followerCount > 0 
+      ? followState.followerCount 
+      : (profileData as any)?.followersCount || 0;
+    const followingCount = followState.followingCount > 0
+      ? followState.followingCount
+      : (profileData as any)?.followingCount || 0;
+    return {
+      postsCount: posts.length,
+      followersCount,
+      followingCount,
+    };
+  }, [posts.length, profileData, followState.followerCount, followState.followingCount]);
+  
+  const loading = profileLoading || postsLoading;
 
   // Modal states
   const [locationModalVisible, setLocationModalVisible] = useState(false);
@@ -80,9 +149,47 @@ export default function ProfileScreen({ navigation, route }: any) {
   const [interestModalVisible, setInterestModalVisible] = useState(false);
   const [countryModalVisible, setCountryModalVisible] = useState(false);
 
+  const dispatch = useDispatch();
+
+  // Initialize loading state immediately when targetUserId changes
+  // This ensures loading state is set before async fetch completes
+  useEffect(() => {
+    if (!targetUserId) return;
+    
+    // Set loading state immediately to show loading spinner
+    dispatch(setUserPostsLoading({ userId: targetUserId, loading: true }));
+    dispatch(setUserProfileLoading({ userId: targetUserId, loading: true }));
+  }, [targetUserId, dispatch]);
+
+  // Fetch fresh data on mount and when screen comes into focus (every time screen opens)
+  // This ensures we always get the latest data from Firestore, including:
+  // - Latest profile information
+  // - Latest posts
+  // - Latest follow state (isFollowing, isFollowedBack, counts)
+  // 
+  // IMPORTANT: All Firestore operations are PERMANENT and write immediately:
+  // - Likes (toggleLikePost) - updates likedBy[] array and likeCount
+  // - Comments (addComment) - creates comment document
+  // - Saves/Bookmarks (toggleBookmarkPost) - updates savedBy[] array
+  // - Shares (toggleSharePost) - updates sharedBy[] array and shareCount
+  // - Follow/Unfollow (followUser/unfollowUser) - updates following[]/followers[] arrays and counts
+  // These operations NEVER undo when screen unmounts - they persist in Firestore
+  // and will be reflected in the fresh data on next visit
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!targetUserId) return;
+      
+      // Always fetch fresh data from Firestore
+      fetchUserProfile(targetUserId);
+      fetchUserPosts(targetUserId);
+      if (currentUserId && !isOwnProfile) {
+        fetchFollowState(currentUserId, targetUserId);
+      }
+    }, [targetUserId, currentUserId, isOwnProfile])
+  );
+
   // Fetch account type and verification status
-  React.useEffect(() => {
-    const targetUserId = profileUserId || user?.uid;
+  useEffect(() => {
     if (!targetUserId) return;
     const userRef = doc(db, 'users', targetUserId);
     const unsubscribe = onSnapshot(userRef, (snapshot) => {
@@ -93,11 +200,11 @@ export default function ProfileScreen({ navigation, route }: any) {
       }
     });
     return () => unsubscribe();
-  }, [user, profileUserId]);
+  }, [targetUserId]);
 
   // Fetch saved posts (only for current user's own profile)
-  React.useEffect(() => {
-    if (!user || activeTab !== 'saved' || profileUserId) return;
+  useEffect(() => {
+    if (!user || activeTab !== 'saved' || !isOwnProfile) return;
 
     setSavedPostsLoading(true);
     const postsRef = collection(db, 'posts');
@@ -122,10 +229,21 @@ export default function ProfileScreen({ navigation, route }: any) {
     return () => unsubscribe();
   }, [user, activeTab]);
 
+  // Determine if content should be visible (Instagram-style)
+  // Content is visible if: isOwnProfile OR isFollowing
+  const canViewContent = isOwnProfile || followState.isFollowing;
+
   // Determine available tabs (references only if reviews exist, saved only for own profile)
+  // Hide memories tab if not following and not own profile
   const availableTabs = useMemo(() => {
-    const tabs: TabType[] = ['posts', 'bio', 'memories'];
-    if (!profileUserId) {
+    const tabs: TabType[] = ['posts', 'bio'];
+    
+    // Only show memories tab if can view content
+    if (canViewContent) {
+      tabs.push('memories');
+    }
+    
+    if (isOwnProfile) {
       // Only show saved tab for own profile
       tabs.push('saved');
     }
@@ -133,7 +251,14 @@ export default function ProfileScreen({ navigation, route }: any) {
       tabs.push('references');
     }
     return tabs;
-  }, [reviews.length, profileUserId]);
+  }, [reviews.length, isOwnProfile, canViewContent]);
+
+  // Reset active tab if current tab is not available (e.g., memories tab hidden)
+  useEffect(() => {
+    if (!availableTabs.includes(activeTab)) {
+      setActiveTab('posts');
+    }
+  }, [availableTabs, activeTab]);
 
   // Animate tab changes
   React.useEffect(() => {
@@ -146,7 +271,7 @@ export default function ProfileScreen({ navigation, route }: any) {
   }, [activeTab]);
 
   const handleEditProfile = () => {
-    navigation?.navigate('EditProfile');
+    navigation?.push('EditProfile');
   };
 
   // Firebase update functions
@@ -246,7 +371,8 @@ export default function ProfileScreen({ navigation, route }: any) {
     const displayName = profileData?.fullname || 'User';
     const username = profileData?.username || 'user';
     const userTag = profileData?.userTag || `@${username}`;
-    const profilePic = profileData?.profilePic;
+    // Use unified profile photo hook - rectangular shape for Profile Screen
+    const profilePic = useProfilePhoto(targetUserId, { shape: 'rectangle' });
     const aboutMe = profileData?.aboutMe || '';
     const bio = profileData?.bio || '';
     // Bio text - prefer aboutMe, fallback to auto-generated bio
@@ -256,8 +382,29 @@ export default function ProfileScreen({ navigation, route }: any) {
     const accountMetadata = getAccountTypeMetadata(accountType);
     const accountTypeDisplay = accountMetadata.displayName;
 
+    // isOwnProfile is already determined at component level
+
+    const handleBackPress = () => {
+      if (navigation?.canGoBack?.()) {
+        navigation.goBack();
+      } else {
+        // Fallback: navigate to Home if no screen to go back to
+        navigation?.navigate('Home');
+      }
+    };
+
     return (
       <View style={styles.headerWrapper}>
+        {/* Back Button - Only show when viewing other user's profile */}
+        {!isOwnProfile && (
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={handleBackPress}
+            activeOpacity={0.7}
+          >
+            <Icon name="arrow-back" size={24} color={DESIGN_COLORS.primaryText} />
+          </TouchableOpacity>
+        )}
         {/* Main Header Container with Layered Layout */}
         <View style={styles.headerContainer}>
           {/* Info Card - Behind the photo */}
@@ -281,13 +428,31 @@ export default function ProfileScreen({ navigation, route }: any) {
                   {/* Account Type - On same row */}
                   <Text style={styles.cardAccountType}>{accountTypeDisplay}</Text>
                 </View>
-                <TouchableOpacity
-                  style={styles.cardEditButton}
-                  onPress={handleEditProfile}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.cardEditButtonText}>Edit</Text>
-                </TouchableOpacity>
+                {/* Edit Button - Only show for own profile */}
+                {isOwnProfile ? (
+                  <TouchableOpacity
+                    style={styles.cardEditButton}
+                    onPress={handleEditProfile}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.cardEditButtonText}>Edit</Text>
+                  </TouchableOpacity>
+                ) : (
+                  /* Follow Button - Show for visited profiles */
+                  <FollowButton
+                    currentUserId={currentUserId}
+                    targetUserId={targetUserId}
+                    followState={followState}
+                    onFollowStateChange={() => {
+                      // Refresh profile data and follow state to update UI
+                      // This ensures content visibility updates immediately after follow/unfollow
+                      fetchUserProfile(targetUserId);
+                      if (currentUserId && !isOwnProfile) {
+                        fetchFollowState(currentUserId, targetUserId);
+                      }
+                    }}
+                  />
+                )}
               </View>
               
               {/* Bio Text - Multi-line, max 3-4 lines */}
@@ -299,16 +464,24 @@ export default function ProfileScreen({ navigation, route }: any) {
             </View>
           </View>
 
-          {/* Profile Photo - In front of card with zIndex */}
+          {/* Profile Photo - In front of card with zIndex - Rectangular (no borderRadius) */}
           <View style={styles.profilePhotoBox}>
-            {profilePic ? (
-              <Image source={{ uri: profilePic }} style={styles.profilePhotoImage} resizeMode="cover" />
-            ) : (
+            {isDefaultProfilePhoto(profilePic) ? (
               <View style={styles.profilePhotoPlaceholder}>
                 <Text style={styles.profilePhotoText}>
                   {displayName.charAt(0).toUpperCase()}
                 </Text>
               </View>
+            ) : (
+              <Image 
+                source={{ uri: profilePic }} 
+                defaultSource={{ uri: getDefaultProfilePhoto() }}
+                onError={() => {
+                  // Offline/CDN failure - Image component will use defaultSource
+                }}
+                style={styles.profilePhotoImage} 
+                resizeMode="cover" 
+              />
             )}
           </View>
         </View>
@@ -330,8 +503,8 @@ export default function ProfileScreen({ navigation, route }: any) {
             <TouchableOpacity
               style={styles.statItem}
               onPress={() => {
-                navigation?.navigate('Followers', {
-                  profileUserId: profileUserId || user?.uid,
+                navigation?.push('Followers', {
+                  profileUserId: targetUserId,
                   username: profileData?.username,
                 });
               }}
@@ -344,8 +517,8 @@ export default function ProfileScreen({ navigation, route }: any) {
             <TouchableOpacity
               style={styles.statItem}
               onPress={() => {
-                navigation?.navigate('Followers', {
-                  profileUserId: profileUserId || user?.uid,
+                navigation?.push('Followers', {
+                  profileUserId: targetUserId,
                   username: profileData?.username,
                   initialTab: 'following',
                 });
@@ -392,6 +565,29 @@ export default function ProfileScreen({ navigation, route }: any) {
   };
 
   const renderPostsTab = () => {
+    // Content visibility: If not following and not own profile, show placeholder
+    if (!canViewContent) {
+      return (
+        <View style={styles.lockedContainer}>
+          <View style={styles.lockedIconContainer}>
+            <Icon name="lock-closed" size={48} color={DESIGN_COLORS.secondaryText} />
+          </View>
+          <Text style={styles.lockedTitle}>This Account is Private</Text>
+          <Text style={styles.lockedSubtext}>Follow to see their posts</Text>
+        </View>
+      );
+    }
+
+    // Show loading state if posts are still loading
+    if (postsLoading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={DESIGN_COLORS.primary} />
+        </View>
+      );
+    }
+
+    // Only show empty state if we've finished loading and there are no posts
     if (posts.length === 0) {
       return (
         <View style={styles.emptyContainer}>
@@ -427,7 +623,7 @@ export default function ProfileScreen({ navigation, route }: any) {
                 { marginRight: index % 3 === 2 ? 0 : 2, marginBottom: 2 },
               ]}
               activeOpacity={0.9}
-              onPress={() => navigation?.navigate('PostDetail', { postId: post.id })}
+              onPress={() => navigation?.push('PostDetail', { postId: post.id })}
             >
               {thumbnailUrl ? (
                 <>
@@ -615,6 +811,19 @@ export default function ProfileScreen({ navigation, route }: any) {
   };
 
   const renderMemoriesTab = () => {
+    // Content visibility: If not following and not own profile, show placeholder
+    if (!canViewContent) {
+      return (
+        <View style={styles.lockedContainer}>
+          <View style={styles.lockedIconContainer}>
+            <Icon name="lock-closed" size={48} color={DESIGN_COLORS.secondaryText} />
+          </View>
+          <Text style={styles.lockedTitle}>This Account is Private</Text>
+          <Text style={styles.lockedSubtext}>Follow to see their memories</Text>
+        </View>
+      );
+    }
+
     return (
       <ScrollView style={styles.memoriesContent} contentContainerStyle={styles.memoriesContentInner}>
         <View style={styles.memoriesCard}>
@@ -723,7 +932,7 @@ export default function ProfileScreen({ navigation, route }: any) {
               activeOpacity={0.9}
               onPress={() => {
                 // Navigate to post detail
-                navigation?.navigate('PostDetail', { postId: post.id });
+                navigation?.push('PostDetail', { postId: post.id });
               }}
             >
               {imageUrl ? (
@@ -883,6 +1092,24 @@ const styles = StyleSheet.create({
     paddingTop: 16, // Reduced top spacing
     paddingHorizontal: 16,
     paddingBottom: 0,
+    position: 'relative',
+  },
+  backButton: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: DESIGN_COLORS.cardBackground,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   headerContainer: {
     flexDirection: 'row',
@@ -893,8 +1120,8 @@ const styles = StyleSheet.create({
   },
   profilePhotoBox: {
     width: 100, // Reduced from 120
-    height: 130, // Reduced from 160 - more compact
-    borderRadius: 12, // 10-14 range
+    height: 130, // Reduced from 160 - more compact - Rectangular ratio (100x130)
+    borderRadius: 12, // Smooth rounded corners for premium look
     overflow: 'hidden',
     backgroundColor: DESIGN_COLORS.border,
     shadowColor: '#000',
@@ -928,7 +1155,7 @@ const styles = StyleSheet.create({
     right: 16,
     top: 8, // Reduced top offset
     backgroundColor: '#FFFAEE', // Warm off-white / cream tone matching reference
-    borderRadius: 18, // 16-20 range
+    borderRadius: 24, // Increased for smoother, more rounded corners
     paddingHorizontal: 0, // No horizontal padding - handled by content container
     paddingVertical: 12, // Premium padding
     shadowColor: '#000',
@@ -1461,6 +1688,34 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   emptySubtext: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: DESIGN_COLORS.secondaryText,
+    textAlign: 'center',
+  },
+  lockedContainer: {
+    padding: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 300,
+  },
+  lockedIconContainer: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: DESIGN_COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  lockedTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.bold,
+    color: DESIGN_COLORS.primaryText,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  lockedSubtext: {
     fontSize: 14,
     fontFamily: Fonts.regular,
     color: DESIGN_COLORS.secondaryText,

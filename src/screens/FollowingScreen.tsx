@@ -28,7 +28,14 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
   // Posts have ended if: not loading AND hasMore is false AND we have posts
   const postsEnded = !loading && !hasMore && posts.length > 0;
   
+  // Show suggestions when:
+  // Always show suggestions at the bottom after initial load completes
+  // This ensures users can always discover new people to follow
+  // Show when not loading (initial data has loaded)
+  const shouldShowSuggestions = !loading;
+  
   console.log('📱 [FollowingScreen] Posts ended:', postsEnded, '(hasMore:', hasMore, 'loading:', loading, 'posts:', posts.length, ')');
+  console.log('📱 [FollowingScreen] Should show suggestions:', shouldShowSuggestions, '(!loading:', !loading, ')');
 
   return (
     <View style={styles.container}>
@@ -57,9 +64,9 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
           </View>
         )}
 
-        {/* Suggestions/Contacts - ALWAYS shown below posts (when posts exist or have ended) */}
-        {/* CRITICAL: Always show suggestions/contacts section when posts have ended */}
-        {postsEnded && (
+        {/* Suggestions/Contacts - ALWAYS shown below posts when not loading */}
+        {/* Show when: not loading (initial data has loaded) */}
+        {shouldShowSuggestions && (
           <View style={styles.suggestionsWrapper}>
             <FollowingSuggestions 
               onUserPress={onUserPress}

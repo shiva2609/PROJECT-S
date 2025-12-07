@@ -1125,6 +1125,98 @@ export async function unfollowUser(currentUserId: string, targetUserId: string):
 }
 
 /**
+ * Upload profile photo
+ * Converts finalImage to blob and uploads to /profilePhotos/{userId}/{userId}.jpg
+ * Returns downloadURL
+ */
+export async function uploadProfilePhoto(finalImageUri: string, userId: string): Promise<string> {
+	try {
+		// Use fileName format to match storage rules pattern: profilePhotos/{userId}/{fileName}
+		const fileName = `${userId}.jpg`;
+		const storagePath = `profilePhotos/${userId}/${fileName}`;
+		const reference = rnfbStorage().ref(storagePath);
+		
+		// Prepare upload URI (remove file:// prefix if present)
+		let uploadUri = finalImageUri;
+		if (Platform.OS === 'ios' && uploadUri.startsWith('file://')) {
+			uploadUri = uploadUri.replace('file://', '');
+		}
+		if (Platform.OS === 'android' && uploadUri.startsWith('file://')) {
+			uploadUri = uploadUri.replace('file://', '');
+		}
+		
+		console.log('📤 [uploadProfilePhoto] Uploading profile photo to:', storagePath);
+		await reference.putFile(uploadUri);
+		const downloadURL = await reference.getDownloadURL();
+		console.log('✅ [uploadProfilePhoto] Profile photo uploaded successfully');
+		return downloadURL;
+	} catch (error: any) {
+		console.error('❌ Error uploading profile photo:', error);
+		throw error;
+	}
+}
+
+/**
+ * Delete old profile photo
+ * Only deletes if previousUrl exists and is not default
+ */
+export async function deleteOldProfilePhoto(previousUrl: string | null | undefined): Promise<void> {
+	if (!previousUrl) {
+		console.log('ℹ️ No previous profile photo to delete');
+		return;
+	}
+	
+	// Don't delete default/placeholder URLs
+	if (previousUrl.includes('default') || previousUrl.includes('placeholder') || !previousUrl.includes('firebasestorage')) {
+		console.log('ℹ️ Skipping deletion of default/placeholder URL');
+		return;
+	}
+	
+	try {
+		// Extract storage path from URL
+		// URL format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encodedPath}?alt=media&token=...
+		const urlObj = new URL(previousUrl);
+		const pathMatch = urlObj.pathname.match(/\/o\/(.+)/);
+		if (pathMatch && pathMatch[1]) {
+			const encodedPath = pathMatch[1];
+			const storagePath = decodeURIComponent(encodedPath);
+			
+			// Delete using React Native Firebase Storage
+			const storageRef = rnfbStorage().ref(storagePath);
+			await storageRef.delete();
+			console.log('✅ [deleteOldProfilePhoto] Old profile photo deleted:', storagePath);
+		} else {
+			console.warn('⚠️ [deleteOldProfilePhoto] Could not extract storage path from URL');
+		}
+	} catch (error: any) {
+		// Log but don't fail - file might already be deleted
+		console.warn('⚠️ [deleteOldProfilePhoto] Could not delete old profile photo:', error.message);
+	}
+}
+
+/**
+ * Update profile photo in Firestore
+ * Updates users/{userId}/profilePhotoUrl and photoURL (legacy field)
+ * Includes timestamp for race-condition prevention
+ */
+export async function updateProfilePhotoInDatabase(userId: string, downloadURL: string): Promise<void> {
+	try {
+		const userRef = doc(db(), 'users', userId);
+		await updateDoc(userRef, {
+			profilePhotoUrl: downloadURL,
+			photoURL: downloadURL, // Also update legacy field
+			profilePhoto: downloadURL, // Also update this field if used
+			profilePhotoUpdatedAt: serverTimestamp(), // Race-condition prevention timestamp
+			updatedAt: Date.now(),
+		});
+		console.log('✅ [updateProfilePhotoInDatabase] Profile photo URL updated in Firestore with timestamp');
+	} catch (error: any) {
+		console.error('❌ Error updating profile photo in database:', error);
+		throw error;
+	}
+}
+
+/**
  * Remove a follower
  * Removes the follow relationship where targetUserId follows currentUserId
  * This is the reverse of unfollow - removes someone who is following you

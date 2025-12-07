@@ -5,7 +5,7 @@
  * regardless of role. Ready to be extended with role-based sections.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -28,8 +28,9 @@ import { Colors } from '../theme/colors';
 import { Fonts } from '../theme/fonts';
 import Card from '../components/profile/Card';
 import MultiSelectDropdown from '../components/profile/MultiSelectDropdown';
-import { uploadImageAsync } from '../api/firebaseService';
+import { uploadImageAsync, uploadProfilePhoto, deleteOldProfilePhoto, updateProfilePhotoInDatabase } from '../api/firebaseService';
 import { AccountType } from '../types/account';
+import { useFocusEffect } from '@react-navigation/native';
 
 /**
  * Auto Bio Generation Function
@@ -305,7 +306,7 @@ interface ProfileData {
   courseGallery?: string[];
 }
 
-export default function EditProfileScreen({ navigation }: any) {
+export default function EditProfileScreen({ navigation, route }: any) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -324,13 +325,10 @@ export default function EditProfileScreen({ navigation }: any) {
     languagesKnown: [],
     interests: [],
   });
+  const [previousProfilePhotoUrl, setPreviousProfilePhotoUrl] = useState<string | null>(null);
 
-  // Fetch user data from Firestore
-  useEffect(() => {
-    fetchUserData();
-  }, [user]);
-
-  const fetchUserData = async () => {
+  // Fetch user data from Firestore - memoized with useCallback
+  const fetchUserData = useCallback(async () => {
     if (!user?.uid) {
       setLoading(false);
       return;
@@ -343,11 +341,20 @@ export default function EditProfileScreen({ navigation }: any) {
 
       if (userSnap.exists()) {
         const data = userSnap.data();
+        console.log('📋 [EditProfileScreen] Fetched user data:', {
+          fullName: data.fullName || data.displayName,
+          username: data.username,
+          email: data.email || user.email,
+          profilePhoto: data.profilePhoto || data.photoURL || data.profilePhotoUrl,
+        });
+        
         const userAccountType = (data.accountType || data.role || 'Traveler') as AccountType;
         setAccountType(userAccountType);
         
+        const currentProfilePhoto = data.profilePhoto || data.photoURL || data.profilePhotoUrl || '';
+        setPreviousProfilePhotoUrl(currentProfilePhoto || null);
         setFormData({
-          profilePhoto: data.profilePhoto || data.photoURL || '',
+          profilePhoto: currentProfilePhoto,
           fullName: data.fullName || data.displayName || '',
           username: data.username || '',
           bio: data.bio || '', // Hidden field, auto-generated later
@@ -405,6 +412,14 @@ export default function EditProfileScreen({ navigation }: any) {
           courseLocations: data.courseLocations || '',
           courseGallery: data.courseGallery || [],
         });
+        console.log('✅ [EditProfileScreen] Form data updated with user data');
+      } else {
+        console.warn('⚠️ [EditProfileScreen] User document does not exist');
+        // Initialize with user email if available
+        setFormData((prev) => ({
+          ...prev,
+          email: user.email || prev.email,
+        }));
       }
     } catch (error: any) {
       console.error('Error fetching user data:', error);
@@ -412,37 +427,95 @@ export default function EditProfileScreen({ navigation }: any) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  // Fetch user data when component mounts or user changes
+  useEffect(() => {
+    fetchUserData();
+  }, [fetchUserData]);
+
+  // Refetch data when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchUserData();
+    }, [fetchUserData])
+  );
+
+  const handleProfilePhotoUpload = useCallback(async (finalImageUri: string) => {
+    if (!user?.uid) {
+      Alert.alert('Error', 'User not authenticated');
+      return;
+    }
+
+    try {
+      setUploadingPhoto(true);
+
+      // Upload new profile photo
+      const downloadURL = await uploadProfilePhoto(finalImageUri, user.uid);
+      console.log('✅ [EditProfileScreen] Profile photo uploaded:', downloadURL);
+
+      // Delete old profile photo if exists
+      if (previousProfilePhotoUrl) {
+        await deleteOldProfilePhoto(previousProfilePhotoUrl);
+        console.log('✅ [EditProfileScreen] Old profile photo deleted');
+      }
+
+      // Update Firestore
+      await updateProfilePhotoInDatabase(user.uid, downloadURL);
+      console.log('✅ [EditProfileScreen] Profile photo updated in database');
+
+      // Update local state
+      setFormData((prev) => ({ ...prev, profilePhoto: downloadURL }));
+      setPreviousProfilePhotoUrl(downloadURL);
+
+      // Refetch user data to ensure everything is in sync
+      await fetchUserData();
+
+      Alert.alert('Success', 'Profile photo updated successfully');
+    } catch (error: any) {
+      console.error('❌ [EditProfileScreen] Error uploading profile photo:', error);
+      Alert.alert('Error', error.message || 'Failed to upload profile photo');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }, [user, previousProfilePhotoUrl, fetchUserData]);
+
+  // Handle finalProfilePhoto from ProfilePhotoCropScreen
+  useFocusEffect(
+    React.useCallback(() => {
+      const finalPhoto = route.params?.finalProfilePhoto;
+      if (finalPhoto) {
+        console.log('📸 [EditProfileScreen] Received final profile photo from crop screen');
+        // Clear the param first to prevent re-processing
+        navigation.setParams({ finalProfilePhoto: undefined });
+        // Then handle the upload
+        handleProfilePhotoUpload(finalPhoto);
+      }
+    }, [route.params?.finalProfilePhoto, navigation, handleProfilePhotoUpload])
+  );
 
   const handlePickProfilePhoto = async () => {
     try {
       const result = await launchImageLibrary({
         mediaType: 'photo',
-        quality: 0.8,
-        maxWidth: 800,
-        maxHeight: 800,
+        quality: 1.0, // High quality for profile photos
       });
 
       if (result.assets && result.assets[0]) {
-        setUploadingPhoto(true);
         const imageAsset = result.assets[0];
-
-        // Upload to Firebase Storage
-        const fileName = `profile_images/${user?.uid}/${Date.now()}.jpg`;
-        const downloadURL = await uploadImageAsync({
-          uri: imageAsset.uri || '',
-          path: fileName,
+        // Navigate to ProfilePhotoCropScreen instead of uploading directly
+        navigation.navigate('ProfilePhotoCrop', {
+          imageUri: imageAsset.uri || '',
         });
-
-        setFormData({ ...formData, profilePhoto: downloadURL });
-        setUploadingPhoto(false);
       }
     } catch (error: any) {
-      console.error('Error picking/uploading photo:', error);
-      setUploadingPhoto(false);
-      Alert.alert('Error', 'Failed to upload profile photo');
+      console.error('Error picking photo:', error);
+      if (error.code !== 'E_PICKER_CANCELLED') {
+        Alert.alert('Error', 'Failed to pick image');
+      }
     }
   };
+
 
   const handleSave = async () => {
     // Validate required fields

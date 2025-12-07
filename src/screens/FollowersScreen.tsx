@@ -212,7 +212,7 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
   };
 
   const handleUserPress = (userId: string) => {
-    navigation?.navigate('Profile', { userId });
+    navigation?.push('ProfileScreen', { userId });
   };
 
   const handleMessagePress = (userId: string) => {

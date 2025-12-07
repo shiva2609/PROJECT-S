@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useFollow } from '../../hooks/useFollow';
+import { useProfilePhoto } from '../../hooks/useProfilePhoto';
+import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/userProfilePhotoService';
 import { SuggestionCandidate } from '../../utils/suggestionUtils';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
@@ -29,6 +31,8 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
   const { isFollowing, isLoading, follow, unfollow } = useFollow(user.id);
   const [showPopover, setShowPopover] = useState(false);
   const [localFollowing, setLocalFollowing] = useState(user.isFollowing || false);
+  // Use unified profile photo hook
+  const profilePhoto = useProfilePhoto(user.id);
 
   // Debug: Log when card mounts
   useEffect(() => {
@@ -104,14 +108,22 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
       >
         {/* Avatar */}
         <View style={styles.avatarContainer}>
-          {user.avatar ? (
-            <Image source={{ uri: user.avatar }} style={styles.avatar} />
-          ) : (
+          {isDefaultProfilePhoto(profilePhoto) ? (
             <View style={styles.avatarPlaceholder}>
               <Text style={styles.avatarText}>
                 {user.name.charAt(0).toUpperCase()}
               </Text>
             </View>
+          ) : (
+            <Image 
+              source={{ uri: profilePhoto }} 
+              defaultSource={{ uri: getDefaultProfilePhoto() }}
+              onError={() => {
+                // Offline/CDN failure - Image component will use defaultSource
+              }}
+              style={styles.avatar} 
+              resizeMode="cover"
+            />
           )}
           {user.verified && (
             <View style={styles.verifiedBadge}>

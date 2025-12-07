@@ -36,12 +36,30 @@ service firebase.storage {
       allow delete: if isOwner(userId) || isSuperAdmin();
     }
     
-    // User profile images
+    // User profile images (legacy path)
     match /profile_images/{userId}/{fileName} {
       allow read: if isAuthenticated();
       allow write: if isOwner(userId) &&
                      request.resource.size < 5 * 1024 * 1024 &&
                      request.resource.contentType.matches('image/.*');
+      allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+    
+    // Profile photos (new path: profilePhotos/{userId}/{fileName})
+    match /profilePhotos/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) &&
+                     request.resource.size < 5 * 1024 * 1024 &&
+                     request.resource.contentType.matches('image/.*');
+      allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+    
+    // Posts (allow authenticated users to upload)
+    match /posts/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) &&
+                     request.resource.size < 20 * 1024 * 1024 &&
+                     request.resource.contentType.matches('image/.*|video/.*');
       allow delete: if isOwner(userId) || isSuperAdmin();
     }
     

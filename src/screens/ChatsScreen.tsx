@@ -17,6 +17,8 @@ import { collection, query, where, orderBy, onSnapshot, getDoc, doc } from 'fire
 import { ChatMessage } from '../api/firebaseService';
 import { getCopilotChatMessages, hasCopilotChat } from '../api/chatService';
 import { getLastReadTimestamp, markChatAsRead } from '../api/notificationService';
+import { useProfilePhoto } from '../hooks/useProfilePhoto';
+import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../services/userProfilePhotoService';
 import { Colors } from '../theme/colors';
 
 interface ChatListItem {
@@ -29,6 +31,29 @@ interface ChatListItem {
   unreadCount: number;
   isTyping?: boolean;
   isUnread?: boolean; // For styling
+}
+
+// Component to render chat avatar with unified profile photo hook
+function ChatListItemAvatar({ userId, username }: { userId: string; username: string }) {
+  const profilePhoto = useProfilePhoto(userId);
+  if (isDefaultProfilePhoto(profilePhoto)) {
+    return (
+      <View style={styles.avatarPlaceholder}>
+        <Text style={styles.avatarText}>{username.charAt(0).toUpperCase()}</Text>
+      </View>
+    );
+  }
+  return (
+    <Image 
+      source={{ uri: profilePhoto }} 
+      defaultSource={{ uri: getDefaultProfilePhoto() }}
+      onError={() => {
+        // Offline/CDN failure - Image component will use defaultSource
+      }}
+      style={styles.avatar} 
+      resizeMode="cover"
+    />
+  );
 }
 
 export default function ChatsScreen({ navigation }: any) {
@@ -264,12 +289,8 @@ export default function ChatsScreen({ navigation }: any) {
           <View style={[styles.avatarPlaceholder, { backgroundColor: '#FF5C02' }]}>
             <Icon name="compass-outline" size={24} color="#FFFFFF" />
           </View>
-        ) : item.profilePhoto ? (
-          <Image source={{ uri: item.profilePhoto }} style={styles.avatar} />
         ) : (
-          <View style={styles.avatarPlaceholder}>
-            <Text style={styles.avatarText}>{item.username.charAt(0).toUpperCase()}</Text>
-          </View>
+          <ChatListItemAvatar userId={item.userId} username={item.username} />
         )}
         
         <View style={styles.chatContent}>

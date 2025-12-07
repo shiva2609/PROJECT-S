@@ -22,6 +22,8 @@ import { toggleLikePost, toggleBookmarkPost, toggleSharePost, Post } from '../ap
 import { formatTimestamp, parseHashtags, CaptionPart } from '../utils/postHelpers';
 import { normalizePost } from '../utils/postUtils';
 import PostCard from '../components/PostCard';
+import { useProfilePhoto } from '../hooks/useProfilePhoto';
+import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../services/userProfilePhotoService';
 
 interface StoryDoc { id: string; userId: string; media?: string; location?: string; profilePhoto?: string; username?: string; }
 
@@ -361,6 +363,69 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   const hasStories = stories && stories.length > 0;
   const storyData = useMemo(() => [{ id: 'your-story', isYou: true, userId: user?.uid } as any, ...stories], [stories, user]);
 
+  // Story Item Component - Must be separate to use hooks
+  const StoryItem = React.memo(({ item }: { item: any }) => {
+    // Use unified profile photo hook
+    const profilePhoto = useProfilePhoto(item.userId);
+    const hasStory = !item.isYou || (item.media && item.media.length > 0);
+    const showPlaceholder = isDefaultProfilePhoto(profilePhoto);
+    
+    return (
+      <View style={styles.storyItem}>
+        {hasStory ? (
+          <LinearGradient
+            colors={[Colors.brand.primary, Colors.brand.secondary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.storyRing}
+          >
+            {showPlaceholder ? (
+              <View style={styles.storyAvatar}>
+                <Icon name="person" size={28} color={Colors.black.qua} />
+              </View>
+            ) : (
+              <Image 
+                source={{ uri: profilePhoto }} 
+                defaultSource={{ uri: getDefaultProfilePhoto() }}
+                onError={() => {
+                  // Offline/CDN failure - Image component will use defaultSource
+                }}
+                style={styles.storyAvatar} 
+                resizeMode="cover"
+              />
+            )}
+          </LinearGradient>
+        ) : (
+          <View style={[styles.storyRing, styles.storyRingInactive]}>
+            {showPlaceholder ? (
+              <View style={styles.storyAvatar}>
+                <Icon name="person" size={28} color={Colors.black.qua} />
+              </View>
+            ) : (
+              <Image 
+                source={{ uri: profilePhoto }} 
+                defaultSource={{ uri: getDefaultProfilePhoto() }}
+                onError={() => {
+                  // Offline/CDN failure - Image component will use defaultSource
+                }}
+                style={styles.storyAvatar} 
+                resizeMode="cover"
+              />
+            )}
+          </View>
+        )}
+        {item.isYou && (
+          <View style={styles.storyAdd}>
+            <Icon name="add" size={12} color="white" />
+          </View>
+        )}
+        <Text style={styles.storyText} numberOfLines={1}>
+          {item.isYou ? 'Your story' : (item.location || item.username || 'Story')}
+        </Text>
+      </View>
+    );
+  });
+
   const renderCaption = (caption: string) => {
     if (!caption) return null;
     const parts = parseHashtags(caption);
@@ -421,7 +486,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
           onComment={() => navProp?.navigate('Comments', { postId: item.id })}
           onShare={() => handleShare(item)}
           onBookmark={() => handleBookmark(item.id)}
-          onProfilePress={() => navProp?.navigate('Profile', { userId: item.createdBy || item.userId })}
+          onProfilePress={() => navProp?.push('ProfileScreen', { userId: item.createdBy || item.userId })}
           onPostDetailPress={() => navProp?.navigate('PostDetail', { 
             posts: posts, 
             index: index,
@@ -488,43 +553,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
               data={storyData}
               keyExtractor={(i) => i.id}
               contentContainerStyle={{ paddingLeft: 20, paddingRight: 12, paddingBottom: 8 }}
-              renderItem={({ item, index }) => {
-                const hasStory = !item.isYou || (item.media && item.media.length > 0);
-                return (
-                  <View style={styles.storyItem}>
-                    {hasStory ? (
-                      <LinearGradient
-                        colors={[Colors.brand.primary, Colors.brand.secondary]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.storyRing}
-                      >
-                        {item.profilePhoto ? (
-                          <Image source={{ uri: item.profilePhoto }} style={styles.storyAvatar} />
-                        ) : (
-                          <View style={styles.storyAvatar}>
-                            <Icon name="person" size={28} color={Colors.black.qua} />
-                          </View>
-                        )}
-                      </LinearGradient>
-                    ) : (
-                      <View style={[styles.storyRing, styles.storyRingInactive]}>
-                        <View style={styles.storyAvatar}>
-                          <Icon name="person" size={28} color={Colors.black.qua} />
-                        </View>
-                      </View>
-                    )}
-                    {item.isYou && (
-                      <View style={styles.storyAdd}>
-                        <Icon name="add" size={12} color="white" />
-                      </View>
-                    )}
-                    <Text style={styles.storyText} numberOfLines={1}>
-                      {item.isYou ? 'Your story' : (item.location || item.username || 'Story')}
-                    </Text>
-                  </View>
-                );
-              }}
+              renderItem={({ item, index }) => <StoryItem item={item} />}
             />
 
             {/* For You / Following Toggle */}
@@ -562,7 +591,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
           ) : (
             <FollowingScreen
               navigation={navProp}
-              onUserPress={(userId) => navProp?.navigate('Profile', { userId })}
+              onUserPress={(userId) => navProp?.push('ProfileScreen', { userId })}
               onPostPress={(post) => {
                 const postIndex = posts.findIndex((p) => p.id === post.id);
                 navProp?.navigate('PostDetail', { 

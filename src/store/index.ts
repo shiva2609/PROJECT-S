@@ -1,4 +1,8 @@
 import { configureStore, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import profilePhotoReducer from './profilePhotoSlice';
+import userProfileReducer from './userProfileSlice';
+import userPostsReducer from './userPostsSlice';
+import userFollowStateReducer from './userFollowStateSlice';
 
 export type User = {
   id: string;
@@ -51,6 +55,10 @@ export const store = configureStore({
   reducer: {
     user: userSlice.reducer,
     posts: postsSlice.reducer,
+    profilePhoto: profilePhotoReducer,
+    userProfile: userProfileReducer,
+    userPosts: userPostsReducer,
+    userFollowState: userFollowStateReducer,
   },
 });
 
