@@ -172,15 +172,29 @@ function PostCard({
   // Get mediaUrls array - primary field for multi-image posts
   // This contains the FINAL cropped bitmap URLs (exact adjusted frames)
   // CRITICAL: Ensure mediaUrls is always an array, never undefined
-  const mediaUrls = Array.isArray(normalizedPost?.mediaUrls) 
-    ? normalizedPost.mediaUrls 
-    : [];
+  // Priority: imageURLs (from enriched post) > mediaUrls > gallery > imageURL
+  const imageURLs = (post as any).imageURLs || normalizedPost?.mediaUrls || [];
+  const mediaUrls = Array.isArray(imageURLs) && imageURLs.length > 0
+    ? imageURLs
+    : (Array.isArray(normalizedPost?.mediaUrls) ? normalizedPost.mediaUrls : []);
   
   // Convert mediaUrls to MediaItem[] with comprehensive fallbacks
-  // Priority: mediaUrls > finalCroppedUrl > media array > mediaUrl > imageUrl > files[0].url
+  // Priority: imageURLs (enriched) > mediaUrls > finalCroppedUrl > media array > mediaUrl > imageUrl > files[0].url
   // CRITICAL: Always return an array, never undefined
   const normalizedMedia: MediaItem[] = useMemo(() => {
-    // Priority 1: mediaUrls array (contains final cropped bitmap URLs)
+    // Priority 1: imageURLs from enriched post (from global service)
+    const enrichedImageURLs = (post as any).imageURLs;
+    if (Array.isArray(enrichedImageURLs) && enrichedImageURLs.length > 0) {
+      return enrichedImageURLs
+        .filter((url: string) => url && typeof url === 'string' && url.length > 0)
+        .map((url: string, index: number) => ({
+          type: 'image' as const,
+          uri: url,
+          id: `enriched-${index}`,
+        }));
+    }
+    
+    // Priority 2: mediaUrls array (contains final cropped bitmap URLs)
     // CRITICAL: Ensure mediaUrls is an array before accessing .length
     if (Array.isArray(mediaUrls) && mediaUrls.length > 0) {
       return mediaUrls
@@ -192,7 +206,7 @@ function PostCard({
         }));
     }
     
-    // Priority 2: finalCroppedUrl (single image posts - final cropped bitmap)
+    // Priority 3: finalCroppedUrl (single image posts - final cropped bitmap)
     const finalCroppedUrl = (post as any).finalCroppedUrl;
     if (finalCroppedUrl && typeof finalCroppedUrl === 'string' && finalCroppedUrl.length > 0) {
       return [{ 
@@ -202,7 +216,7 @@ function PostCard({
       }];
     }
     
-    // Priority 3: Check media array (filter out undefined items)
+    // Priority 4: Check media array (filter out undefined items)
     // CRITICAL: Check if post.media exists and is an array before accessing .length
     if (post && post.media && Array.isArray(post.media) && post.media.length > 0) {
       const mediaItems = post.media
@@ -225,7 +239,7 @@ function PostCard({
       }
     }
     
-    // Priority 4: mediaUrl (single string field)
+    // Priority 5: mediaUrl (single string field)
     const mediaUrl = (post as any).mediaUrl || post.mediaUrl;
     if (mediaUrl && typeof mediaUrl === 'string' && mediaUrl.length > 0) {
       return [{
@@ -235,7 +249,7 @@ function PostCard({
       }];
     }
     
-    // Priority 5: imageUrl (legacy field)
+    // Priority 6: imageUrl (legacy field)
     const imageUrl = (post as any).imageUrl || post.imageUrl;
     if (imageUrl && typeof imageUrl === 'string' && imageUrl.length > 0) {
       return [{
@@ -245,7 +259,7 @@ function PostCard({
       }];
     }
     
-    // Priority 6: photoUrl (alternative field)
+    // Priority 7: photoUrl (alternative field)
     const photoUrl = (post as any).photoUrl || post.photoUrl;
     if (photoUrl && typeof photoUrl === 'string' && photoUrl.length > 0) {
       return [{
@@ -255,7 +269,7 @@ function PostCard({
       }];
     }
     
-    // Priority 7: files[0]?.url (nested structure)
+    // Priority 8: files[0]?.url (nested structure)
     const files = (post as any)?.files;
     if (Array.isArray(files) && files.length > 0 && files[0]) {
       const fileUrl = files[0]?.url || files[0]?.uri;
@@ -269,27 +283,38 @@ function PostCard({
     }
     
     // Debug: Log if no image found (only in development)
-    if (__DEV__) {
+    if (__DEV__ && normalizedMedia.length === 0) {
       console.warn('[PostCard] No image found for post:', {
         postId: post?.id,
+        authorId: (post as any)?.authorId,
+        hasImageURLs: Array.isArray((post as any)?.imageURLs) && (post as any).imageURLs.length > 0,
+        imageURLsValue: (post as any)?.imageURLs,
         hasMediaUrls: Array.isArray(mediaUrls) && mediaUrls.length > 0,
+        mediaUrlsValue: mediaUrls,
         hasFinalCroppedUrl: !!finalCroppedUrl,
         hasMediaArray: post && Array.isArray(post.media) && post.media.length > 0,
         hasMediaUrl: !!(post as any)?.mediaUrl,
         hasImageUrl: !!(post as any)?.imageUrl,
         hasPhotoUrl: !!(post as any)?.photoUrl,
         hasFiles: Array.isArray((post as any)?.files) && (post as any).files.length > 0,
+        rawPostKeys: Object.keys(post || {}),
       });
     }
     
     // CRITICAL: Always return an array, never undefined
     return [];
-  }, [mediaUrls, post?.media, (post as any)?.finalCroppedUrl, (post as any)?.mediaUrl, (post as any)?.imageUrl, (post as any)?.photoUrl, (post as any)?.files]);
+  }, [mediaUrls, (post as any)?.imageURLs, post?.media, (post as any)?.finalCroppedUrl, (post as any)?.mediaUrl, (post as any)?.imageUrl, (post as any)?.photoUrl, (post as any)?.files]);
 
-  // Use unified profile photo hook
-  const profilePhoto = useProfilePhoto(creatorId || '');
+  // Get author info from post (enriched by global service) or use fallback
+  const authorUsername = (post as any).authorUsername || post.username || 'Unknown';
+  const authorAvatar = (post as any).authorAvatar || (post as any).profilePhoto || (post as any).ownerAvatar || '';
+  
+  // Use profile photo hook as fallback if authorAvatar not provided
+  const profilePhotoFromHook = useProfilePhoto(creatorId || '');
+  const profilePhoto = authorAvatar || profilePhotoFromHook;
+  
   const location = post.location || post.placeName || '';
-  const username = post.username || 'User';
+  const username = authorUsername;
   const timestamp = formatTimestamp(post.createdAt || Date.now());
   
   // Ensure counts never go negative

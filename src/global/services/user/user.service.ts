@@ -56,16 +56,42 @@ export async function getUserPublicInfo(userId: string): Promise<UserPublicInfo 
     }
 
     const raw = { id: snapshot.id, ...snapshot.data() };
+    
+    // Check raw data directly for username fields (before normalization)
+    const rawUsername = raw.username || raw.handle || raw.userTag?.replace('@', '') || '';
+    
     const normalized = normalizeUser(raw);
 
     if (!normalized) {
       return null;
     }
 
+    // Try to get username from multiple possible sources
+    let username = rawUsername || normalized.username || '';
+    
+    // If still empty, try to extract from displayName or use a portion of user ID
+    if (!username || username.trim() === '') {
+      const displayName = normalized.name || normalized.fullName || normalized.displayName || '';
+      if (displayName && displayName.trim() !== '') {
+        // Use displayName as fallback if it looks like a username (no spaces, alphanumeric)
+        if (!displayName.includes(' ') && /^[a-zA-Z0-9_]+$/.test(displayName)) {
+          username = displayName;
+        } else {
+          // Use first 8 chars of user ID as last resort (better than "Unknown")
+          username = (normalized.id || userId || '').substring(0, 8);
+        }
+      } else {
+        // Use first 8 chars of user ID as last resort (better than "Unknown")
+        username = (normalized.id || userId || '').substring(0, 8);
+      }
+    }
+    
+    console.log('[getUserPublicInfo] Username resolved:', { userId, rawUsername, normalizedUsername: normalized.username, finalUsername: username });
+
     const userInfo: UserPublicInfo = {
       uid: normalized.id || userId,
-      username: normalized.username || 'Unknown',
-      displayName: normalized.name || normalized.fullName || normalized.displayName || normalized.username || 'User',
+      username: username,
+      displayName: normalized.name || normalized.fullName || normalized.displayName || normalized.username || username || 'User',
       photoURL: normalized.photoUrl || normalized.profilePic || normalized.profilePhotoUrl || '',
       bio: normalized.bio || '',
       verified: normalized.verified || false,

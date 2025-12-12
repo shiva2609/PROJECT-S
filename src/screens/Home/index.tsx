@@ -15,10 +15,11 @@ import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { useAuth } from '../../providers/AuthProvider';
 import { useUserRelations } from '../../providers/UserRelationProvider';
-import { usePosts, Post } from '../../hooks/usePosts';
 import { usePostActions } from '../../utils/postActions';
 import { useUnifiedFollow } from '../../hooks/useUnifiedFollow';
+import { useHomeFeed } from '../../global/hooks/useHomeFeed';
 import PostCard from '../../components/post/PostCard';
+import type { PostWithAuthor } from '../../global/services/posts/post.service';
 import SegmentedControl from '../../components/common/SegmentedControl';
 import { listenToUnreadCounts } from '../../services/notifications/notificationService';
 import { useRewardOnboarding } from '../../hooks/useRewardOnboarding';
@@ -39,20 +40,42 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   const { following, refreshRelations } = useUserRelations();
   const { toggleFollow: handleFollowUser } = useUnifiedFollow();
   
-  // State must be defined before usePosts hook
+  // State must be defined before useHomeFeed hook
   const [selectedTab, setSelectedTab] = useState<'For You' | 'Following'>('For You');
   
-  // Unified posts hook with feed type
+  // Use global home feed hook
   const { 
-    posts, 
+    feed: posts, 
     loading, 
     refreshing, 
     hasMore, 
     fetchMore, 
-    refresh, 
-    updatePost,
-    removePost 
-  } = usePosts({ feedType: selectedTab === 'For You' ? 'forYou' : 'following' });
+    refresh,
+    type: feedType
+  } = useHomeFeed(user?.uid, { 
+    feedType: selectedTab === 'For You' ? 'foryou' : 'following',
+    limit: 10
+  });
+  
+  // Local state for post updates
+  const [postsState, setPostsState] = useState<PostWithAuthor[]>([]);
+  
+  // Sync posts from hook
+  useEffect(() => {
+    setPostsState(posts);
+  }, [posts]);
+  
+  // Update post function
+  const updatePost = useCallback((postId: string, updates: Partial<PostWithAuthor>) => {
+    setPostsState((prev) =>
+      prev.map((post) => (post.id === postId ? { ...post, ...updates } : post))
+    );
+  }, []);
+  
+  // Remove post function
+  const removePost = useCallback((postId: string) => {
+    setPostsState((prev) => prev.filter((post) => post.id !== postId));
+  }, []);
   
   // Post actions with optimistic updates
   const postActions = usePostActions((postId: string, updates: any) => {
@@ -90,14 +113,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   const { visible: rewardVisible, claimed, points, claiming: rewardClaiming, error: rewardError, grantReward, dismiss: dismissReward, showReward } = useRewardOnboarding(user?.uid);
   const { showAlert: showTopicAlert, onClaimNow: handleTopicClaimNow, onRemindLater: handleTopicRemindLater } = useTopicClaimReminder(user?.uid, navigation);
 
-  // Initial fetch on mount
-  useEffect(() => {
-    if (user?.uid && posts.length === 0 && !loading) {
-      refresh().catch((error: any) => {
-        console.error('Error fetching initial posts:', error);
-      });
-    }
-  }, [user?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Feed will auto-fetch via useHomeFeed hook
 
   // Listen to unread counts
   useEffect(() => {
@@ -123,12 +139,10 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     }, [claimed, user, showReward, route?.params, navProp])
   );
 
-  // Posts are already filtered by usePosts hook based on feedType
-  // For You: posts from users NOT followed
-  // Following: posts from users followed
+  // Use posts from state (synced from hook)
   const displayedPosts = useMemo(() => {
-    return posts;
-  }, [posts]);
+    return postsState;
+  }, [postsState]);
 
   // Handle like with optimistic update
   const handleLike = useCallback(async (postId: string) => {
@@ -187,34 +201,43 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     }
   }, [handleFollowUser, refresh, refreshRelations, user?.uid]);
 
-  const renderPost = useCallback(({ item }: { item: Post }) => {
-    const authorId = item.userId || item.createdBy || item.ownerId || '';
+  const renderPost = useCallback(({ item }: { item: PostWithAuthor }) => {
+    const authorId = item.authorId || item.userId || item.createdBy || item.ownerId || '';
     const isLiked = postActions.isLiked(item.id);
     const isSaved = postActions.isSaved(item.id);
-    const isOwnerFollowed = following.has(authorId);
+    const isOwnerFollowed = item.isFollowingAuthor ?? false;
     const showFollowButton = !isOwnerFollowed && selectedTab === 'For You' && authorId !== user?.uid;
+    
+    // Create post object with author info for PostCard
+    const postForCard = {
+      ...item,
+      username: item.authorUsername || 'Unknown',
+      profilePhoto: item.authorAvatar,
+      ownerAvatar: item.authorAvatar,
+      avatarUri: item.authorAvatar,
+    };
     
     return (
       <PostCard
-        post={item}
+        post={postForCard as any}
         isLiked={isLiked}
         isSaved={isSaved}
         onLike={() => handleLike(item.id)}
         onComment={() => {
-          const postIndex = posts.findIndex((p) => p.id === item.id);
+          const postIndex = displayedPosts.findIndex((p) => p.id === item.id);
           navProp?.navigate('PostDetail', { 
             postId: item.id,
-            posts: posts,
+            posts: displayedPosts as any,
             index: postIndex >= 0 ? postIndex : 0,
           });
         }}
-        onShare={() => handleShare(item)}
+        onShare={() => handleShare(item as any)}
         onBookmark={() => handleSave(item.id)}
         onProfilePress={() => navProp?.push('ProfileScreen', { userId: authorId })}
         onPostDetailPress={() => {
-          const postIndex = posts.findIndex((p) => p.id === item.id);
+          const postIndex = displayedPosts.findIndex((p) => p.id === item.id);
           navProp?.navigate('PostDetail', { 
-            posts: posts, 
+            posts: displayedPosts as any, 
             index: postIndex >= 0 ? postIndex : 0,
             postId: item.id 
           });
@@ -227,7 +250,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
         onPostRemoved={removePost}
       />
     );
-  }, [postActions, handleLike, handleSave, handleShare, navProp, posts, user?.uid, selectedTab, following, handleFollow, removePost]);
+  }, [postActions, handleLike, handleSave, handleShare, navProp, displayedPosts, user?.uid, selectedTab, handleFollow, removePost]);
 
   const handleLoadMore = useCallback(() => {
     if (hasMore && !loading) {

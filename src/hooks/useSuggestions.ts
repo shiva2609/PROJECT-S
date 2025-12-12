@@ -1,6 +1,7 @@
 import { useCallback, useState, useEffect, useMemo } from 'react';
 import { useUserRelations } from '../providers/UserRelationProvider';
 import { useAuth } from '../providers/AuthProvider';
+import * as UserService from '../global/services/user/user.service';
 import * as UsersAPI from '../services/users/usersService';
 import { db } from '../services/auth/authService';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -69,33 +70,27 @@ export function useSuggestions(): UseSuggestionsReturn {
       
       if (followerIds.length === 0) return [];
       
-      // Fetch user documents
-      const userPromises = followerIds.slice(0, 20).map(async (followerId: string) => {
-        try {
-          const userDoc = await UsersAPI.getUserById(followerId);
-          if (userDoc) {
-            return {
-              id: userDoc.id,
-              username: userDoc.username || '',
-              displayName: userDoc.name || userDoc.username || '',
-              name: userDoc.name || userDoc.username || '',
-              avatarUri: userDoc.photoUrl || userDoc.photoURL || userDoc.profilePhoto || undefined,
-              profilePic: userDoc.photoUrl || userDoc.photoURL || userDoc.profilePhoto || undefined,
-              profilePhoto: userDoc.photoUrl || userDoc.photoURL || userDoc.profilePhoto || undefined,
-              isVerified: userDoc.verified || false,
-              followerCount: userDoc.followersCount || 0,
-              mutualFollowers: 0, // Will be calculated
-              reason: 'mutual' as const,
-            } as SuggestionUser;
-          }
-        } catch (error) {
-          console.warn(`Error fetching user ${followerId}:`, error);
-        }
-        return null;
-      });
+      // Batch fetch user documents using global service
+      const userIdsToFetch = followerIds.slice(0, 20);
+      const userInfos = await UserService.getUsersPublicInfo(userIdsToFetch);
       
-      const users = (await Promise.all(userPromises)).filter((u): u is SuggestionUser => u !== null);
-      return users.filter(u => !following.has(u.id)); // Exclude already following
+      const users: SuggestionUser[] = userInfos
+        .filter(userInfo => !following.has(userInfo.uid)) // Exclude already following
+        .map(userInfo => ({
+          id: userInfo.uid,
+          username: userInfo.username || '',
+          displayName: userInfo.displayName || userInfo.username || '',
+          name: userInfo.displayName || userInfo.username || '',
+          avatarUri: userInfo.photoURL || undefined,
+          profilePic: userInfo.photoURL || undefined,
+          profilePhoto: userInfo.photoURL || undefined,
+          isVerified: userInfo.verified || false,
+          followerCount: 0, // Will be updated if needed
+          mutualFollowers: 0, // Will be calculated
+          reason: 'mutual' as const,
+        } as SuggestionUser));
+      
+      return users;
     } catch (error) {
       console.error('Error fetching people who follow you:', error);
       return [];
@@ -107,22 +102,39 @@ export function useSuggestions(): UseSuggestionsReturn {
    */
   const fetchGeneralSuggestions = useCallback(async (currentUserId: string): Promise<SuggestionUser[]> => {
     try {
-      const suggestions = await UsersAPI.getSuggested(currentUserId, {
+      // Get suggested users from API (returns User objects with IDs)
+      const suggestedUsers = await UsersAPI.getSuggested(currentUserId, {
         excludeFollowing: Array.from(following),
         limit: 30,
       });
 
-      // Transform to SuggestionUser format
-      return suggestions.map(user => ({
-        id: user.id,
-        username: user.username || '',
-        displayName: user.name || user.username || '',
-        name: user.name || user.username || '',
-        avatarUri: user.photoUrl || user.photoURL || user.profilePhoto || undefined,
-        profilePic: user.photoUrl || user.photoURL || user.profilePhoto || undefined,
-        profilePhoto: user.photoUrl || user.photoURL || user.profilePhoto || undefined,
-        isVerified: user.verified || false,
-        followerCount: user.followersCount || 0,
+      if (suggestedUsers.length === 0) {
+        return [];
+      }
+
+      // Extract user IDs and batch fetch fresh data using global service
+      const userIds = suggestedUsers.map(u => u.id).filter(Boolean);
+      const userInfos = await UserService.getUsersPublicInfo(userIds);
+      
+      // Create a map for quick lookup of follower counts from original data
+      const followerCountMap = new Map<string, number>();
+      suggestedUsers.forEach(u => {
+        if (u.followersCount) {
+          followerCountMap.set(u.id, u.followersCount);
+        }
+      });
+      
+      // Transform to SuggestionUser format using fresh Firestore data
+      return userInfos.map(userInfo => ({
+        id: userInfo.uid,
+        username: userInfo.username || '',
+        displayName: userInfo.displayName || userInfo.username || '',
+        name: userInfo.displayName || userInfo.username || '',
+        avatarUri: userInfo.photoURL || undefined,
+        profilePic: userInfo.photoURL || undefined,
+        profilePhoto: userInfo.photoURL || undefined,
+        isVerified: userInfo.verified || false,
+        followerCount: followerCountMap.get(userInfo.uid) || 0,
         mutualFollowers: 0,
         reason: 'popular' as const,
       })) as SuggestionUser[];

@@ -15,7 +15,7 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../../providers/AuthProvider';
 import { useFollowStatus } from '../../global/hooks/useFollowStatus';
-import { useProfilePhoto } from '../../hooks/useProfilePhoto';
+import * as UserService from '../../global/services/user/user.service';
 import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/users/userProfilePhotoService';
 import { SuggestionCandidate } from '../../utils/suggestionUtils';
 import { Colors } from '../../theme/colors';
@@ -33,8 +33,101 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
   const { isFollowing, loading: followLoading, toggleFollow } = useFollowStatus(currentUser?.uid, user.id);
   const [showPopover, setShowPopover] = useState(false);
   const [localFollowing, setLocalFollowing] = useState(user.isFollowing || false);
-  // Use unified profile photo hook
-  const profilePhoto = useProfilePhoto(user.id);
+  
+  // Fetch user data from Firestore using global service
+  const [userData, setUserData] = useState<{
+    username: string;
+    displayName: string;
+    photoURL: string;
+    verified: boolean;
+  } | null>(null);
+  const [loadingUserData, setLoadingUserData] = useState(true);
+
+  // Fetch user public info from Firestore
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!user.id) {
+        setLoadingUserData(false);
+        return;
+      }
+
+      try {
+        setLoadingUserData(true);
+        console.log('[SuggestionCard] Fetching user data for:', user.id, 'prop username:', user.username);
+        const publicInfo = await UserService.getUserPublicInfo(user.id);
+        console.log('[SuggestionCard] Fetched publicInfo:', publicInfo ? { username: publicInfo.username, displayName: publicInfo.displayName } : 'null');
+        
+        if (publicInfo) {
+          // Prioritize username from Firestore - it's the most important for recognition
+          // Never show "Unknown" - always use a recognizable identifier
+          let username = publicInfo.username;
+          
+          // If username is missing or "Unknown", try other sources
+          if (!username || username === 'Unknown' || username.trim() === '') {
+            username = user.username;
+          }
+          
+          // If still missing, use displayName if it looks like a username, otherwise use user ID
+          if (!username || username.trim() === '') {
+            const displayName = publicInfo.displayName || user.name;
+            if (displayName && !displayName.includes(' ') && /^[a-zA-Z0-9_]+$/.test(displayName)) {
+              username = displayName;
+            } else {
+              // Use first 8 chars of user ID as last resort (better than "Unknown")
+              username = user.id.substring(0, 8);
+            }
+          }
+          
+          console.log('[SuggestionCard] Final username for', user.id, ':', username);
+          
+          setUserData({
+            username: username,
+            displayName: publicInfo.displayName || user.name || user.username || username,
+            photoURL: publicInfo.photoURL || user.avatar || '',
+            verified: publicInfo.verified || user.verified || false,
+          });
+        } else {
+          // Fallback to prop data if Firestore fetch fails
+          let username = user.username;
+          if (!username || username.trim() === '') {
+            // Use displayName if it looks like a username, otherwise use user ID
+            const displayName = user.name;
+            if (displayName && !displayName.includes(' ') && /^[a-zA-Z0-9_]+$/.test(displayName)) {
+              username = displayName;
+            } else {
+              username = user.id.substring(0, 8);
+            }
+          }
+          
+          console.log('[SuggestionCard] Using fallback username for', user.id, ':', username);
+          
+          setUserData({
+            username: username,
+            displayName: user.name || user.username || username,
+            photoURL: user.avatar || '',
+            verified: user.verified || false,
+          });
+        }
+      } catch (error) {
+        console.error('[SuggestionCard] Error fetching user data:', error, 'user.id:', user.id);
+        // Fallback to prop data on error
+        const username = user.username && user.username !== 'Unknown' 
+          ? user.username 
+          : 'Unknown';
+        
+        setUserData({
+          username: username,
+          displayName: user.name || user.username || 'User',
+          photoURL: user.avatar || '',
+          verified: user.verified || false,
+        });
+      } finally {
+        setLoadingUserData(false);
+      }
+    };
+
+    fetchUserData();
+  }, [user.id, user.username, user.name, user.avatar, user.verified]);
 
   // Debug: Log when card mounts
   useEffect(() => {
@@ -108,15 +201,15 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
       >
         {/* Avatar */}
         <View style={styles.avatarContainer}>
-          {isDefaultProfilePhoto(profilePhoto) ? (
+          {!userData || isDefaultProfilePhoto(userData.photoURL) ? (
             <View style={styles.avatarPlaceholder}>
               <Text style={styles.avatarText}>
-                {user.name.charAt(0).toUpperCase()}
+                {(userData?.displayName || user.name || 'U').charAt(0).toUpperCase()}
               </Text>
             </View>
           ) : (
             <Image 
-              source={{ uri: profilePhoto }} 
+              source={{ uri: userData.photoURL }} 
               defaultSource={{ uri: getDefaultProfilePhoto() }}
               onError={() => {
                 // Offline/CDN failure - Image component will use defaultSource
@@ -125,7 +218,7 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
               resizeMode="cover"
             />
           )}
-          {user.verified && (
+          {(userData?.verified || user.verified) && (
             <View style={styles.verifiedBadge}>
               <Icon name="checkmark-circle" size={16} color={Colors.brand.primary} />
             </View>
@@ -135,7 +228,7 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
         {/* Name and Tagline */}
         <View style={styles.infoContainer}>
           <Text style={styles.name} numberOfLines={1}>
-            {user.name}
+            {userData?.username || user.username || userData?.displayName || user.name || 'User'}
           </Text>
           <Text style={styles.tagline} numberOfLines={1}>
             {tagline}

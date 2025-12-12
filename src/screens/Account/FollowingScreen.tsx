@@ -4,13 +4,14 @@
  * Header -> Suggestions (if no posts) -> Feed -> Suggestions (if end reached)
  */
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Text, FlatList, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
-import { usePosts, Post } from '../../hooks/usePosts';
 import { usePostActions } from '../../utils/postActions';
 import { useUnifiedFollow } from '../../hooks/useUnifiedFollow';
 import { useAuth } from '../../providers/AuthProvider';
 import { useUserRelations } from '../../providers/UserRelationProvider';
+import { useHomeFeed } from '../../global/hooks/useHomeFeed';
+import type { PostWithAuthor } from '../../global/services/posts/post.service';
 import PostCard from '../../components/post/PostCard';
 import FollowingSuggestions from '../../components/suggestions/FollowingSuggestions';
 import { Colors } from '../../theme/colors';
@@ -27,16 +28,35 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
   const { following, refreshRelations } = useUserRelations();
   const { toggleFollow: handleFollowUser } = useUnifiedFollow();
   
+  // Use global home feed hook for following feed
   const {
-    posts,
+    feed: postsFromHook,
     loading,
     refreshing,
     hasMore,
     fetchMore,
     refresh,
-    updatePost,
-    removePost,
-  } = usePosts({ feedType: 'following' });
+  } = useHomeFeed(user?.uid, { feedType: 'following', limit: 10 });
+  
+  // Local state for post updates
+  const [posts, setPosts] = useState<PostWithAuthor[]>([]);
+  
+  // Sync posts from hook
+  useEffect(() => {
+    setPosts(postsFromHook);
+  }, [postsFromHook]);
+  
+  // Update post function
+  const updatePost = useCallback((postId: string, updates: Partial<PostWithAuthor>) => {
+    setPosts((prev) =>
+      prev.map((post) => (post.id === postId ? { ...post, ...updates } : post))
+    );
+  }, []);
+  
+  // Remove post function
+  const removePost = useCallback((postId: string) => {
+    setPosts((prev) => prev.filter((post) => post.id !== postId));
+  }, []);
   
   const postActions = usePostActions((postId: string, updates: any) => {
     const currentPost = posts.find(p => p.id === postId);
@@ -78,7 +98,7 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
     }
   }, [postActions]);
 
-  const handleShare = useCallback(async (post: Post) => {
+  const handleShare = useCallback(async (post: PostWithAuthor | any) => {
     try {
       await postActions.sharePost(post);
     } catch (error: any) {
@@ -96,17 +116,28 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
     }
   }, [handleFollowUser, refresh, refreshRelations, user?.uid]);
 
-  const renderPost = useCallback(({ item }: { item: Post }) => {
-    const authorId = item.userId || item.createdBy || item.ownerId || '';
+  const renderPost = useCallback(({ item }: { item: PostWithAuthor }) => {
+    const authorId = item.authorId || item.userId || item.createdBy || item.ownerId || '';
     const isLiked = postActions.isLiked(item.id);
     const isSaved = postActions.isSaved(item.id);
-    const isOwnerFollowed = following.has(authorId);
+    const isOwnerFollowed = item.isFollowingAuthor ?? true; // In following feed, all should be followed
     // Following feed: never show Follow button (all posts are from followed users)
     const showFollowButton = false;
     
+    // Create post object with author info and images for PostCard
+    const postForCard = {
+      ...item,
+      username: item.authorUsername || 'Unknown',
+      profilePhoto: item.authorAvatar,
+      ownerAvatar: item.authorAvatar,
+      avatarUri: item.authorAvatar,
+      // Ensure imageURLs is available
+      imageURLs: item.imageURLs || item.mediaUrls || [],
+    };
+    
     return (
       <PostCard
-        post={item}
+        post={postForCard as any}
         isLiked={isLiked}
         isSaved={isSaved}
         onLike={() => handleLike(item.id)}
@@ -114,17 +145,17 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
           const postIndex = posts.findIndex((p) => p.id === item.id);
           navigation?.navigate('PostDetail', { 
             postId: item.id,
-            posts: posts,
+            posts: posts as any,
             index: postIndex >= 0 ? postIndex : 0,
           });
         }}
-        onShare={() => handleShare(item)}
+        onShare={() => handleShare(item as any)}
         onBookmark={() => handleSave(item.id)}
         onProfilePress={() => onUserPress?.(authorId) || navigation?.push('ProfileScreen', { userId: authorId })}
         onPostDetailPress={() => {
           const postIndex = posts.findIndex((p) => p.id === item.id);
           onPostPress?.(item) || navigation?.navigate('PostDetail', { 
-            posts: posts, 
+            posts: posts as any, 
             index: postIndex >= 0 ? postIndex : 0,
             postId: item.id 
           });
@@ -137,7 +168,7 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
         onPostRemoved={removePost}
       />
     );
-  }, [postActions, handleLike, handleSave, handleShare, navigation, posts, user?.uid, following, handleFollow, removePost, onUserPress, onPostPress]);
+  }, [postActions, handleLike, handleSave, handleShare, navigation, posts, user?.uid, handleFollow, removePost, onUserPress, onPostPress]);
 
   const handleLoadMore = useCallback(() => {
     if (hasMore && !loading) {

@@ -138,11 +138,24 @@ export default function FollowingSuggestions({
       {/* Render ALL suggestion categories - "People Who Follow You" first (highest priority) */}
       {categoriesToRender.map((category, index) => {
         console.log('[FollowingSuggestions] Rendering category:', category.title, 'with', category.users.length, 'users');
+        
+        // Convert SuggestionUser to SuggestionCandidate
+        const candidateUsers: SuggestionCandidate[] = category.users.map((user) => ({
+          id: user.id,
+          name: user.displayName || user.name || user.username || 'User',
+          username: user.username || '',
+          avatar: user.avatarUri || user.profilePic || user.profilePhoto,
+          verified: user.isVerified || false,
+          followersCount: user.followerCount || 0,
+          followingCount: 0,
+          postsCount: 0,
+        }));
+        
         return (
           <View key={`${category.title}-${index}`} style={styles.categoryWrapper}>
             <SuggestionCarousel
               title={category.title}
-              users={category.users}
+              users={candidateUsers}
               onUserPress={onUserPress}
               onViewMore={onViewMore}
               onFollowChange={handleFollowChange}
