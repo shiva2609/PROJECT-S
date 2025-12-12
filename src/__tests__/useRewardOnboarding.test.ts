@@ -10,7 +10,7 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { useRewardOnboarding } from '../hooks/useRewardOnboarding';
 import { doc, getDoc, runTransaction } from 'firebase/firestore';
-import { db } from '../api/authService';
+import { db } from '../services/auth/authService';
 
 // Mock Firebase Firestore
 jest.mock('firebase/firestore', () => ({

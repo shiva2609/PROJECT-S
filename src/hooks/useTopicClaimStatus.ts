@@ -15,7 +15,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../api/authService';
+import { db } from '../services/auth/authService';
 
 interface TopicClaimStatus {
   claimed: boolean;
@@ -117,8 +117,8 @@ export function useTopicClaimStatus(
         deadline: deadline ? new Date(deadline).toISOString() : null,
         hasPassedDeadline,
       });
-    } catch (err: any) {
-      console.error('❌ Error checking topic claim status:', err);
+    } catch (error: any) {
+      console.error('❌ Error checking topic claim status:', error);
       setStatus((prev) => ({
         ...prev,
         loading: false,

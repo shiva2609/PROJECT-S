@@ -54,13 +54,85 @@ service firebase.storage {
       allow delete: if isOwner(userId) || isSuperAdmin();
     }
     
-    // Posts (allow authenticated users to upload)
+    // Posts media (public read, owner write)
+    match /posts/{postId}/media/{mediaId} {
+      // Public read for authenticated users
+      allow read: if isAuthenticated();
+      
+      // Only post owner can write
+      allow write: if isAuthenticated() && 
+                     // Check if user is post owner via Firestore
+                     firestore.get(/databases/(default)/documents/posts/$(postId)).data.createdBy == request.auth.uid &&
+                     // Validate file size (50MB max for videos)
+                     request.resource.size < 50 * 1024 * 1024 &&
+                     // Validate content type
+                     request.resource.contentType.matches('image/.*|video/.*');
+      
+      // Post owner or super admin can delete
+      allow delete: if isAuthenticated() && (
+        isSuperAdmin() ||
+        firestore.get(/databases/(default)/documents/posts/$(postId)).data.createdBy == request.auth.uid
+      );
+    }
+    
+    // Legacy posts path (posts/{userId}/{fileName})
     match /posts/{userId}/{fileName} {
       allow read: if isAuthenticated();
       allow write: if isOwner(userId) &&
-                     request.resource.size < 20 * 1024 * 1024 &&
+                     request.resource.size < 50 * 1024 * 1024 &&
                      request.resource.contentType.matches('image/.*|video/.*');
       allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+    
+    // Messages media (participants only)
+    match /messages/{conversationId}/{messageId}/{mediaId} {
+      // Only conversation participants can read
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() ||
+        // Check if user is participant in conversation
+        request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.participants
+      );
+      
+      // Only participants can write
+      allow write: if isAuthenticated() && 
+                     request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.participants &&
+                     // Validate file size (25MB max)
+                     request.resource.size < 25 * 1024 * 1024 &&
+                     // Validate content type
+                     (request.resource.contentType.matches('image/.*|video/.*') ||
+                      request.resource.contentType.matches('application/.*'));
+      
+      // Message sender or super admin can delete
+      allow delete: if isAuthenticated() && (
+        isSuperAdmin() ||
+        firestore.get(/databases/(default)/documents/conversations/$(conversationId)/messages/$(messageId)).data.senderId == request.auth.uid
+      );
+    }
+    
+    // Legacy messages path (users/{userId}/chats/{chatId}/messages/{messageId})
+    match /users/{userId}/chats/{chatId}/messages/{messageId}/{mediaId} {
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() ||
+        userId == request.auth.uid
+      );
+      allow write: if isOwner(userId) &&
+                     request.resource.size < 25 * 1024 * 1024 &&
+                     (request.resource.contentType.matches('image/.*|video/.*') ||
+                      request.resource.contentType.matches('application/.*'));
+      allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+    
+    // Post media alternative path
+    match /postMedia/{postId}/{mediaId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+                     firestore.get(/databases/(default)/documents/posts/$(postId)).data.createdBy == request.auth.uid &&
+                     request.resource.size < 50 * 1024 * 1024 &&
+                     request.resource.contentType.matches('image/.*|video/.*');
+      allow delete: if isAuthenticated() && (
+        isSuperAdmin() ||
+        firestore.get(/databases/(default)/documents/posts/$(postId)).data.createdBy == request.auth.uid
+      );
     }
     
     // Deny all other paths

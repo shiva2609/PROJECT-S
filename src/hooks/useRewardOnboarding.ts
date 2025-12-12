@@ -25,12 +25,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { doc, getDoc, runTransaction } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { db } from '../api/authService';
+import { db } from '../services/auth/authService';
 import {
   createRewardNotification,
   checkUnclaimedRewards,
   markRewardNotificationAsClaimed,
-} from '../api/rewardNotificationService';
+} from '../services/notifications/rewardNotificationService';
 
 interface UseRewardOnboardingReturn {
   visible: boolean;
@@ -172,9 +172,9 @@ export function useRewardOnboarding(
         currentPoints,
         willShowPopup: !rewardClaimed && !claimedLocal,
       });
-    } catch (err: any) {
-      console.error('❌ Error checking reward status:', err);
-      setError(err instanceof Error ? err : new Error('Failed to check reward status'));
+    } catch (error: any) {
+      console.error('❌ Error checking reward status:', error);
+      setError(error instanceof Error ? error : new Error('Failed to check reward status'));
     } finally {
       setLoading(false);
       setHasChecked(true);
@@ -266,8 +266,8 @@ export function useRewardOnboarding(
       await markRewardNotificationAsClaimed(userId);
 
       console.log('✅ Reward claim completed successfully (Firestore + AsyncStorage)');
-    } catch (err: any) {
-      console.error('❌ Error granting reward:', err);
+    } catch (error: any) {
+      console.error('❌ Error granting reward:', error);
 
       // Revert optimistic update on error
       await checkRewardStatus();

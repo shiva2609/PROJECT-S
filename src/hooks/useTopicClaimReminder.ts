@@ -11,7 +11,7 @@ import {
   createTopicReminderNotification,
   scheduleTopicReminderNotification,
   removeTopicReminderNotification,
-} from '../api/topicNotificationService';
+} from '../services/notifications/topicNotificationService';
 
 interface UseTopicClaimReminderReturn {
   showAlert: boolean;

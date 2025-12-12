@@ -6,7 +6,7 @@
 import { Platform, Image } from 'react-native';
 import RNFS from 'react-native-fs';
 import { computeCropRect } from './cropMath';
-import type { CropParams } from '../store/useCreateFlowStore';
+import type { CropParams } from '../store/stores/useCreateFlowStore';
 
 // Profile photo box dimensions from ProfileScreen
 export const PROFILE_PHOTO_WIDTH = 100;

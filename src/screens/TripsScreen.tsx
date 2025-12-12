@@ -18,8 +18,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { useAuth } from '../contexts/AuthContext';
-import { db } from '../api/authService';
+import { useAuth } from '../providers/AuthProvider';
+import { db } from '../services/auth/authService';
 import { collection, query, where, getDocs, orderBy, onSnapshot } from 'firebase/firestore';
 
 // Brand Colors

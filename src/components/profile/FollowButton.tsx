@@ -20,11 +20,11 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Fonts } from '../../theme/fonts';
-import { followUser, unfollowUser } from '../../services/followService';
-import { fetchFollowState } from '../../services/profileService';
+import { followUser, unfollowUser } from '../../services/follow/followService';
+import { fetchFollowState } from '../../services/users/profileService';
 import { store } from '../../store';
-import { setUserFollowState } from '../../store/userFollowStateSlice';
-import type { FollowState } from '../../store/userFollowStateSlice';
+import { setUserFollowState } from '../../store/slices/userFollowStateSlice';
+import type { FollowState } from '../../store/slices/userFollowStateSlice';
 import { Alert } from 'react-native';
 
 const DESIGN_COLORS = {

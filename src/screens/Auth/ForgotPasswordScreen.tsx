@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../utils/colors';
-import { auth, firestore } from '../../api/firebaseConfig';
+import { auth, firestore } from '../../services/api/firebaseConfig';
 import { FontFamily } from '../../GlobalStyles';
 
 export default function ForgotPasswordScreen({ navigation }: any) {

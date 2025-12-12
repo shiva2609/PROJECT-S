@@ -1,8 +1,8 @@
 import { configureStore, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import profilePhotoReducer from './profilePhotoSlice';
-import userProfileReducer from './userProfileSlice';
-import userPostsReducer from './userPostsSlice';
-import userFollowStateReducer from './userFollowStateSlice';
+import profilePhotoReducer from './slices/profilePhotoSlice';
+import userProfileReducer from './slices/userProfileSlice';
+import userPostsReducer from './slices/userPostsSlice';
+import userFollowStateReducer from './slices/userFollowStateSlice';
 
 export type User = {
   id: string;

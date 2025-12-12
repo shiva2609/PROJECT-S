@@ -16,10 +16,10 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useFollowingFeed, Post } from '../../hooks/useFollowingFeed';
-import { useAuth } from '../../contexts/AuthContext';
-import { toggleLikePost, toggleBookmarkPost } from '../../api/firebaseService';
+import { useAuth } from '../../providers/AuthProvider';
+import { toggleLikePost, toggleBookmarkPost } from '../../services/api/firebaseService';
 import { normalizePost } from '../../utils/postUtils';
-import PostCard from '../PostCard';
+import PostCard from '../post/PostCard';
 // FollowingSuggestions removed - now handled by FollowingScreen
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';

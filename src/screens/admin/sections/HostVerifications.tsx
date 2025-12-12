@@ -6,7 +6,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useVerifications, Verification } from '../../../hooks/admin/useVerifications';
-import { auth, db } from '../../../api/authService';
+import { auth, db } from '../../../services/auth/authService';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 interface Props {

@@ -22,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { colors } from '../../utils/colors';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../providers/AuthProvider';
 import { useKYCManager } from '../../hooks/useKYCManager';
 import {
   VerificationStep,
@@ -31,7 +31,7 @@ import {
 } from '../../types/kyc';
 import { AccountType } from '../../types/account';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../api/authService';
+import { db } from '../../services/auth/authService';
 
 interface AccountChangeFlowScreenProps {
   navigation: any;

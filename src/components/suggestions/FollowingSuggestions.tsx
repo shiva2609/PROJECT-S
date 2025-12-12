@@ -41,30 +41,37 @@ export default function FollowingSuggestions({
   const { categories, loading, refresh, updateSuggestionFollowState } = useSuggestions();
   const [contactsModalVisible, setContactsModalVisible] = useState(false);
 
+  // Safety check: Ensure categories is always an array
+  const safeCategories = Array.isArray(categories) ? categories : [];
+
   // Handle follow state change from SuggestionCard - memoized to prevent infinite loops
   const handleFollowChange = useCallback((userId: string, isFollowing: boolean) => {
     // Update local state only - no refetch
-    updateSuggestionFollowState(userId, isFollowing);
+    if (updateSuggestionFollowState) {
+      updateSuggestionFollowState(userId, isFollowing);
+    }
   }, [updateSuggestionFollowState]);
 
   // Debug: Log categories being rendered - MUST be before any conditional returns
   useEffect(() => {
-    console.log('[FollowingSuggestions] Categories state:', categories.length, categories.map(c => ({ title: c.title, count: c.users.length })));
-    const categoriesWithUsers = categories.filter(
-      category => category.users && category.users.length > 0
-    );
-    console.log('[FollowingSuggestions] Categories with users:', categoriesWithUsers.length, categoriesWithUsers.map(c => ({ title: c.title, count: c.users.length })));
-  }, [categories]);
+    if (safeCategories.length > 0) {
+      console.log('[FollowingSuggestions] Categories state:', safeCategories.length, safeCategories.map(c => ({ title: c.title, count: c.users?.length || 0 })));
+      const categoriesWithUsers = safeCategories.filter(
+        category => category.users && category.users.length > 0
+      );
+      console.log('[FollowingSuggestions] Categories with users:', categoriesWithUsers.length, categoriesWithUsers.map(c => ({ title: c.title, count: c.users.length })));
+    }
+  }, [safeCategories]);
 
   // Filter categories that have users (only render when there are actual suggestions)
-  const peopleWhoFollowYouIndex = categories.findIndex(
+  const peopleWhoFollowYouIndex = safeCategories.findIndex(
     category => category.title === 'People Who Follow You' && category.users && category.users.length > 0
   );
-  const peopleWhoFollowYouCategory = peopleWhoFollowYouIndex >= 0 ? categories[peopleWhoFollowYouIndex] : null;
+  const peopleWhoFollowYouCategory = peopleWhoFollowYouIndex >= 0 ? safeCategories[peopleWhoFollowYouIndex] : null;
   
   // Filter other categories that have users, excluding "People Who Follow You" and any duplicates
   const seenTitles = new Set<string>();
-  const otherCategoriesWithUsers = categories.filter(
+  const otherCategoriesWithUsers = safeCategories.filter(
     category => {
       // Skip "People Who Follow You" (handled separately)
       if (category.title === 'People Who Follow You') return false;
@@ -81,16 +88,18 @@ export default function FollowingSuggestions({
   );
   
   // Build list of categories to render
-  const categoriesToRender: typeof categories = [];
+  const categoriesToRender: typeof safeCategories = [];
   if (peopleWhoFollowYouCategory) {
     categoriesToRender.push(peopleWhoFollowYouCategory);
   }
   categoriesToRender.push(...otherCategoriesWithUsers);
   
-  console.log('[FollowingSuggestions] Categories to render:', categoriesToRender.length, categoriesToRender.map(c => ({ title: c.title, count: c.users.length })));
+  if (categoriesToRender.length > 0) {
+    console.log('[FollowingSuggestions] Categories to render:', categoriesToRender.length, categoriesToRender.map(c => ({ title: c.title, count: c.users?.length || 0 })));
+  }
   
   // Show loading state only if loading and no categories yet
-  if (loading && categories.length === 0) {
+  if (loading && safeCategories.length === 0) {
     return null; // Don't show loading placeholders - wait for actual suggestions
   }
 
@@ -146,7 +155,7 @@ export default function FollowingSuggestions({
       {/* CRITICAL: Always show contacts card below suggestions when showContactsCard is true (when posts have ended) */}
       {showContactsCard && (
         <View style={styles.contactsCardWrapper}>
-          <ContactsPermissionCard onSuccess={refresh} />
+          <ContactsPermissionCard onSuccess={refresh || (() => {})} />
         </View>
       )}
 
@@ -154,7 +163,7 @@ export default function FollowingSuggestions({
         visible={contactsModalVisible}
         onClose={() => setContactsModalVisible(false)}
         onSuccess={() => {
-          refresh();
+          if (refresh) refresh();
         }}
       />
     </View>

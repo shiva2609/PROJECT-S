@@ -18,12 +18,12 @@ import {
 } from 'react-native';
 import { launchImageLibrary, launchCamera, MediaType } from 'react-native-image-picker';
 import { colors } from '../../utils/colors';
-import { uploadImageAsync, createPost, createReel } from '../../api/firebaseService';
-import { db } from '../../api/authService';
+import { uploadImageAsync, createPost, createReel } from '../../services/api/firebaseService';
+import { db } from '../../services/auth/authService';
 import { doc, getDoc } from 'firebase/firestore';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { requireAuth } from '../../utils/authUtils';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../providers/AuthProvider';
 import { useNavigation } from '@react-navigation/native';
 import { navigateToScreen } from '../../utils/navigationHelpers';
 

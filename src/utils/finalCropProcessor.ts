@@ -1,7 +1,7 @@
 // ImagePicker removed - was causing ghost "Processing" screen
 // Using ImageResizer instead for silent processing
 import { Platform } from 'react-native';
-import type { Asset, CropParams, AspectRatio } from '../store/useCreateFlowStore';
+import type { Asset, CropParams, AspectRatio } from '../store/stores/useCreateFlowStore';
 import { computeCropRect } from './cropMath';
 
 /**

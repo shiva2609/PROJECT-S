@@ -26,7 +26,7 @@ import {
   subscribeToUserProfilePhoto,
   getDefaultProfilePhoto,
   getCachedProfilePhoto,
-} from '../services/userProfilePhotoService';
+} from '../services/users/userProfilePhotoService';
 import { store } from '../store';
 
 /**

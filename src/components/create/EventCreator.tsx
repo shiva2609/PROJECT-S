@@ -7,7 +7,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { colors } from '../../utils/colors';
-import { auth, db } from '../../api/authService';
+import { auth, db } from '../../services/auth/authService';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 interface Props {

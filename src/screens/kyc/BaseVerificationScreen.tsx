@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { colors } from '../../utils/colors';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../providers/AuthProvider';
 import { useKYCManager, VerificationDocs } from '../../hooks/useKYCManager';
 import { AccountType } from '../../types/account';
 import { VerificationKey } from '../../constants/verificationTemplates';

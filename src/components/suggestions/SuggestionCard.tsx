@@ -13,9 +13,10 @@ import {
   Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { useFollow } from '../../hooks/useFollow';
+import { useAuth } from '../../providers/AuthProvider';
+import { useFollowStatus } from '../../global/hooks/useFollowStatus';
 import { useProfilePhoto } from '../../hooks/useProfilePhoto';
-import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/userProfilePhotoService';
+import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/users/userProfilePhotoService';
 import { SuggestionCandidate } from '../../utils/suggestionUtils';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
@@ -28,7 +29,8 @@ interface SuggestionCardProps {
 }
 
 export default function SuggestionCard({ user, onPress, onLongPress, onFollowChange }: SuggestionCardProps) {
-  const { isFollowing, isLoading, follow, unfollow } = useFollow(user.id);
+  const { user: currentUser } = useAuth();
+  const { isFollowing, loading: followLoading, toggleFollow } = useFollowStatus(currentUser?.uid, user.id);
   const [showPopover, setShowPopover] = useState(false);
   const [localFollowing, setLocalFollowing] = useState(user.isFollowing || false);
   // Use unified profile photo hook
@@ -82,11 +84,9 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
     setLocalFollowing(!wasFollowing);
     
     try {
-      if (wasFollowing) {
-        await unfollow();
-      } else {
-        await follow();
-      }
+      await toggleFollow();
+      // Update local state to match hook state
+      setLocalFollowing(!wasFollowing);
     } catch (error) {
       // Rollback on error
       setLocalFollowing(wasFollowing);
@@ -147,13 +147,13 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
           style={[
             styles.followButton,
             localFollowing && styles.followingButton,
-            isLoading && styles.loadingButton,
+            followLoading && styles.loadingButton,
           ]}
           onPress={handleFollow}
-          disabled={isLoading}
+          disabled={followLoading}
           activeOpacity={0.7}
         >
-          {isLoading ? (
+          {followLoading ? (
             <Text style={styles.followButtonText}>...</Text>
           ) : localFollowing ? (
             <View style={styles.followingButtonContent}>

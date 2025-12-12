@@ -10,7 +10,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import ItineraryCard from './ItineraryCard';
-import { ItineraryResponse } from '../../api/generateItinerary';
+import { ItineraryResponse } from '../../services/itinerary/generateItinerary';
 
 interface ChatBubbleProps {
   message: string;

@@ -7,7 +7,7 @@
  */
 
 import { Alert } from 'react-native';
-import { auth } from '../api/authService';
+import { auth } from '../services/auth/authService';
 import { onAuthStateChanged } from 'firebase/auth';
 
 /**

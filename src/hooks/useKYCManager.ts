@@ -19,7 +19,7 @@ import {
   Unsubscribe,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../api/authService';
+import { db, storage } from '../services/auth/authService';
 import { AccountType } from '../types/account';
 import {
   PendingAccountChange,

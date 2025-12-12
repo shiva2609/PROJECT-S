@@ -4,7 +4,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { colors } from '../utils/colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_USER_KEY } from '../utils/constants';
-import { auth, firestore } from '../api/firebaseConfig';
+import { auth, firestore } from '../services/api/firebaseConfig';
 import { useDispatch } from 'react-redux';
 import { setUser } from '../store';
 

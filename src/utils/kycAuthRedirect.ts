@@ -8,7 +8,7 @@
 import { useEffect } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../api/authService';
+import { db } from '../services/auth/authService';
 import { AccountType, UserAccountData } from '../types/account';
 import { requiresVerification } from '../hooks/useKYCManager';
 import { navigateToVerification } from './kycNavigation';

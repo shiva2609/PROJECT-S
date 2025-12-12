@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { collection, query, getDocs, orderBy, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../../api/authService';
+import { db } from '../../services/auth/authService';
 import { AccountType } from '../../types/account';
 
 export interface User {

@@ -35,7 +35,8 @@ export default function ChatSuggestions({
   }
 
   // Get first category's users (or combine all)
-  const allUsers = categories.flatMap(cat => cat.users).slice(0, 8);
+  const safeCategories = Array.isArray(categories) ? categories : [];
+  const allUsers = safeCategories.flatMap(cat => cat.users || []).slice(0, 8);
 
   if (allUsers.length === 0) {
     return null;

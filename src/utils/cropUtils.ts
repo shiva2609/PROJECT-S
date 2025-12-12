@@ -1,7 +1,7 @@
 import { Platform, Image } from 'react-native';
 import type { AspectRatio } from '../hooks/useCropState';
 import { computeCropRect } from './cropMath';
-import type { CropParams } from '../store/useCreateFlowStore';
+import type { CropParams } from '../store/stores/useCreateFlowStore';
 
 // ImagePicker is optional - only used for legacy performNativeCrop function
 let ImagePicker: any;

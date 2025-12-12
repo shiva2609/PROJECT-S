@@ -21,14 +21,14 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { auth, db } from '../../api/authService';
+import { auth, db } from '../../services/auth/authService';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { handleLogout } from '../../utils/accountActions';
 import { useDispatch } from 'react-redux';
 import { NavigationProp, useRoute, useFocusEffect } from '@react-navigation/native';
 import { BackHandler } from 'react-native';
 import { Colors } from '../../theme/colors';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../providers/AuthProvider';
 
 // Section Components
 import DashboardOverview from './sections/DashboardOverview';

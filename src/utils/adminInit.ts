@@ -11,7 +11,7 @@
 
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../api/authService';
+import { auth, db } from '../services/auth/authService';
 import { AccountType } from '../types/account';
 
 const ADMIN_CONFIG = {

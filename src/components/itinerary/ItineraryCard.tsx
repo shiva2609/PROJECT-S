@@ -9,7 +9,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
-import { ItineraryResponse } from '../../api/generateItinerary';
+import { ItineraryResponse } from '../../services/itinerary/generateItinerary';
 
 interface ItineraryCardProps {
   itinerary: ItineraryResponse;

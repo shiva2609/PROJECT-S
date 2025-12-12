@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, orderBy, onSnapshot } from 'firebase/firestore';
-import { db } from '../../api/authService';
+import { db } from '../../services/auth/authService';
 
 export interface Verification {
   id: string;

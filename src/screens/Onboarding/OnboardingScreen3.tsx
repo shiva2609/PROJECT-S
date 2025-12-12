@@ -22,7 +22,7 @@ const OnboardingScreen3 = () => {
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       <ImageBackground 
-        source={require('../assets/images/onboard3.jpeg')}
+        source={require('../../assets/images/onboard3.jpeg')}
         style={styles.imageBackground}
         resizeMode="cover"
       >

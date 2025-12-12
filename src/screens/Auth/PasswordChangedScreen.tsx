@@ -18,7 +18,7 @@ export default function PasswordChangedScreen({ navigation, route }: any) {
       <View style={styles.content}>
         {/* ✅ New Badge with Icon */}
         <View style={styles.badgeContainer}>
-       <Image source={require('../assets/images/wavyBadge.png')} style={styles.badgeImage} />
+       <Image source={require('../../assets/images/wavyBadge.png')} style={styles.badgeImage} />
 </View>
 
 

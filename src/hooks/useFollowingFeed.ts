@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { db } from '../api/authService';
+import { db } from '../services/auth/authService';
 import {
   collection,
   query,
@@ -16,7 +16,7 @@ import {
   startAfter,
   QueryDocumentSnapshot,
 } from 'firebase/firestore';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../providers/AuthProvider';
 import { chunkArray } from '../utils/suggestionUtils';
 import { normalizePostAuthor, filterValidPosts, sortPostsByCreatedAt, getCreatedAtTimestamp } from '../utils/postUtils';
 

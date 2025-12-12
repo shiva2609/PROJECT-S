@@ -19,7 +19,7 @@ import {
   readAndHashContacts,
   uploadContactsHashes,
 } from '../../utils/contactsService';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../providers/AuthProvider';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 

@@ -16,7 +16,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { colors } from '../../utils/colors';
-import { auth, db } from '../../api/authService';
+import { auth, db } from '../../services/auth/authService';
 import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 
 interface Props {

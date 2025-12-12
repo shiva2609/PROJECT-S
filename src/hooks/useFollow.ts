@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { db } from '../api/authService';
+import { db } from '../services/auth/authService';
 import {
   collection,
   doc,
@@ -18,7 +18,7 @@ import {
   increment,
   onSnapshot,
 } from 'firebase/firestore';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../providers/AuthProvider';
 import { Alert } from 'react-native';
 import { serverTimestamp } from 'firebase/firestore';
 

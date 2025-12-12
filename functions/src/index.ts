@@ -142,7 +142,7 @@ export const autoVerifyStep = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('permission-denied', 'Only admins can auto-verify');
   }
 
-  const { requestId, stepKey } = data;
+  const { stepKey } = data;
 
   // Implement your auto-verification logic here
   // For example, validate PAN number via third-party API

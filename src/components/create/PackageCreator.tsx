@@ -18,8 +18,8 @@ import {
 } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { colors } from '../../utils/colors';
-import { uploadImageAsync } from '../../api/firebaseService';
-import { auth, db } from '../../api/authService';
+import { uploadImageAsync } from '../../services/api/firebaseService';
+import { auth, db } from '../../services/auth/authService';
 import { collection, addDoc, serverTimestamp, Timestamp, getDoc, doc } from 'firebase/firestore';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { requireAuth } from '../../utils/authUtils';

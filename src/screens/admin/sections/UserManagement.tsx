@@ -6,10 +6,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, LayoutAnimation, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useUsers, suspendUser, unsuspendUser, approveUser } from '../../../hooks/admin/useUsers';
-import { auth, db } from '../../../api/authService';
+import { auth, db } from '../../../services/auth/authService';
 import { doc, getDoc } from 'firebase/firestore';
 import { getAccountTypeMetadata } from '../../../types/account';
-import { useAuth } from '../../../contexts/AuthContext';
+import { useAuth } from '../../../providers/AuthProvider';
 
 interface Props {
   searchQuery: string;

@@ -135,22 +135,49 @@ export function normalizePost(post: PostData): PostData {
   }
   // Priority 2: Check for media array (should contain final cropped bitmap URLs from upload)
   // Only use media array if it has url/uri fields (these should be final cropped bitmaps)
+  // CRITICAL: Filter out undefined/null items before processing
   else if (Array.isArray(normalized.media) && normalized.media.length > 0) {
-    normalized.media.forEach((item: any) => {
-      // Use url or uri from media array (these should be final cropped bitmap URLs)
-      const url = item.url || item.uri;
-      if (url && typeof url === 'string' && url.length > 0) {
-        mediaUrls.push(url);
-      }
-    });
+    normalized.media
+      .filter((item: any) => item != null && typeof item === 'object') // Filter out undefined/null items
+      .forEach((item: any) => {
+        try {
+          // Use url or uri from media array (these should be final cropped bitmap URLs)
+          const url = item?.url || item?.uri;
+          if (url && typeof url === 'string' && url.length > 0) {
+            mediaUrls.push(url);
+          }
+        } catch (error) {
+          console.warn('Error processing media item in normalizePost:', error, item);
+          // Skip this item and continue
+        }
+      });
   }
   // Priority 3: Check for mediaUrl (single string - should be final cropped bitmap)
   // Only use if media array is not available
-  else if (normalized.mediaUrl && typeof normalized.mediaUrl === 'string' && normalized.mediaUrl.length > 0) {
+  if (mediaUrls.length === 0 && normalized.mediaUrl && typeof normalized.mediaUrl === 'string' && normalized.mediaUrl.length > 0) {
     mediaUrls.push(normalized.mediaUrl);
   }
-  // NOTE: We do NOT fallback to imageUrl, coverImage, or gallery
-  // These fields might contain original image URIs, which would break the fixed aspect ratio pipeline
+  
+  // Priority 4: Check for imageUrl (legacy field - use as fallback)
+  if (mediaUrls.length === 0 && normalized.imageUrl && typeof normalized.imageUrl === 'string' && normalized.imageUrl.length > 0) {
+    mediaUrls.push(normalized.imageUrl);
+  }
+  
+  // Priority 5: Check for photoUrl (alternative field)
+  if (mediaUrls.length === 0 && (normalized as any).photoUrl && typeof (normalized as any).photoUrl === 'string' && (normalized as any).photoUrl.length > 0) {
+    mediaUrls.push((normalized as any).photoUrl);
+  }
+  
+  // Priority 6: Check for files[0]?.url (nested structure)
+  if (mediaUrls.length === 0 && Array.isArray((normalized as any).files) && (normalized as any).files.length > 0) {
+    const fileUrl = (normalized as any).files[0]?.url || (normalized as any).files[0]?.uri;
+    if (fileUrl && typeof fileUrl === 'string' && fileUrl.length > 0) {
+      mediaUrls.push(fileUrl);
+    }
+  }
+  
+  // NOTE: We prioritize final cropped bitmaps, but fallback to other fields if needed
+  // This ensures images always render, even if the post structure is non-standard
 
   // Set mediaUrls (always an array, even if empty)
   normalized.mediaUrls = mediaUrls.length > 0 ? mediaUrls : [];
