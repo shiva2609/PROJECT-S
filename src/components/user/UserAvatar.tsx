@@ -1,5 +1,7 @@
 import React from 'react';
 import { View, Image, StyleSheet, ImageStyle } from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
+import { Colors } from '../../theme/colors';
 import VerifiedBadge from './VerifiedBadge';
 
 interface UserAvatarProps {
@@ -7,6 +9,7 @@ interface UserAvatarProps {
   uri?: string;
   hasStoryRing?: boolean;
   isVerified?: boolean;
+  variant?: 'default' | 'profile'; // 'profile' uses brand color for icon
 }
 
 const SIZE_MAP = {
@@ -19,14 +22,30 @@ const SIZE_MAP = {
 
 const STORY_RING_WIDTH = 2;
 
+/**
+ * Checks if URI is empty or placeholder
+ */
+function isEmptyAvatar(uri?: string): boolean {
+  if (!uri) return true;
+  if (uri.trim() === '') return true;
+  if (uri.includes('placeholder')) return true;
+  return false;
+}
+
 export default function UserAvatar({
   size = 'md',
   uri,
   hasStoryRing = false,
   isVerified = false,
+  variant = 'default', // Default to neutral gray
 }: UserAvatarProps) {
   const avatarSize = SIZE_MAP[size];
   const containerSize = hasStoryRing ? avatarSize + STORY_RING_WIDTH * 2 : avatarSize;
+  const isEmpty = isEmptyAvatar(uri);
+  const iconSize = Math.floor(avatarSize * 0.5);
+
+  // Use brand secondary color for profile variant, neutral gray for default
+  const iconColor = variant === 'profile' ? Colors.brand.secondary : '#8E8E8E';
 
   return (
     <View style={[styles.container, { width: containerSize, height: containerSize }]}>
@@ -42,18 +61,37 @@ export default function UserAvatar({
           ]}
         />
       )}
-      <Image
-        source={uri ? { uri } : { uri: 'https://via.placeholder.com/150/FF5C02/FFFFFF?text=User' }}
-        style={[
-          styles.avatar,
-          {
-            width: avatarSize,
-            height: avatarSize,
-            borderRadius: avatarSize / 2,
-          },
-        ]}
-        defaultSource={{ uri: 'https://via.placeholder.com/150/FF5C02/FFFFFF?text=User' }}
-      />
+      {isEmpty ? (
+        <View
+          style={[
+            styles.avatar,
+            styles.emptyAvatar,
+            {
+              width: avatarSize,
+              height: avatarSize,
+              borderRadius: avatarSize / 2,
+              borderWidth: 2,
+              borderColor: '#E0E0E0',
+            },
+          ]}
+        >
+          <Icon name="person" size={iconSize} color={iconColor} />
+        </View>
+      ) : (
+        <Image
+          source={{ uri }}
+          style={[
+            styles.avatar,
+            {
+              width: avatarSize,
+              height: avatarSize,
+              borderRadius: avatarSize / 2,
+              borderWidth: 2,
+              borderColor: '#E0E0E0',
+            },
+          ]}
+        />
+      )}
       {isVerified && (
         <View style={[styles.verifiedBadge, { bottom: size === 'xs' ? -2 : 0, right: size === 'xs' ? -2 : 0 }]}>
           <VerifiedBadge size={size === 'xs' ? 12 : size === 'sm' ? 14 : 18} />
@@ -77,6 +115,11 @@ const styles = StyleSheet.create({
   },
   avatar: {
     backgroundColor: '#EAEAEA',
+  },
+  emptyAvatar: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
   },
   verifiedBadge: {
     position: 'absolute',

@@ -47,7 +47,7 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
   const { user: currentUser } = useAuth();
   const profileUserId = route?.params?.userId || currentUser?.uid || '';
   const initialTab = route?.params?.type || 'followers';
-  
+
   const [activeTab, setActiveTab] = useState<'followers' | 'following'>(initialTab);
   const [profileUsername, setProfileUsername] = useState<string>('User');
   const [userList, setUserList] = useState<UserListItem[]>([]);
@@ -99,7 +99,7 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
       try {
         // Step 1: Get UIDs from follow service
         console.log(`[FollowersScreen] Fetching ${activeTab} for userId:`, profileUserId);
-        const uids = activeTab === 'followers' 
+        const uids = activeTab === 'followers'
           ? await FollowService.getFollowersIds(profileUserId)
           : await FollowService.getFollowingIds(profileUserId);
 
@@ -131,7 +131,7 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
 
             return {
               uid: userInfo.uid,
-              username: userInfo.username || 'Unknown',
+              username: userInfo.username,
               displayName: userInfo.displayName,
               photoURL: userInfo.photoURL,
               isFollowing,

@@ -1,12 +1,8 @@
 /**
- * User Components Barrel Export
+ * User Components Index
+ * 
+ * Centralized exports for user-related components
  */
 
-export { default as UserAvatar } from './UserAvatar';
-export { default as ProfileImage } from './ProfileImage';
-export { default as UsernameChip } from './UsernameChip';
+export { default as ProfileAvatar, ProfileAvatarSmall, ProfileAvatarMedium, ProfileAvatarLarge, ProfileAvatarXL } from './ProfileAvatar';
 export { default as VerifiedBadge } from './VerifiedBadge';
-
-
-
-

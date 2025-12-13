@@ -882,32 +882,32 @@ export default function EditProfileScreen({ navigation, route }: any) {
               style={[
                 styles.input,
                 styles.textArea,
-                formData.aboutMe && formData.aboutMe.length > 60 && styles.inputError,
+                formData.aboutMe && formData.aboutMe.length > 100 && styles.inputError,
               ]}
               placeholder="Tell us about yourself, your travel experiences, and what makes you unique... (50-60 characters recommended)"
               placeholderTextColor={Colors.black.qua}
               value={formData.aboutMe}
               onChangeText={(text) => {
-                // Limit to 60 characters
-                if (text.length <= 60) {
+                // Limit to 100 characters
+                if (text.length <= 100) {
                   setFormData({ ...formData, aboutMe: text });
                 }
               }}
               multiline
               numberOfLines={3}
-              maxLength={60}
+              maxLength={100}
             />
             <View style={styles.characterCountContainer}>
               <Text
                 style={[
                   styles.characterCount,
-                  formData.aboutMe && formData.aboutMe.length < 50 && styles.characterCountWarning,
-                  formData.aboutMe && formData.aboutMe.length > 60 && styles.characterCountError,
+                  formData.aboutMe && formData.aboutMe.length < 80 && styles.characterCountWarning,
+                  formData.aboutMe && formData.aboutMe.length > 100 && styles.characterCountError,
                 ]}
               >
-                {formData.aboutMe?.length || 0}/60 characters
-                {formData.aboutMe && formData.aboutMe.length < 50 && ' (Recommended: 80-90 characters)'}
-                {formData.aboutMe && formData.aboutMe.length > 60 && ' (Exceeds limit)'}
+                {formData.aboutMe?.length || 0}/100 characters
+                {formData.aboutMe && formData.aboutMe.length < 80 && ' (Recommended: 80-90 characters)'}
+                {formData.aboutMe && formData.aboutMe.length > 100 && ' (Exceeds limit)'}
               </Text>
             </View>
           </View>

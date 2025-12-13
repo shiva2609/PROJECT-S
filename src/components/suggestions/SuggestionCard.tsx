@@ -32,8 +32,8 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
   const { user: currentUser } = useAuth();
   const { isFollowing, loading: followLoading, toggleFollow } = useFollowStatus(currentUser?.uid, user.id);
   const [showPopover, setShowPopover] = useState(false);
-  const [localFollowing, setLocalFollowing] = useState(user.isFollowing || false);
-  
+  const [localFollowing, setLocalFollowing] = useState(isFollowing || false);
+
   // Fetch user data from Firestore using global service
   const [userData, setUserData] = useState<{
     username: string;
@@ -56,54 +56,21 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
         console.log('[SuggestionCard] Fetching user data for:', user.id, 'prop username:', user.username);
         const publicInfo = await UserService.getUserPublicInfo(user.id);
         console.log('[SuggestionCard] Fetched publicInfo:', publicInfo ? { username: publicInfo.username, displayName: publicInfo.displayName } : 'null');
-        
+
         if (publicInfo) {
-          // Prioritize username from Firestore - it's the most important for recognition
-          // Never show "Unknown" - always use a recognizable identifier
-          let username = publicInfo.username;
-          
-          // If username is missing or "Unknown", try other sources
-          if (!username || username === 'Unknown' || username.trim() === '') {
-            username = user.username;
-          }
-          
-          // If still missing, use displayName if it looks like a username, otherwise use user ID
-          if (!username || username.trim() === '') {
-            const displayName = publicInfo.displayName || user.name;
-            if (displayName && !displayName.includes(' ') && /^[a-zA-Z0-9_]+$/.test(displayName)) {
-              username = displayName;
-            } else {
-              // Use first 8 chars of user ID as last resort (better than "Unknown")
-              username = user.id.substring(0, 8);
-            }
-          }
-          
-          console.log('[SuggestionCard] Final username for', user.id, ':', username);
-          
+          // Global service now guarantees username is never empty
+          // No need for complex fallback logic
           setUserData({
-            username: username,
-            displayName: publicInfo.displayName || user.name || user.username || username,
+            username: publicInfo.username, // ✅ Always has value from global service
+            displayName: publicInfo.displayName || publicInfo.username,
             photoURL: publicInfo.photoURL || user.avatar || '',
             verified: publicInfo.verified || user.verified || false,
           });
         } else {
           // Fallback to prop data if Firestore fetch fails
-          let username = user.username;
-          if (!username || username.trim() === '') {
-            // Use displayName if it looks like a username, otherwise use user ID
-            const displayName = user.name;
-            if (displayName && !displayName.includes(' ') && /^[a-zA-Z0-9_]+$/.test(displayName)) {
-              username = displayName;
-            } else {
-              username = user.id.substring(0, 8);
-            }
-          }
-          
-          console.log('[SuggestionCard] Using fallback username for', user.id, ':', username);
-          
           setUserData({
-            username: username,
-            displayName: user.name || user.username || username,
+            username: user.username || user.name || user.id.substring(0, 8),
+            displayName: user.name || user.username || 'User',
             photoURL: user.avatar || '',
             verified: user.verified || false,
           });
@@ -111,12 +78,8 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
       } catch (error) {
         console.error('[SuggestionCard] Error fetching user data:', error, 'user.id:', user.id);
         // Fallback to prop data on error
-        const username = user.username && user.username !== 'Unknown' 
-          ? user.username 
-          : 'Unknown';
-        
         setUserData({
-          username: username,
+          username: user.username || user.name || user.id.substring(0, 8),
           displayName: user.name || user.username || 'User',
           photoURL: user.avatar || '',
           verified: user.verified || false,
@@ -172,10 +135,10 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
 
   const handleFollow = async () => {
     const wasFollowing = localFollowing;
-    
+
     // Optimistic update - instantly show ✓ Following or Follow
     setLocalFollowing(!wasFollowing);
-    
+
     try {
       await toggleFollow();
       // Update local state to match hook state
@@ -187,7 +150,7 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
     }
   };
 
-  const tagline = user.postsCount 
+  const tagline = user.postsCount
     ? `Visited ${user.location || 'Unknown'} • ${user.postsCount} posts`
     : user.location || 'Traveler';
 
@@ -203,18 +166,16 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
         <View style={styles.avatarContainer}>
           {!userData || isDefaultProfilePhoto(userData.photoURL) ? (
             <View style={styles.avatarPlaceholder}>
-              <Text style={styles.avatarText}>
-                {(userData?.displayName || user.name || 'U').charAt(0).toUpperCase()}
-              </Text>
+              <Icon name="person" size={32} color="#FFFFFF" />
             </View>
           ) : (
-            <Image 
-              source={{ uri: userData.photoURL }} 
+            <Image
+              source={{ uri: userData.photoURL }}
               defaultSource={{ uri: getDefaultProfilePhoto() }}
               onError={() => {
                 // Offline/CDN failure - Image component will use defaultSource
               }}
-              style={styles.avatar} 
+              style={styles.avatar}
               resizeMode="cover"
             />
           )}

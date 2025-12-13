@@ -9,24 +9,21 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../../theme/colors';
 import { Fonts } from '../../../theme/fonts';
 import { useAuth } from '../../../providers/AuthProvider';
-import CommentCard from '../../../components/post/CommentCard';
+import { formatTimestamp } from '../../../utils/postHelpers';
+import { useProfilePhoto } from '../../../hooks/useProfilePhoto';
 import * as PostInteractions from '../../../global/services/posts/post.interactions.service';
 import { getUserPublicInfo } from '../../../global/services/user/user.service';
 import { Timestamp } from 'firebase/firestore';
-import { formatTimestamp } from '../../../utils/postHelpers';
+import UserAvatar from '../../../components/user/UserAvatar';
 
-/**
- * Comments/Post Details Screen
- * 
- * Displays comments for a post using global hooks.
- * Zero Firestore code - all logic handled by useCommentsManager.
- */
 interface Comment {
   id: string;
   userId: string;
@@ -43,71 +40,125 @@ export default function CommentsScreen({ navigation, route }: any) {
   const [commentText, setCommentText] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
+  const userProfilePhoto = useProfilePhoto(user?.uid || '');
 
-  // Listen to comments using global service
+  // Animation for send button
+  const sendScale = useRef(new Animated.Value(1)).current;
+
+  // Listen to comments in real-time
   useEffect(() => {
     if (!postId) {
       setLoading(false);
       return;
     }
 
+    setError(null);
     const unsubscribe = PostInteractions.listenToPostComments(postId, (commentsData) => {
       setComments(commentsData);
       setLoading(false);
+      setError(null);
     });
 
     return () => unsubscribe();
   }, [postId]);
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = async () => {
     if (!user) {
+      Alert.alert('Login Required', 'Please login to comment');
       return;
     }
 
     const text = commentText.trim();
-    if (!text || !postId) {
+    if (!text) {
       return;
     }
+
+    // Animate button
+    Animated.sequence([
+      Animated.timing(sendScale, { toValue: 0.8, duration: 100, useNativeDriver: true }),
+      Animated.timing(sendScale, { toValue: 1, duration: 100, useNativeDriver: true }),
+    ]).start();
 
     setSubmitting(true);
     try {
       // Fetch current user profile to get accurate username
       const userProfile = await getUserPublicInfo(user.uid);
       const username = userProfile?.username || user.displayName || user.email?.split('@')[0] || 'User';
-      const photoURL = userProfile?.photoURL || user.photoURL || null;
+      const photoURL = userProfile?.photoURL || user.photoURL || userProfilePhoto || null;
+
       await PostInteractions.addComment(postId, user.uid, username, photoURL, text);
       setCommentText('');
-      // Scroll to bottom after adding comment
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+
+      // Scroll to top to see the new comment
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     } catch (error: any) {
-      console.error('Error adding comment:', error);
+      setError(error.message || 'Failed to add comment');
+      Alert.alert('Error', error.message || 'Failed to add comment');
     } finally {
       setSubmitting(false);
     }
-  }, [user, commentText, postId]);
+  };
 
   const renderComment = useCallback(({ item }: { item: Comment }) => {
-    const timestampValue = item.createdAt 
+    const timestampValue = item.createdAt
       ? (item.createdAt.toMillis?.() || (item.createdAt as any).seconds * 1000 || Date.now())
       : Date.now();
-    
+    const timestamp = formatTimestamp(timestampValue);
+
     return (
-      <CommentCard
-        username={item.username || 'Unknown'}
-        avatarUri={item.photoURL || undefined}
-        text={item.text}
-        timestamp={timestampValue}
-        onPressUser={() => {
-          navigation?.push('ProfileScreen', { userId: item.userId });
-        }}
-        onLike={() => {
-          // Like comment functionality can be added later
-        }}
-        isLiked={false}
-      />
+      <View style={styles.commentItem}>
+        {/* Avatar */}
+        <TouchableOpacity
+          style={styles.avatarContainer}
+          onPress={() => navigation?.push('ProfileScreen', { userId: item.userId })}
+          activeOpacity={0.8}
+        >
+          <UserAvatar
+            uri={item.photoURL || undefined}
+            size="sm"
+          />
+        </TouchableOpacity>
+
+        {/* Content Stack */}
+        <View style={styles.commentContent}>
+          {/* Username */}
+          <TouchableOpacity
+            onPress={() => navigation?.push('ProfileScreen', { userId: item.userId })}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.commentUsername} numberOfLines={1}>
+              {item.username}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Comment Text */}
+          <Text style={styles.commentText}>
+            {item.text}
+          </Text>
+
+          {/* Footer Row: Time + Reply + Like */}
+          <View style={styles.commentFooter}>
+            <Text style={styles.commentTimestamp}>{timestamp}</Text>
+            <TouchableOpacity activeOpacity={0.7} style={styles.footerAction}>
+              <Text style={styles.replyText}>Reply</Text>
+            </TouchableOpacity>
+
+            {/* Spacer */}
+            <View style={{ flex: 1 }} />
+
+            {/* Like Icon */}
+            <TouchableOpacity
+              style={styles.likeButton}
+              activeOpacity={0.6}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Icon name="heart-outline" size={16} color={Colors.black.qua} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
     );
   }, [navigation]);
 
@@ -129,7 +180,8 @@ export default function CommentsScreen({ navigation, route }: any) {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Icon name="arrow-back" size={24} color={Colors.black.primary} />
@@ -140,7 +192,7 @@ export default function CommentsScreen({ navigation, route }: any) {
 
       <KeyboardAvoidingView
         style={styles.content}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <FlatList
@@ -148,42 +200,71 @@ export default function CommentsScreen({ navigation, route }: any) {
           data={comments}
           renderItem={renderComment}
           keyExtractor={(item) => item.id}
-          windowSize={10}
-          initialNumToRender={10}
-          maxToRenderPerBatch={10}
-          removeClippedSubviews
-          contentContainerStyle={styles.commentsList}
+          contentContainerStyle={[
+            styles.commentsList,
+            comments.length === 0 && styles.emptyListContainer
+          ]}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Icon name="chatbubbles-outline" size={64} color={Colors.black.qua} />
+              <View style={styles.emptyIconCircle}>
+                <Icon name="chatbubbles-outline" size={48} color={Colors.brand.primary} />
+              </View>
               <Text style={styles.emptyText}>No comments yet</Text>
-              <Text style={styles.emptySub}>Be the first to comment!</Text>
+              <Text style={styles.emptySub}>Start the conversation.</Text>
             </View>
           }
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={15}
+          maxToRenderPerBatch={10}
+          windowSize={10}
+          removeClippedSubviews={Platform.OS === 'android'}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
         />
 
+        {/* Input Bar */}
         <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            placeholder="Add a comment..."
-            placeholderTextColor={Colors.black.qua}
-            value={commentText}
-            onChangeText={setCommentText}
-            multiline
-            maxLength={500}
+          {/* User Avatar */}
+          <UserAvatar
+            uri={userProfilePhoto || undefined}
+            size="sm"
           />
-          <TouchableOpacity
-            style={[styles.sendButton, (!commentText.trim() || submitting) && styles.sendButtonDisabled]}
-            onPress={handleSubmit}
-            disabled={!commentText.trim() || submitting}
-            activeOpacity={0.7}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color={Colors.white.primary} />
-            ) : (
-              <Icon name="send" size={20} color={Colors.white.primary} />
-            )}
-          </TouchableOpacity>
+
+          {/* Input Field */}
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={styles.input}
+              placeholder="Add a comment..."
+              placeholderTextColor={Colors.black.qua}
+              value={commentText}
+              onChangeText={setCommentText}
+              multiline
+              maxLength={500}
+              editable={!submitting}
+            />
+          </View>
+
+          {/* Send Button */}
+          <Animated.View style={{ transform: [{ scale: sendScale }] }}>
+            <TouchableOpacity
+              style={[
+                styles.sendButton,
+                (!commentText.trim() || submitting) && styles.sendButtonDisabled
+              ]}
+              onPress={handleSubmit}
+              disabled={!commentText.trim() || submitting}
+              activeOpacity={0.7}
+            >
+              {submitting ? (
+                <ActivityIndicator size="small" color={Colors.white.primary} />
+              ) : (
+                <Icon
+                  name="arrow-up"
+                  size={20}
+                  color={Colors.white.primary}
+                />
+              )}
+            </TouchableOpacity>
+          </Animated.View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -193,7 +274,7 @@ export default function CommentsScreen({ navigation, route }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.white.secondary,
+    backgroundColor: Colors.white.primary,
   },
   header: {
     flexDirection: 'row',
@@ -203,7 +284,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: Colors.white.primary,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.white.tertiary,
+    borderBottomColor: Colors.white.secondary,
+    zIndex: 10,
   },
   backButton: {
     width: 40,
@@ -212,8 +294,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   headerTitle: {
-    fontSize: 18,
-    fontFamily: Fonts.semibold,
+    fontSize: 16,
+    fontFamily: Fonts.bold,
     color: Colors.black.primary,
   },
   loadingContainer: {
@@ -225,24 +307,90 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   commentsList: {
-    padding: 16,
+    paddingVertical: 8,
+    paddingBottom: 40, // Extra padding for last item
+  },
+  emptyListContainer: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  separator: {
+    height: 16, // Vertical spacing between comments
+  },
+  commentItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
+  avatarContainer: {
+    marginRight: 12,
+    paddingTop: 4,
+  },
+  commentContent: {
+    flex: 1,
+  },
+  commentUsername: {
+    fontSize: 13,
+    fontFamily: Fonts.semibold,
+    color: Colors.black.primary,
+    marginBottom: 2,
+  },
+  commentText: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: Colors.black.secondary,
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  commentFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  commentTimestamp: {
+    fontSize: 12,
+    fontFamily: Fonts.regular,
+    color: Colors.black.qua,
+    marginRight: 16,
+  },
+  footerAction: {
+    paddingVertical: 2,
+    marginRight: 12,
+  },
+  replyText: {
+    fontSize: 12,
+    fontFamily: Fonts.semibold,
+    color: Colors.black.qua,
+  },
+  likeButton: {
+    padding: 4,
   },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 60,
+    paddingHorizontal: 32,
+  },
+  emptyIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.white.secondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   emptyText: {
     fontSize: 18,
     fontFamily: Fonts.semibold,
-    color: Colors.black.secondary,
-    marginTop: 16,
+    color: Colors.black.primary,
     marginBottom: 8,
   },
   emptySub: {
     fontSize: 14,
     fontFamily: Fonts.regular,
     color: Colors.black.qua,
+    textAlign: 'center',
   },
   inputContainer: {
     flexDirection: 'row',
@@ -252,21 +400,24 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white.primary,
     borderTopWidth: 1,
     borderTopColor: Colors.white.tertiary,
-    gap: 8,
+    gap: 12,
   },
-  input: {
+  inputWrapper: {
     flex: 1,
+    backgroundColor: Colors.white.secondary,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     minHeight: 40,
     maxHeight: 100,
-    backgroundColor: Colors.white.secondary,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    justifyContent: 'center',
+  },
+  input: {
+    padding: 0, // Remove default padding
     fontSize: 14,
     fontFamily: Fonts.regular,
     color: Colors.black.primary,
-    borderWidth: 1,
-    borderColor: Colors.white.tertiary,
+    textAlignVertical: 'center',
   },
   sendButton: {
     width: 40,
@@ -275,10 +426,16 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.brand.primary,
     justifyContent: 'center',
     alignItems: 'center',
+    // shadow
+    shadowColor: Colors.brand.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   sendButtonDisabled: {
-    backgroundColor: Colors.white.tertiary,
-    opacity: 0.5,
+    backgroundColor: Colors.white.qua,
+    shadowOpacity: 0,
+    elevation: 0,
   },
 });
-

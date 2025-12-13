@@ -74,7 +74,7 @@ export function UserRelationProvider({ children }: UserRelationProviderProps) {
       setFollowing([]);
       return;
     }
-    
+
     setIsLoading(true);
     try {
       const [followersResult, followingResult] = await Promise.all([
@@ -106,21 +106,49 @@ export function UserRelationProvider({ children }: UserRelationProviderProps) {
     }
   }, [setFollowers, setFollowing]);
 
-  // Fetch relations on app load when user is authenticated
+  // Listen to relations in REAL TIME when user is authenticated
   useEffect(() => {
-    if (user?.uid && validateUserId(user.uid)) {
-      refreshRelations(user.uid).catch(error => {
-        console.error('Failed to load user relations on mount:', error);
-        // Set empty arrays on error to prevent crashes
-        setFollowing([]);
-        setFollowers([]);
-      });
-    } else {
+    if (!user?.uid || !validateUserId(user.uid)) {
       // Clear relations on logout
       setFollowing([]);
       setFollowers([]);
+      return;
     }
-  }, [user?.uid, refreshRelations]);
+
+    console.log('[UserRelationProvider] Setting up real-time listeners for user:', user.uid);
+
+    // Import global follow service for real-time listeners
+    import('../global/services/follow/follow.service').then((FollowService) => {
+      // Set up real-time listener for following
+      const unsubscribeFollowing = FollowService.listenToFollowingIds(
+        user.uid,
+        (followingIds: string[]) => {
+          console.log('[UserRelationProvider] Following updated:', followingIds.length);
+          setFollowing(followingIds.filter(id => id && id.trim().length > 0));
+        }
+      );
+
+      // Set up real-time listener for followers
+      const unsubscribeFollowers = FollowService.listenToFollowersIds(
+        user.uid,
+        (followerIds: string[]) => {
+          console.log('[UserRelationProvider] Followers updated:', followerIds.length);
+          setFollowers(followerIds.filter(id => id && id.trim().length > 0));
+        }
+      );
+
+      // Cleanup listeners on unmount or user change
+      return () => {
+        console.log('[UserRelationProvider] Cleaning up listeners');
+        unsubscribeFollowing();
+        unsubscribeFollowers();
+      };
+    }).catch(error => {
+      console.error('[UserRelationProvider] Failed to set up listeners:', error);
+      setFollowing([]);
+      setFollowers([]);
+    });
+  }, [user?.uid, setFollowing, setFollowers]);
 
   const value: UserRelationContextType = {
     following,

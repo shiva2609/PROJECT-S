@@ -1,31 +1,16 @@
-/**
- * Follow Button Component
- * 
- * Instagram-style follow button with three states:
- * - Follow (not following)
- * - Following ▼ (following, shows bottom sheet on press)
- * - Follow Back (visited user follows you but you don't follow)
- */
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
   Modal,
   TouchableWithoutFeedback,
+  View,
   Animated,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Fonts } from '../../theme/fonts';
-import { followUser, unfollowUser } from '../../services/follow/followService';
-import { fetchFollowState } from '../../services/users/profileService';
-import { store } from '../../store';
-import { setUserFollowState } from '../../store/slices/userFollowStateSlice';
-import type { FollowState } from '../../store/slices/userFollowStateSlice';
-import { Alert } from 'react-native';
 
 const DESIGN_COLORS = {
   primary: '#FF5C02',
@@ -38,25 +23,23 @@ const DESIGN_COLORS = {
 };
 
 interface FollowButtonProps {
-  currentUserId: string;
-  targetUserId: string;
-  followState: FollowState;
-  onFollowStateChange?: () => void;
+  isFollowing: boolean;
+  isFollowedBack: boolean;
+  isLoading?: boolean;
+  onToggleFollow: () => void;
+  followersCount?: number; // Optional purely for display if needed
 }
 
 export default function FollowButton({
-  currentUserId,
-  targetUserId,
-  followState,
-  onFollowStateChange,
+  isFollowing,
+  isFollowedBack,
+  isLoading = false,
+  onToggleFollow,
 }: FollowButtonProps) {
-  const [isLoading, setIsLoading] = useState(false);
   const [bottomSheetVisible, setBottomSheetVisible] = useState(false);
   const [slideAnim] = useState(new Animated.Value(0));
 
-  const { isFollowing, isFollowedBack, isLoading: stateLoading } = followState;
-
-  // Determine button text and behavior
+  // Determine button configuration based on props ONLY
   const getButtonConfig = () => {
     if (isFollowing) {
       return {
@@ -66,7 +49,7 @@ export default function FollowButton({
         textColor: DESIGN_COLORS.primaryText,
         borderColor: DESIGN_COLORS.border,
       };
-    } else if (isFollowedBack && !isFollowing) {
+    } else if (isFollowedBack) {
       return {
         text: 'Follow Back',
         showDropdown: false,
@@ -87,92 +70,21 @@ export default function FollowButton({
 
   const buttonConfig = getButtonConfig();
 
-  const handleFollow = async () => {
-    if (isLoading || stateLoading) return;
+  const handleMainPress = () => {
+    if (isLoading) return;
 
-    setIsLoading(true);
-    
-    // Optimistic update
-    const optimisticState: FollowState = {
-      ...followState,
-      isFollowing: true,
-      isLoading: true,
-      followerCount: followState.followerCount + 1,
-    };
-    store.dispatch(setUserFollowState({ userId: targetUserId, followState: optimisticState }));
-
-    try {
-      await followUser(currentUserId, targetUserId);
-      
-      // Refresh follow state
-      await fetchFollowState(currentUserId, targetUserId);
-      
-      if (onFollowStateChange) {
-        onFollowStateChange();
-      }
-    } catch (error: any) {
-      console.error('Error following user:', error);
-      
-      // Rollback optimistic update
-      const rollbackState: FollowState = {
-        ...followState,
-        isFollowing: false,
-        isLoading: false,
-      };
-      store.dispatch(setUserFollowState({ userId: targetUserId, followState: rollbackState }));
-      
-      Alert.alert('Error', 'Failed to follow user. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleFollowingPress = () => {
-    if (buttonConfig.showDropdown) {
+    if (isFollowing) {
+      // If following, open dropdown to confirm unfollow
       showBottomSheet();
+    } else {
+      // If not following (or following back), just follow immediately
+      onToggleFollow();
     }
   };
 
-  const handleUnfollow = async () => {
+  const handleUnfollowConfirm = () => {
     hideBottomSheet();
-    
-    if (isLoading || stateLoading) return;
-
-    setIsLoading(true);
-    
-    // Optimistic update
-    const optimisticState: FollowState = {
-      ...followState,
-      isFollowing: false,
-      isLoading: true,
-      followerCount: Math.max(0, followState.followerCount - 1),
-    };
-    store.dispatch(setUserFollowState({ userId: targetUserId, followState: optimisticState }));
-
-    try {
-      await unfollowUser(currentUserId, targetUserId);
-      
-      // Refresh follow state
-      await fetchFollowState(currentUserId, targetUserId);
-      
-      if (onFollowStateChange) {
-        onFollowStateChange();
-      }
-    } catch (error: any) {
-      console.error('Error unfollowing user:', error);
-      
-      // Rollback optimistic update
-      const rollbackState: FollowState = {
-        ...followState,
-        isFollowing: true,
-        isLoading: false,
-      };
-      store.dispatch(setUserFollowState({ userId: targetUserId, followState: rollbackState }));
-      
-      Alert.alert('Error', 'Failed to unfollow user. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
+    onToggleFollow();
   };
 
   const showBottomSheet = () => {
@@ -199,7 +111,7 @@ export default function FollowButton({
     outputRange: [300, 0],
   });
 
-  if (isLoading || stateLoading) {
+  if (isLoading) {
     return (
       <TouchableOpacity
         style={[styles.button, styles.loadingButton]}
@@ -221,7 +133,7 @@ export default function FollowButton({
             borderWidth: 1,
           },
         ]}
-        onPress={isFollowing ? handleFollowingPress : handleFollow}
+        onPress={handleMainPress}
         activeOpacity={0.8}
       >
         <Text style={[styles.buttonText, { color: buttonConfig.textColor }]}>
@@ -251,15 +163,15 @@ export default function FollowButton({
                 ]}
               >
                 <View style={styles.bottomSheetHandle} />
-                
+
                 <TouchableOpacity
                   style={styles.bottomSheetItem}
-                  onPress={handleUnfollow}
+                  onPress={handleUnfollowConfirm}
                   activeOpacity={0.7}
                 >
                   <Text style={styles.bottomSheetItemTextDestructive}>Unfollow</Text>
                 </TouchableOpacity>
-                
+
                 <TouchableOpacity
                   style={styles.bottomSheetItem}
                   onPress={hideBottomSheet}
@@ -278,19 +190,20 @@ export default function FollowButton({
 
 const styles = StyleSheet.create({
   button: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 24,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    minWidth: 100,
-    height: 28,
+    minWidth: 120,
+    height: 36,
+    // shadow
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   loadingButton: {
     backgroundColor: DESIGN_COLORS.cardBackground,
@@ -298,12 +211,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   buttonText: {
-    fontSize: 12,
+    fontSize: 14,
     fontFamily: Fonts.semibold,
     letterSpacing: 0.3,
   },
   dropdownIcon: {
-    marginLeft: 4,
+    marginLeft: 6,
   },
   bottomSheetOverlay: {
     flex: 1,
@@ -344,4 +257,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

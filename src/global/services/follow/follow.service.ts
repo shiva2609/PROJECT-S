@@ -34,45 +34,16 @@ export async function getFollowersIds(targetUid: string): Promise<string[]> {
     // Try subcollection first: users/{userId}/followers
     const followersRef = collection(db, 'users', targetUid, 'followers');
     const snapshot = await getDocs(followersRef);
-    
+
     const ids = snapshot.docs.map((docSnap) => {
       const data = docSnap.data();
       return data.uid || docSnap.id;
     });
 
-    // If no followers in subcollection, try the follows collection as fallback
-    if (ids.length === 0) {
-      console.log('[getFollowersIds] No followers in subcollection, trying follows collection...');
-      const followsRef = collection(db, 'follows');
-      const followsQuery = query(followsRef, where('followingId', '==', targetUid));
-      const followsSnapshot = await getDocs(followsQuery);
-      
-      const followIds = followsSnapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
-        return data.followerId;
-      }).filter((id): id is string => !!id);
-
-      console.log(`[getFollowersIds] Found ${followIds.length} followers in follows collection`);
-      return followIds;
-    }
-
     return ids;
   } catch (error: any) {
     console.error('[getFollowersIds] Error:', error);
-    // Fallback to follows collection on error
-    try {
-      const followsRef = collection(db, 'follows');
-      const followsQuery = query(followsRef, where('followingId', '==', targetUid));
-      const followsSnapshot = await getDocs(followsQuery);
-      
-      return followsSnapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
-        return data.followerId;
-      }).filter((id): id is string => !!id);
-    } catch (fallbackError: any) {
-      console.error('[getFollowersIds] Fallback error:', fallbackError);
-      return [];
-    }
+    return [];
   }
 }
 
@@ -88,45 +59,16 @@ export async function getFollowingIds(targetUid: string): Promise<string[]> {
     // Try subcollection first: users/{userId}/following
     const followingRef = collection(db, 'users', targetUid, 'following');
     const snapshot = await getDocs(followingRef);
-    
+
     const ids = snapshot.docs.map((docSnap) => {
       const data = docSnap.data();
       return data.uid || docSnap.id;
     });
 
-    // If no following in subcollection, try the follows collection as fallback
-    if (ids.length === 0) {
-      console.log('[getFollowingIds] No following in subcollection, trying follows collection...');
-      const followsRef = collection(db, 'follows');
-      const followsQuery = query(followsRef, where('followerId', '==', targetUid));
-      const followsSnapshot = await getDocs(followsQuery);
-      
-      const followIds = followsSnapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
-        return data.followingId;
-      }).filter((id): id is string => !!id);
-
-      console.log(`[getFollowingIds] Found ${followIds.length} following in follows collection`);
-      return followIds;
-    }
-
     return ids;
   } catch (error: any) {
     console.error('[getFollowingIds] Error:', error);
-    // Fallback to follows collection on error
-    try {
-      const followsRef = collection(db, 'follows');
-      const followsQuery = query(followsRef, where('followerId', '==', targetUid));
-      const followsSnapshot = await getDocs(followsQuery);
-      
-      return followsSnapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
-        return data.followingId;
-      }).filter((id): id is string => !!id);
-    } catch (fallbackError: any) {
-      console.error('[getFollowingIds] Fallback error:', fallbackError);
-      return [];
-    }
+    return [];
   }
 }
 
@@ -142,12 +84,12 @@ export function listenToFollowersIds(
 ): Unsubscribe {
   if (!targetUid) {
     onUpdate([]);
-    return () => {};
+    return () => { };
   }
 
   try {
     const followersRef = collection(db, 'users', targetUid, 'followers');
-    
+
     return onSnapshot(
       followersRef,
       (snapshot) => {
@@ -165,7 +107,7 @@ export function listenToFollowersIds(
   } catch (error: any) {
     console.error('[listenToFollowersIds] Setup error:', error);
     onUpdate([]);
-    return () => {};
+    return () => { };
   }
 }
 
@@ -181,12 +123,12 @@ export function listenToFollowingIds(
 ): Unsubscribe {
   if (!targetUid) {
     onUpdate([]);
-    return () => {};
+    return () => { };
   }
 
   try {
     const followingRef = collection(db, 'users', targetUid, 'following');
-    
+
     return onSnapshot(
       followingRef,
       (snapshot) => {
@@ -204,7 +146,7 @@ export function listenToFollowingIds(
   } catch (error: any) {
     console.error('[listenToFollowingIds] Setup error:', error);
     onUpdate([]);
-    return () => {};
+    return () => { };
   }
 }
 
@@ -241,12 +183,12 @@ export function listenToIsFollowing(
 ): Unsubscribe {
   if (!loggedUid || !targetUid || loggedUid === targetUid) {
     onUpdate(false);
-    return () => {};
+    return () => { };
   }
 
   try {
     const followingRef = doc(db, 'users', loggedUid, 'following', targetUid);
-    
+
     return onSnapshot(
       followingRef,
       (snapshot) => {
@@ -260,7 +202,7 @@ export function listenToIsFollowing(
   } catch (error: any) {
     console.error('[listenToIsFollowing] Setup error:', error);
     onUpdate(false);
-    return () => {};
+    return () => { };
   }
 }
 
@@ -280,7 +222,7 @@ export async function followUser(loggedUid: string, targetUid: string): Promise<
       const sourceFollowingRef = doc(db, 'users', loggedUid, 'following', targetUid);
       const targetFollowersRef = doc(db, 'users', targetUid, 'followers', loggedUid);
 
-      // Check if already following
+      // 1. READ ALL FIRST
       const followingSnap = await transaction.get(sourceFollowingRef);
       if (followingSnap.exists()) {
         return; // Already following, no-op
@@ -300,6 +242,7 @@ export async function followUser(loggedUid: string, targetUid: string): Promise<
       const sourceUserData = sourceUserSnap.data();
       const targetUserData = targetUserSnap.data();
 
+      // 2. WRITE OPERATIONS
       // Create follow documents in subcollections
       transaction.set(sourceFollowingRef, {
         uid: targetUid,
@@ -349,24 +292,24 @@ export async function unfollowUser(loggedUid: string, targetUid: string): Promis
     await runTransaction(db, async (transaction) => {
       const sourceFollowingRef = doc(db, 'users', loggedUid, 'following', targetUid);
       const targetFollowersRef = doc(db, 'users', targetUid, 'followers', loggedUid);
+      const sourceUserRef = doc(db, 'users', loggedUid);
+      const targetUserRef = doc(db, 'users', targetUid);
 
-      // Check if following
+      // 1. READ ALL FIRST (Strict Requirement for Firestore)
       const followingSnap = await transaction.get(sourceFollowingRef);
+      const sourceUserSnap = await transaction.get(sourceUserRef);
+      const targetUserSnap = await transaction.get(targetUserRef);
+
       if (!followingSnap.exists()) {
         return; // Not following, no-op
       }
 
+      // 2. WRITE OPERATIONS
       // Delete follow documents from subcollections
       transaction.delete(sourceFollowingRef);
       transaction.delete(targetFollowersRef);
 
-      // Update counts
-      const sourceUserRef = doc(db, 'users', loggedUid);
-      const targetUserRef = doc(db, 'users', targetUid);
-
-      const sourceUserSnap = await transaction.get(sourceUserRef);
-      const targetUserSnap = await transaction.get(targetUserRef);
-
+      // Update counts (using manual calculation from read data)
       if (sourceUserSnap.exists()) {
         const currentFollowing = sourceUserSnap.data().followingCount || 0;
         transaction.update(sourceUserRef, {
@@ -386,4 +329,3 @@ export async function unfollowUser(loggedUid: string, targetUid: string): Promis
     throw error;
   }
 }
-

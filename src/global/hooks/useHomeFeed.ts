@@ -47,24 +47,46 @@ export function useHomeFeed(
   const [lastDoc, setLastDoc] = useState<any>(null);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
 
-  // Fetch following IDs
+  // Listen to following IDs in REAL TIME
   useEffect(() => {
-    const fetchFollowing = async () => {
-      if (!loggedUid) {
-        setFollowingIds([]);
-        return;
-      }
+    if (!loggedUid) {
+      setFollowingIds([]);
+      return;
+    }
 
-      try {
-        const ids = await FollowService.getFollowingIds(loggedUid);
-        setFollowingIds(ids);
-      } catch (err: any) {
-        console.error('[useHomeFeed] Error fetching following IDs:', err);
-        setFollowingIds([]);
+    console.log('[useHomeFeed] Setting up real-time listener for followingIds');
+
+    // Set up real-time listener for following IDs
+    const unsubscribe = FollowService.listenToFollowingIds(
+      loggedUid,
+      (ids: string[]) => {
+        console.log('[useHomeFeed] followingIds updated in real-time:', {
+          count: ids.length,
+          ids: ids.slice(0, 5), // Log first 5 for debugging
+        });
+
+        // Only update if IDs actually changed (prevent unnecessary re-renders)
+        setFollowingIds((prevIds) => {
+          // Quick check: if lengths differ, definitely changed
+          if (prevIds.length !== ids.length) {
+            return ids;
+          }
+
+          // Deep check: compare sorted arrays
+          const prevSorted = [...prevIds].sort();
+          const newSorted = [...ids].sort();
+          const hasChanged = prevSorted.some((id, index) => id !== newSorted[index]);
+
+          return hasChanged ? ids : prevIds;
+        });
       }
+    );
+
+    // Cleanup listener on unmount or when loggedUid changes
+    return () => {
+      console.log('[useHomeFeed] Cleaning up followingIds listener');
+      unsubscribe();
     };
-
-    fetchFollowing();
   }, [loggedUid]);
 
   // Determine feed type (no fallback - respect the requested type)
@@ -182,12 +204,12 @@ export function useHomeFeed(
   // Initial fetch and refresh when followingIds change
   useEffect(() => {
     if (loggedUid) {
-      // Wait for followingIds to be fetched before fetching posts
       // Reset lastDoc to start fresh when followingIds change
+      // This ensures feed reclassification happens with updated followingIds
       setLastDoc(null);
       fetchPosts(true);
     }
-  }, [loggedUid, actualFeedType, followingIds.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loggedUid, actualFeedType, followingIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Refresh function
   const refresh = useCallback(async () => {

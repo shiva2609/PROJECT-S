@@ -1,14 +1,15 @@
 /**
  * Unified Follow Hook
  * 
- * Integrates with UserRelationProvider for global state updates
- * Handles optimistic updates and feed refresh
+ * Uses GLOBAL follow service for real-time subcollection updates
+ * Integrates with UserRelationProvider for optimistic UI updates
+ * Ensures follow writes match feed listener reads
  */
 
 import { useCallback, useRef } from 'react';
 import { useAuth } from '../providers/AuthProvider';
 import { useUserRelations } from '../providers/UserRelationProvider';
-import * as UserRelationService from '../services/users/userRelationService';
+import * as FollowService from '../global/services/follow/follow.service';
 
 interface UseUnifiedFollowReturn {
   followUser: (targetUserId: string) => Promise<void>;
@@ -50,8 +51,9 @@ export function useUnifiedFollow(): UseUnifiedFollowReturn {
     processingRef.current.add(targetUserId);
 
     try {
-      await UserRelationService.followUser(user.uid, targetUserId);
-      
+      // Use global follow service - writes to users/{uid}/following subcollection
+      await FollowService.followUser(user.uid, targetUserId);
+
       // Refresh relations to sync with backend
       await refreshRelations(user.uid);
     } catch (error: any) {
@@ -78,8 +80,9 @@ export function useUnifiedFollow(): UseUnifiedFollowReturn {
     processingRef.current.add(targetUserId);
 
     try {
-      await UserRelationService.unfollowUser(user.uid, targetUserId);
-      
+      // Use global follow service - writes to users/{uid}/following subcollection
+      await FollowService.unfollowUser(user.uid, targetUserId);
+
       // Refresh relations to sync with backend
       await refreshRelations(user.uid);
     } catch (error: any) {

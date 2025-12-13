@@ -5,7 +5,7 @@
  * Used by all profile screens, followers/following lists, and post grids
  */
 
-import { doc, onSnapshot, getDoc, getDocs, collection, query, where, orderBy, Unsubscribe } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, getDocs, collection, query, where, orderBy, Unsubscribe, getCountFromServer } from 'firebase/firestore';
 import { db } from '../../../services/auth/authService';
 import { normalizeUser } from '../../../utils/normalize/normalizeUser';
 import { normalizePost } from '../../../utils/normalize/normalizePost';
@@ -56,10 +56,10 @@ export async function getUserPublicInfo(userId: string): Promise<UserPublicInfo 
     }
 
     const raw = { id: snapshot.id, ...snapshot.data() };
-    
+
     // Check raw data directly for username fields (before normalization)
-    const rawUsername = raw.username || raw.handle || raw.userTag?.replace('@', '') || '';
-    
+    const rawUsername = (raw as any).username || (raw as any).handle || (raw as any).userTag?.replace('@', '') || '';
+
     const normalized = normalizeUser(raw);
 
     if (!normalized) {
@@ -68,7 +68,7 @@ export async function getUserPublicInfo(userId: string): Promise<UserPublicInfo 
 
     // Try to get username from multiple possible sources
     let username = rawUsername || normalized.username || '';
-    
+
     // If still empty, try to extract from displayName or use a portion of user ID
     if (!username || username.trim() === '') {
       const displayName = normalized.name || normalized.fullName || normalized.displayName || '';
@@ -85,17 +85,29 @@ export async function getUserPublicInfo(userId: string): Promise<UserPublicInfo 
         username = (normalized.id || userId || '').substring(0, 8);
       }
     }
-    
+
     console.log('[getUserPublicInfo] Username resolved:', { userId, rawUsername, normalizedUsername: normalized.username, finalUsername: username });
+
+    // Prepare displayName first (needed for username fallback)
+    const displayName = normalized.name || normalized.fullName || normalized.displayName || '';
+
+    // CRITICAL: Ensure username is NEVER empty - use displayName as fallback
+    // This prevents "Unknown" from appearing in UI components
+    let finalUsername = username;
+    if (!finalUsername || finalUsername.trim() === '') {
+      finalUsername = displayName || (normalized.id || userId || '').substring(0, 8);
+    }
 
     const userInfo: UserPublicInfo = {
       uid: normalized.id || userId,
-      username: username,
-      displayName: normalized.name || normalized.fullName || normalized.displayName || normalized.username || username || 'User',
+      username: finalUsername, // ✅ NEVER empty - always has fallback
+      displayName: displayName || finalUsername || 'User', // ✅ Falls back to username if needed
       photoURL: normalized.photoUrl || normalized.profilePic || normalized.profilePhotoUrl || '',
       bio: normalized.bio || '',
       verified: normalized.verified || false,
       email: normalized.email,
+      accountType: normalized.accountType || (raw as any).accountType || (raw as any).role,
+      aboutMe: (normalized as any).aboutMe || (raw as any).aboutMe || (raw as any).about || '',
     };
 
     // Update cache
@@ -187,7 +199,7 @@ export function listenToUserPublicInfo(
 ): Unsubscribe {
   if (!userId) {
     callback(null);
-    return () => {};
+    return () => { };
   }
 
   const userRef = doc(db, 'users', userId);
@@ -210,14 +222,25 @@ export function listenToUserPublicInfo(
             return;
           }
 
+          // Prepare displayName first (needed for username fallback)
+          const displayName = normalized.name || normalized.fullName || normalized.displayName || '';
+
+          // CRITICAL: Ensure username is NEVER empty - use displayName as fallback
+          let finalUsername = normalized.username || '';
+          if (!finalUsername || finalUsername.trim() === '') {
+            finalUsername = displayName || (normalized.id || userId || '').substring(0, 8);
+          }
+
           const userInfo: UserPublicInfo = {
             uid: normalized.id || userId,
-            username: normalized.username || '',
-            displayName: normalized.name || normalized.fullName || normalized.displayName || normalized.username || 'User',
+            username: finalUsername, // ✅ NEVER empty - always has fallback
+            displayName: displayName || finalUsername || 'User', // ✅ Falls back to username if needed
             photoURL: normalized.photoUrl || normalized.profilePic || normalized.profilePhotoUrl || '',
             bio: normalized.bio || '',
             verified: normalized.verified || false,
             email: normalized.email,
+            accountType: normalized.accountType || (raw as any).accountType || (raw as any).role,
+            aboutMe: (normalized as any).aboutMe || (raw as any).aboutMe || (raw as any).about || '',
           };
 
           callback(userInfo);
@@ -234,7 +257,7 @@ export function listenToUserPublicInfo(
   } catch (setupErr: any) {
     console.error('[listenToUserPublicInfo] Setup error:', setupErr);
     callback(null);
-    return () => {};
+    return () => { };
   }
 }
 
@@ -304,11 +327,11 @@ export function listenToUserPosts(
 ): Unsubscribe {
   if (!userId) {
     callback([]);
-    return () => {};
+    return () => { };
   }
 
   const postsCol = collection(db, 'posts');
-  
+
   let q;
   try {
     q = query(
@@ -395,9 +418,11 @@ export function listenToUserPosts(
   } catch (setupErr: any) {
     console.error('[listenToUserPosts] Setup error:', setupErr);
     callback([]);
-    return () => {};
+    return () => { };
   }
 }
+
+
 
 /**
  * Get user counts (one-time fetch)
@@ -410,22 +435,19 @@ export async function getUserCounts(userId: string): Promise<UserCounts> {
   }
 
   try {
-    const userRef = doc(db, 'users', userId);
-    const snapshot = await getDoc(userRef);
+    // Fetch actual counts from subcollections directly
+    const followersRef = collection(db, 'users', userId, 'followers');
+    const followingRef = collection(db, 'users', userId, 'following');
 
-    if (!snapshot.exists()) {
-      return { followers: 0, following: 0, posts: 0 };
-    }
-
-    const data = snapshot.data();
-    const normalized = normalizeUser({ id: snapshot.id, ...data });
-
-    // Get posts count
-    const posts = await getUserPosts(userId);
+    const [followersSnap, followingSnap, posts] = await Promise.all([
+      getCountFromServer(followersRef),
+      getCountFromServer(followingRef),
+      getUserPosts(userId)
+    ]);
 
     return {
-      followers: normalized?.followersCount || data?.followersCount || 0,
-      following: normalized?.followingCount || data?.followingCount || 0,
+      followers: followersSnap.data().count,
+      following: followingSnap.data().count,
       posts: posts.length,
     };
   } catch (error: any) {
@@ -447,7 +469,7 @@ export function listenToUserCounts(
 ): Unsubscribe {
   if (!userId) {
     callback({ followers: 0, following: 0, posts: 0 });
-    return () => {};
+    return () => { };
   }
 
   let followersCount = 0;

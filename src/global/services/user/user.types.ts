@@ -12,6 +12,8 @@ export interface UserPublicInfo {
   bio?: string;
   verified?: boolean;
   email?: string;
+  accountType?: string;
+  aboutMe?: string;
 }
 
 export interface UserCounts {

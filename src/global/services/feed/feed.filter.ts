@@ -51,7 +51,7 @@ export function classifyPostsForFeeds({
 }: ClassifyPostsInput): ClassifyPostsOutput {
   // Convert followingIds to Set for O(1) lookup
   const followingSet = new Set(followingIds);
-  
+
   const followingFeedPosts: PostWithAuthor[] = [];
   const forYouFeedPosts: PostWithAuthor[] = [];
 
@@ -76,13 +76,15 @@ export function classifyPostsForFeeds({
     }
   }
 
-  // Debug logging (temporary, for validation)
+  // Debug logging (for validation)
   console.log('[feed.filter] Classification results:', {
     totalPostsFetched: posts.length,
     followingIdsCount: followingIds.length,
     followingFeedCount: followingFeedPosts.length,
     forYouFeedCount: forYouFeedPosts.length,
     loggedUserId,
+    sampleFollowingAuthors: followingFeedPosts.slice(0, 3).map(p => p.authorId),
+    sampleForYouAuthors: forYouFeedPosts.slice(0, 3).map(p => p.authorId),
   });
 
   return {

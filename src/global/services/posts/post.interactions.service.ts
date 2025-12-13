@@ -4,8 +4,9 @@
  * SINGLE SOURCE OF TRUTH for all post interactions (likes, comments, saves, reports).
  * Uses Firestore subcollections for persistent, real-time state.
  * 
- * Data Model:
- * - posts/{postId}/likes/{userId} → { userId, createdAt }
+ * data Model:
+ * - posts/{postId}/likes/{userId} → { userId, createdAt } (Primary)
+ * - likes/{userId}_{postId} → { userId, postId, createdAt } (Legacy Sync)
  * - posts/{postId}/comments/{commentId} → { userId, username, text, createdAt }
  * - posts/{postId}/reports/{reportId} → { reporterId, reason, createdAt, status: 'pending' }
  * - users/{userId}/savedPosts/{postId} → { postId, savedAt }
@@ -24,13 +25,17 @@ import {
   serverTimestamp,
   Unsubscribe,
   Timestamp,
+  runTransaction,
+  writeBatch,
+  increment
 } from 'firebase/firestore';
 import { db } from '../../../services/auth/authService';
-import { getUserPublicInfo, getUsersPublicInfo } from '../user/user.service';
+import { getUsersPublicInfo } from '../user/user.service';
 
 /**
  * Toggle like on a post
  * Creates or deletes posts/{postId}/likes/{userId}
+ * AND syncs with legacy root 'likes' collection for backward compatibility
  */
 export async function toggleLike(postId: string, userId: string): Promise<void> {
   if (!postId || !userId) {
@@ -38,17 +43,48 @@ export async function toggleLike(postId: string, userId: string): Promise<void> 
   }
 
   const likeRef = doc(db, 'posts', postId, 'likes', userId);
-  const likeSnap = await getDoc(likeRef);
+  const legacyLikeRef = doc(db, 'likes', `${userId}_${postId}`);
+  const postRef = doc(db, 'posts', postId);
 
-  if (likeSnap.exists()) {
-    // Unlike: delete the document
-    await deleteDoc(likeRef);
-  } else {
-    // Like: create the document
-    await setDoc(likeRef, {
-      userId,
-      createdAt: serverTimestamp(),
+  try {
+    await runTransaction(db, async (transaction) => {
+      const likeSnap = await transaction.get(likeRef);
+      const exists = likeSnap.exists();
+
+      if (exists) {
+        // Unlike: delete the document and legacy doc
+        transaction.delete(likeRef);
+        transaction.delete(legacyLikeRef);
+
+        // Decrement like count
+        transaction.update(postRef, {
+          likeCount: increment(-1)
+        });
+
+      } else {
+        // Like: create the document and legacy doc
+        const timestamp = serverTimestamp();
+
+        transaction.set(likeRef, {
+          userId,
+          createdAt: timestamp,
+        });
+
+        transaction.set(legacyLikeRef, {
+          userId,
+          postId,
+          createdAt: timestamp,
+        });
+
+        // Increment like count
+        transaction.update(postRef, {
+          likeCount: increment(1)
+        });
+      }
     });
+  } catch (error) {
+    console.error('[toggleLike] Transaction failed:', error);
+    throw error;
   }
 }
 
@@ -63,7 +99,7 @@ export function listenToPostLikeState(
 ): Unsubscribe {
   if (!postId || !userId) {
     callback(false);
-    return () => {};
+    return () => { };
   }
 
   const likeRef = doc(db, 'posts', postId, 'likes', userId);
@@ -90,15 +126,21 @@ export function listenToPostLikeCount(
 ): Unsubscribe {
   if (!postId) {
     callback(0);
-    return () => {};
+    return () => { };
   }
 
-  const likesRef = collection(db, 'posts', postId, 'likes');
+  // Listen to the post document itself for accurate likeCount
+  const postRef = doc(db, 'posts', postId);
 
   return onSnapshot(
-    likesRef,
+    postRef,
     (snapshot) => {
-      callback(snapshot.size);
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.likeCount || 0);
+      } else {
+        callback(0);
+      }
     },
     (error) => {
       console.error('[listenToPostLikeCount] Error:', error);
@@ -123,15 +165,27 @@ export async function addComment(
   }
 
   const commentsRef = collection(db, 'posts', postId, 'comments');
+  const postRef = doc(db, 'posts', postId);
+
+  // Create ref beforehand to get ID
   const commentRef = doc(commentsRef);
 
-  await setDoc(commentRef, {
+  const batch = writeBatch(db);
+
+  batch.set(commentRef, {
     userId,
     username,
     photoURL: photoURL || null,
     text: text.trim(),
     createdAt: serverTimestamp(),
   });
+
+  // Atomic increment of comment count
+  batch.update(postRef, {
+    commentCount: increment(1)
+  });
+
+  await batch.commit();
 
   return commentRef.id;
 }
@@ -154,11 +208,11 @@ export function listenToPostComments(
 ): Unsubscribe {
   if (!postId) {
     callback([]);
-    return () => {};
+    return () => { };
   }
 
   const commentsRef = collection(db, 'posts', postId, 'comments');
-  const q = query(commentsRef, orderBy('createdAt', 'asc'));
+  const q = query(commentsRef, orderBy('createdAt', 'desc'));
 
   return onSnapshot(
     q,
@@ -188,7 +242,7 @@ export function listenToPostComments(
 
       // Batch fetch user profiles for comments missing data
       const userIdsToFetch = [...new Set(needsEnrichment.map((c) => c.userId).filter(Boolean))];
-      
+
       try {
         const userProfiles = await getUsersPublicInfo(userIdsToFetch);
         const userMap = new Map(userProfiles.map((u) => [u.uid, u]));
@@ -243,18 +297,28 @@ export async function toggleSavePost(postId: string, userId: string): Promise<vo
   }
 
   const savedPostRef = doc(db, 'users', userId, 'savedPosts', postId);
+  const postRef = doc(db, 'posts', postId);
+
   const savedPostSnap = await getDoc(savedPostRef);
+
+  const batch = writeBatch(db);
 
   if (savedPostSnap.exists()) {
     // Unsave: delete the document
-    await deleteDoc(savedPostRef);
+    batch.delete(savedPostRef);
+    // Optional: decrement savedCount on post if tracked
+    batch.update(postRef, { savedCount: increment(-1) });
   } else {
     // Save: create the document
-    await setDoc(savedPostRef, {
+    batch.set(savedPostRef, {
       postId,
       savedAt: serverTimestamp(),
     });
+    // Optional: increment savedCount on post if tracked
+    batch.update(postRef, { savedCount: increment(1) });
   }
+
+  await batch.commit();
 }
 
 /**
@@ -268,7 +332,7 @@ export function listenToSavedState(
 ): Unsubscribe {
   if (!postId || !userId) {
     callback(false);
-    return () => {};
+    return () => { };
   }
 
   const savedPostRef = doc(db, 'users', userId, 'savedPosts', postId);
@@ -347,7 +411,7 @@ export function listenToSavedPosts(
 ): Unsubscribe {
   if (!userId) {
     callback([]);
-    return () => {};
+    return () => { };
   }
 
   const savedPostsRef = collection(db, 'users', userId, 'savedPosts');
@@ -364,4 +428,3 @@ export function listenToSavedPosts(
     }
   );
 }
-
