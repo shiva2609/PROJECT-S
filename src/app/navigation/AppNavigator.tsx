@@ -23,7 +23,7 @@ import SignupScreen from '../../screens/Auth/SignupScreen';
 import ForgotPasswordScreen from '../../screens/Auth/ForgotPasswordScreen';
 import ChangePasswordScreen from '../../screens/Auth/ChangePasswordScreen';
 import PasswordChangedScreen from '../../screens/Auth/PasswordChangedScreen';
-import TravelPlanSelectScreen from '../../screens/Travel/TravelPlanSelectScreen';
+import TravelPlanSelectScreen from '../../screens/travel/TravelPlanSelectScreen';
 import HomeScreen from '../../screens/Home/index';
 import ExploreScreen from '../../screens/Explore/index';
 import PhotoSelectScreen from '../../screens/Create/PhotoSelectScreen';
