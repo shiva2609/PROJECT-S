@@ -18,7 +18,8 @@ import { Colors } from '../../theme/colors';
 import { Post } from '../../services/api/firebaseService';
 import { getPostDropdownOptions, DropdownOption } from '../../utils/postDropdownHelpers';
 import ConfirmationModal from '../common/ConfirmationModal';
-import { deletePost, reportPost, blockUser, hidePost, muteUser } from '../../services/api/firebaseService';
+import { deletePost, blockUser, hidePost, muteUser } from '../../services/api/firebaseService';
+import * as PostInteractions from '../../global/services/posts/post.interactions.service';
 import { useFollow } from '../../hooks/useFollow';
 import { showSuccessToast } from '../../utils/toast';
 
@@ -214,7 +215,8 @@ export default function PostDropdown({
     setConfirmationModal(null);
     
     try {
-      await reportPost(currentUserId, postUserId, post.id);
+      // Use global service with reason
+      await PostInteractions.reportPost(post.id, currentUserId, 'Inappropriate content');
       console.log('✅ Post reported successfully');
       showSuccessToast('Reported to admin');
     } catch (error: any) {

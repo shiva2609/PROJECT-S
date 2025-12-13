@@ -15,8 +15,11 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../../theme/colors';
 import { Fonts } from '../../../theme/fonts';
 import { useAuth } from '../../../providers/AuthProvider';
-import { useCommentsManager, Comment } from '../../../hooks/useCommentsManager';
 import CommentCard from '../../../components/post/CommentCard';
+import * as PostInteractions from '../../../global/services/posts/post.interactions.service';
+import { getUserPublicInfo } from '../../../global/services/user/user.service';
+import { Timestamp } from 'firebase/firestore';
+import { formatTimestamp } from '../../../utils/postHelpers';
 
 /**
  * Comments/Post Details Screen
@@ -24,31 +27,38 @@ import CommentCard from '../../../components/post/CommentCard';
  * Displays comments for a post using global hooks.
  * Zero Firestore code - all logic handled by useCommentsManager.
  */
+interface Comment {
+  id: string;
+  userId: string;
+  username: string;
+  photoURL: string | null;
+  text: string;
+  createdAt: Timestamp | null;
+}
+
 export default function CommentsScreen({ navigation, route }: any) {
   const { postId } = route.params || {};
   const { user } = useAuth();
-  const { comments, fetchComments, addComment, deleteComment, getCommentCount } = useCommentsManager();
-  
+  const [comments, setComments] = useState<Comment[]>([]);
   const [commentText, setCommentText] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
-  // Fetch comments on mount
+  // Listen to comments using global service
   useEffect(() => {
-    if (postId) {
-      fetchComments(postId)
-        .then(() => setLoading(false))
-        .catch((error) => {
-          console.error('Error fetching comments:', error);
-          setLoading(false);
-        });
-    } else {
+    if (!postId) {
       setLoading(false);
+      return;
     }
-  }, [postId, fetchComments]);
 
-  const postComments = comments[postId] || [];
+    const unsubscribe = PostInteractions.listenToPostComments(postId, (commentsData) => {
+      setComments(commentsData);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [postId]);
 
   const handleSubmit = useCallback(async () => {
     if (!user) {
@@ -62,7 +72,11 @@ export default function CommentsScreen({ navigation, route }: any) {
 
     setSubmitting(true);
     try {
-      await addComment(postId, text);
+      // Fetch current user profile to get accurate username
+      const userProfile = await getUserPublicInfo(user.uid);
+      const username = userProfile?.username || user.displayName || user.email?.split('@')[0] || 'User';
+      const photoURL = userProfile?.photoURL || user.photoURL || null;
+      await PostInteractions.addComment(postId, user.uid, username, photoURL, text);
       setCommentText('');
       // Scroll to bottom after adding comment
       setTimeout(() => {
@@ -73,31 +87,26 @@ export default function CommentsScreen({ navigation, route }: any) {
     } finally {
       setSubmitting(false);
     }
-  }, [user, commentText, postId, addComment]);
-
-  const handleDelete = useCallback(async (commentId: string) => {
-    if (!postId) return;
-    try {
-      await deleteComment(postId, commentId);
-    } catch (error) {
-      console.error('Error deleting comment:', error);
-    }
-  }, [postId, deleteComment]);
+  }, [user, commentText, postId]);
 
   const renderComment = useCallback(({ item }: { item: Comment }) => {
+    const timestampValue = item.createdAt 
+      ? (item.createdAt.toMillis?.() || (item.createdAt as any).seconds * 1000 || Date.now())
+      : Date.now();
+    
     return (
       <CommentCard
-        username={item.username}
-        avatarUri={item.avatarUri}
+        username={item.username || 'Unknown'}
+        avatarUri={item.photoURL || undefined}
         text={item.text}
-        timestamp={item.timestamp}
+        timestamp={timestampValue}
         onPressUser={() => {
           navigation?.push('ProfileScreen', { userId: item.userId });
         }}
         onLike={() => {
           // Like comment functionality can be added later
         }}
-        isLiked={item.isLiked}
+        isLiked={false}
       />
     );
   }, [navigation]);
@@ -136,7 +145,7 @@ export default function CommentsScreen({ navigation, route }: any) {
       >
         <FlatList
           ref={flatListRef}
-          data={postComments}
+          data={comments}
           renderItem={renderComment}
           keyExtractor={(item) => item.id}
           windowSize={10}

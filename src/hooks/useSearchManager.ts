@@ -75,7 +75,12 @@ export function useSearchManager(): UseSearchManagerReturn {
     setLoading(true);
     try {
       const results = await PostsAPI.searchHashtags(query);
-      setHashtagResults(results);
+      // Transform API results to match HashtagResult interface
+      const transformedResults: HashtagResult[] = results.map((item) => ({
+        tag: item.tag,
+        postCount: item.count,
+      }));
+      setHashtagResults(transformedResults);
     } catch (error) {
       console.error('Error searching hashtags:', error);
       setHashtagResults([]);

@@ -29,6 +29,8 @@ import FollowButton from '../../components/profile/FollowButton';
 import UserAvatar from '../../components/user/UserAvatar';
 import { useUser } from '../../global/hooks/useUser';
 import { useFollowStatus } from '../../global/hooks/useFollowStatus';
+import { listenToSavedPosts, getSavedPosts } from '../../global/services/posts/post.interactions.service';
+import { getPostsByIds } from '../../global/services/posts/post.service';
 
 export default function ProfileScreen({ navigation, route }: any) {
   const { user: currentUser } = useAuth();
@@ -47,6 +49,48 @@ export default function ProfileScreen({ navigation, route }: any) {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
   const [savedPosts, setSavedPosts] = useState<Post[]>([]);
+  const [savedPostIds, setSavedPostIds] = useState<string[]>([]);
+  
+  // Fetch saved posts using global service
+  useEffect(() => {
+    if (!isOwnProfile || !currentUserId || activeTab !== 'saved') {
+      return;
+    }
+
+    const unsubscribe = listenToSavedPosts(currentUserId, async (postIds) => {
+      setSavedPostIds(postIds);
+      
+      // Fetch full post data for saved post IDs
+      if (postIds.length > 0) {
+        try {
+          // Fetch posts by their IDs using global service
+          const fetchedPosts = await getPostsByIds(postIds);
+          
+          // Sort by savedAt (most recent first)
+          const savedPostsData = await getSavedPosts(currentUserId);
+          const savedAtMap = new Map(savedPostsData.map(sp => [sp.postId, sp.savedAt]));
+          
+          const sortedPosts = fetchedPosts.sort((a, b) => {
+            const aSavedAt = savedAtMap.get(a.id);
+            const bSavedAt = savedAtMap.get(b.id);
+            if (!aSavedAt || !bSavedAt) return 0;
+            const aTime = aSavedAt.toMillis?.() || (aSavedAt as any).seconds * 1000 || 0;
+            const bTime = bSavedAt.toMillis?.() || (bSavedAt as any).seconds * 1000 || 0;
+            return bTime - aTime; // Most recent first
+          });
+          
+          setSavedPosts(sortedPosts as Post[]);
+        } catch (error: any) {
+          console.error('[ProfileScreen] Error fetching saved posts:', error);
+          setSavedPosts([]);
+        }
+      } else {
+        setSavedPosts([]);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [isOwnProfile, currentUserId, activeTab]);
 
   // Convert user data to User type for compatibility
   const profileUser = user ? {

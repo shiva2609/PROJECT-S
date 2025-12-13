@@ -2,13 +2,14 @@
  * Global useHomeFeed Hook
  * 
  * Centralized hook for home feed (Following and For You tabs)
- * Fetches posts with author information using global services
+ * Uses global feed classification for strict, deterministic feed separation
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import * as PostService from '../services/posts/post.service';
 import * as FollowService from '../services/follow/follow.service';
 import * as UserService from '../services/user/user.service';
+import { classifyPostsForFeeds } from '../services/feed/feed.filter';
 import type { PostWithAuthor } from '../services/posts/post.service';
 
 interface UseHomeFeedOptions {
@@ -66,12 +67,10 @@ export function useHomeFeed(
     fetchFollowing();
   }, [loggedUid]);
 
-  // Determine feed type based on following count
-  const actualFeedType: 'following' | 'foryou' = feedType === 'following' && followingIds.length > 0
-    ? 'following'
-    : 'foryou';
+  // Determine feed type (no fallback - respect the requested type)
+  const actualFeedType: 'following' | 'foryou' = feedType;
 
-  // Fetch posts and enrich with author data
+  // Fetch posts and enrich with author data using global classification
   const fetchPosts = useCallback(async (isRefresh: boolean = false) => {
     if (!loggedUid) {
       setFeed([]);
@@ -87,27 +86,50 @@ export function useHomeFeed(
       }
       setError(null);
 
-      let result: { posts: PostWithAuthor[]; lastDoc?: any; hasMore: boolean };
+      // STEP 1: Fetch candidate posts ONCE (larger batch for classification)
+      const candidateLimit = 80; // Fetch more for classification
+      const candidateResult = await PostService.getCandidatePostsForClassification({
+        limit: candidateLimit,
+        cursor: isRefresh ? undefined : lastDoc,
+      });
 
-      if (actualFeedType === 'following' && followingIds.length > 0) {
-        // Following feed: posts from followed users
-        result = await PostService.getPostsByUserIds(
-          followingIds,
-          { limit, lastDoc: isRefresh ? undefined : lastDoc }
-        );
+      const candidatePosts = candidateResult.posts || [];
+
+      // STEP 2: Classify posts using global filter
+      const { followingFeedPosts, forYouFeedPosts } = classifyPostsForFeeds({
+        posts: candidatePosts,
+        followingIds,
+        loggedUserId: loggedUid,
+      });
+
+      // STEP 3: Apply feed-specific rules
+      let selectedPosts: PostWithAuthor[] = [];
+      let hasMoreResult = false;
+      let lastDocResult: any = null;
+
+      if (actualFeedType === 'following') {
+        // FOLLOWING FEED RULES:
+        // - Use followingFeedPosts ONLY
+        // - Sort by createdAt desc (already sorted from query)
+        // - Slice to MAX 15 posts
+        // - NO infinite scroll (hasMore = false)
+        selectedPosts = followingFeedPosts.slice(0, 15);
+        hasMoreResult = false; // Following feed doesn't support pagination
+        lastDocResult = null;
       } else {
-        // For You feed: suggested posts (exclude followed users and self)
-        const excludeIds = [...followingIds, loggedUid];
-        result = await PostService.getSuggestedPosts({
-          limit,
-          excludeUserIds: excludeIds,
-          lastDoc: isRefresh ? undefined : lastDoc,
-        });
+        // FOR YOU FEED RULES:
+        // - Use forYouFeedPosts ONLY
+        // - Sort by createdAt desc (already sorted from query)
+        // - Infinite scroll allowed
+        // - Pagination cursor applies
+        selectedPosts = forYouFeedPosts;
+        hasMoreResult = candidateResult.nextCursor !== null;
+        lastDocResult = candidateResult.nextCursor;
       }
 
-      // Enrich posts with author information
+      // STEP 4: Enrich posts with author information
       const authorIds = new Set<string>();
-      result.posts.forEach((post) => {
+      selectedPosts.forEach((post) => {
         if (post.authorId) {
           authorIds.add(post.authorId);
         }
@@ -117,12 +139,16 @@ export function useHomeFeed(
       const authorIdsArray = Array.from(authorIds);
       const authors = await UserService.getUsersPublicInfo(authorIdsArray);
       const authorMap = new Map<string, typeof authors[0]>();
-      authors.forEach((author) => {
-        authorMap.set(author.uid, author);
-      });
+      if (authors && Array.isArray(authors)) {
+        authors.forEach((author) => {
+          if (author && author.uid) {
+            authorMap.set(author.uid, author);
+          }
+        });
+      }
 
       // Enrich posts with author data
-      const enrichedPosts: PostWithAuthor[] = result.posts.map((post) => {
+      const enrichedPosts: PostWithAuthor[] = selectedPosts.map((post) => {
         const author = authorMap.get(post.authorId);
         const isFollowingAuthor = followingIds.includes(post.authorId);
 
@@ -135,14 +161,15 @@ export function useHomeFeed(
         };
       });
 
+      // STEP 5: Update feed state
       if (isRefresh) {
         setFeed(enrichedPosts);
       } else {
         setFeed((prev) => [...prev, ...enrichedPosts]);
       }
 
-      setLastDoc(result.lastDoc);
-      setHasMore(result.hasMore);
+      setLastDoc(lastDocResult);
+      setHasMore(hasMoreResult);
     } catch (err: any) {
       console.error('[useHomeFeed] Error fetching posts:', err);
       setError(err instanceof Error ? err : new Error('Failed to fetch feed'));
@@ -150,7 +177,7 @@ export function useHomeFeed(
       setLoading(false);
       setRefreshing(false);
     }
-  }, [loggedUid, actualFeedType, followingIds, limit, lastDoc]);
+  }, [loggedUid, actualFeedType, followingIds, lastDoc]);
 
   // Initial fetch and refresh when followingIds change
   useEffect(() => {

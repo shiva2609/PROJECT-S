@@ -93,7 +93,7 @@ export default function ExploreScreen({ navigation }: any) {
                     }}
                   >
                     <Text style={styles.searchItemText}>#{item.tag}</Text>
-                    <Text style={styles.searchItemCount}>{item.count} posts</Text>
+                    <Text style={styles.searchItemCount}>{item.postCount} posts</Text>
                   </TouchableOpacity>
                 )}
               />
@@ -115,33 +115,36 @@ export default function ExploreScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.white.primary,
-    padding: 16,
+    backgroundColor: Colors.white.secondary,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.white.secondary,
-    borderRadius: 40,
-    marginBottom: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 4,
+    backgroundColor: Colors.white.primary,
+    borderRadius: 24,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
   searchIcon: {
     marginRight: 8,
   },
   searchBar: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: Fonts.regular,
     color: Colors.black.primary,
-    paddingVertical: 12,
+    paddingVertical: 0,
   },
   clearButton: {
+    marginLeft: 8,
     padding: 4,
   },
   searchResults: {
     flex: 1,
+    paddingHorizontal: 16,
   },
   searchSection: {
     marginBottom: 24,
@@ -158,8 +161,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: Colors.white.secondary,
-    borderRadius: 8,
+    backgroundColor: Colors.white.primary,
+    borderRadius: 12,
     marginBottom: 8,
   },
   searchItemText: {
@@ -170,26 +173,27 @@ const styles = StyleSheet.create({
   searchItemCount: {
     fontSize: 14,
     fontFamily: Fonts.regular,
-    color: Colors.black.qua,
+    color: Colors.black.secondary,
   },
   card: {
     marginTop: 40,
-    borderRadius: 12,
-    padding: 20,
-    backgroundColor: '#f5f5f5',
+    marginHorizontal: 16,
+    borderRadius: 16,
+    padding: 24,
+    backgroundColor: Colors.white.primary,
     alignItems: 'center',
   },
   title: {
-    fontSize: 20,
+    fontSize: 22,
     fontFamily: Fonts.bold,
-    color: Colors.black.primary,
+    color: Colors.brand.primary,
     marginBottom: 12,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: Fonts.regular,
     color: Colors.black.secondary,
     textAlign: 'center',
-    opacity: 0.7,
+    lineHeight: 22,
   },
 });

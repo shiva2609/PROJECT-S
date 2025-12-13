@@ -22,6 +22,7 @@ import PostCarousel, { MediaItem } from './PostCarousel';
 import { normalizePost } from '../../utils/postUtils';
 import VerifiedBadge from '../../components/user/VerifiedBadge';
 import PostDropdown from './PostDropdown';
+import { usePostInteractions } from '../../global/hooks/usePostInteractions';
 
 /**
  * Calculate image height using Instagram's exact formula
@@ -56,12 +57,12 @@ function getAspectRatioHeight(width: number, aspectRatio?: number, ratio?: strin
 
 interface PostCardProps {
   post: Post;
-  isLiked: boolean;
-  isSaved: boolean;
-  onLike: () => void;
+  isLiked?: boolean; // Optional: will use real-time state if not provided
+  isSaved?: boolean; // Optional: will use real-time state if not provided
+  onLike?: () => void; // Optional: will use global service if not provided
   onComment: () => void;
   onShare: () => void;
-  onBookmark: () => void;
+  onBookmark?: () => void; // Optional: will use global service if not provided
   onProfilePress: () => void;
   onPostDetailPress: () => void;
   onOptionsPress?: (post: Post) => void;
@@ -120,6 +121,41 @@ function PostCard({
   const [showDropdown, setShowDropdown] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
+  
+  // Use global post interactions hook for real-time state
+  const postInteractions = usePostInteractions(post.id);
+  
+  // Use real-time state from hook, fallback to props for backward compatibility
+  const actualIsLiked = isLiked !== undefined ? isLiked : postInteractions.isLiked;
+  const actualIsSaved = isSaved !== undefined ? isSaved : postInteractions.isSaved;
+  const actualLikeCount = postInteractions.likeCount;
+  const actualCommentCount = postInteractions.commentCount;
+  
+  // Handle like with global service
+  const handleLike = useCallback(async () => {
+    try {
+      await postInteractions.toggleLike();
+      // Call optional callback for backward compatibility
+      if (onLike) {
+        onLike();
+      }
+    } catch (error: any) {
+      console.error('[PostCard] Error toggling like:', error);
+    }
+  }, [postInteractions, onLike]);
+  
+  // Handle save with global service
+  const handleSave = useCallback(async () => {
+    try {
+      await postInteractions.toggleSave();
+      // Call optional callback for backward compatibility
+      if (onBookmark) {
+        onBookmark();
+      }
+    } catch (error: any) {
+      console.error('[PostCard] Error toggling save:', error);
+    }
+  }, [postInteractions, onBookmark]);
   
   // Handle follow with callback
   const handleFollow = useCallback(async () => {
@@ -317,9 +353,9 @@ function PostCard({
   const username = authorUsername;
   const timestamp = formatTimestamp(post.createdAt || Date.now());
   
-  // Ensure counts never go negative
-  const likeCount = Math.max(0, post.likeCount || 0);
-  const commentCount = Math.max(0, post.commentCount || 0);
+  // Use real-time counts from hook, fallback to post data
+  const likeCount = actualLikeCount > 0 ? actualLikeCount : Math.max(0, post.likeCount || 0);
+  const commentCount = actualCommentCount > 0 ? actualCommentCount : Math.max(0, post.commentCount || 0);
   const shareCount = Math.max(0, post.shareCount || 0);
   
   const hasDetails = !!post.details || !!post.caption || normalizedMedia.length > 0; // Check if post has details
@@ -510,12 +546,12 @@ function PostCard({
         <TouchableOpacity
           style={styles.actionPill}
           activeOpacity={0.7}
-          onPress={onLike}
+          onPress={handleLike}
         >
           <Icon
-            name={isLiked ? 'heart' : 'heart-outline'}
+            name={actualIsLiked ? 'heart' : 'heart-outline'}
             size={18}
-            color={Colors.brand.primary}
+            color={actualIsLiked ? Colors.accent.red : Colors.brand.primary}
           />
           <Text style={styles.actionCount}>{likeCount}</Text>
         </TouchableOpacity>
@@ -541,12 +577,12 @@ function PostCard({
         <TouchableOpacity
           style={styles.actionPill}
           activeOpacity={0.7}
-          onPress={onBookmark}
+          onPress={handleSave}
         >
           <Icon
-            name={isSaved ? 'bookmark' : 'bookmark-outline'}
+            name={actualIsSaved ? 'bookmark' : 'bookmark-outline'}
             size={18}
-            color={Colors.brand.primary}
+            color={actualIsSaved ? Colors.brand.primary : Colors.brand.primary}
           />
         </TouchableOpacity>
 

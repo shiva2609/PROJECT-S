@@ -11,7 +11,7 @@ interface Props {
   tabs?: string[];
 }
 
-export default function SegmentedControl({ selectedTab, onChange, tabs = ['For You', 'Following'] }: Props) {
+export default function SegmentedControl({ selectedTab, onChange, tabs = ['Following', 'For You'] }: Props) {
   return (
     <View style={styles.container}>
       {tabs.map((tab, index) => {

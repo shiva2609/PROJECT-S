@@ -12,6 +12,8 @@ import {
   orderBy,
   limit,
   getDocs,
+  getDoc,
+  doc,
   onSnapshot,
   Unsubscribe,
   startAfter,
@@ -34,6 +36,81 @@ function chunkArray<T>(array: T[], chunkSize: number): T[][] {
 }
 
 /**
+ * Get posts by their IDs
+ * Fetches posts individually and in parallel
+ * @param postIds - Array of post IDs to fetch
+ * @returns Array of posts
+ */
+export async function getPostsByIds(postIds: string[]): Promise<PostWithAuthor[]> {
+  if (!postIds || postIds.length === 0) {
+    return [];
+  }
+
+  try {
+    // Fetch all posts in parallel
+    const postPromises = postIds.map(async (postId) => {
+      try {
+        const postRef = doc(db, 'posts', postId);
+        const postSnap = await getDoc(postRef);
+        
+        if (postSnap.exists()) {
+          const raw = { id: postSnap.id, ...postSnap.data() };
+          const normalized = normalizePost(raw);
+          
+          if (normalized && normalized.id && normalized.createdBy) {
+            const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage || 
+                                raw.finalCroppedUrl || null;
+            
+            let imageURLs: string[] = [];
+            
+            if (Array.isArray(raw.mediaUrls) && raw.mediaUrls.length > 0) {
+              imageURLs = raw.mediaUrls.filter((url: any) => url && typeof url === 'string');
+            } else if (Array.isArray(raw.gallery) && raw.gallery.length > 0) {
+              imageURLs = raw.gallery.filter((url: any) => url && typeof url === 'string');
+            } else if (Array.isArray(raw.media) && raw.media.length > 0) {
+              imageURLs = raw.media
+                .map((item: any) => {
+                  if (typeof item === 'string') return item;
+                  if (item && typeof item === 'object') {
+                    return item.url || item.uri || item.finalCroppedUrl || null;
+                  }
+                  return null;
+                })
+                .filter((url: any): url is string => url !== null && typeof url === 'string');
+            } else {
+              const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl || 
+                              normalized.mediaUrl || normalized.coverImage || null;
+              if (imageURL) {
+                imageURLs = [imageURL];
+              }
+            }
+            
+            const post: PostWithAuthor = {
+              ...normalized,
+              authorId: normalized.createdBy || normalized.authorId || '',
+              imageURL: rawImageURL,
+              imageURLs: imageURLs.length > 0 ? imageURLs : (rawImageURL ? [rawImageURL] : []),
+            };
+            
+            return post;
+          }
+        }
+        return null;
+      } catch (err: any) {
+        console.warn('[getPostsByIds] Error fetching post:', postId, err);
+        return null;
+      }
+    });
+    
+    const posts = await Promise.all(postPromises);
+    return posts.filter((p): p is PostWithAuthor => p !== null);
+  } catch (error: any) {
+    console.error('[getPostsByIds] Error:', error);
+    return [];
+  }
+}
+
+/**
  * Post with author information
  */
 export interface PostWithAuthor extends FirestorePost {
@@ -49,12 +126,12 @@ export interface PostWithAuthor extends FirestorePost {
 /**
  * Get posts by user IDs (chunked for Firestore 'in' limit)
  * @param userIds - Array of user IDs to fetch posts from
- * @param limit - Maximum number of posts to return (default: 15)
- * @returns Array of posts sorted by createdAt desc, capped at limit
+ * @param limitCount - Maximum number of posts to return (default: 15)
+ * @returns Array of posts sorted by createdAt desc, capped at limitCount
  */
 export async function getPostsByUserIds(
   userIds: string[],
-  limit: number = 15
+  limitCount: number = 15
 ): Promise<PostWithAuthor[]> {
   if (!userIds || userIds.length === 0) {
     return [];
@@ -72,7 +149,7 @@ export async function getPostsByUserIds(
           postsRef,
           where('createdBy', 'in', chunk),
           orderBy('createdAt', 'desc'),
-          limit(limit * 2) // Fetch more to account for merging across chunks
+          limit(limitCount * 2) // Fetch more to account for merging across chunks
         );
 
         const snapshot = await getDocs(q);
@@ -142,8 +219,8 @@ export async function getPostsByUserIds(
       return bTime - aTime;
     });
 
-    // Return ONLY first 'limit' posts (max 15 for Following feed)
-    return allPosts.slice(0, limit);
+    // Return ONLY first 'limitCount' posts (max 15 for Following feed)
+    return allPosts.slice(0, limitCount);
   } catch (error: any) {
     console.error('[getPostsByUserIds] Error:', error);
     return [];
@@ -243,6 +320,96 @@ export async function getNewerPostsByUserIds(
   } catch (error: any) {
     console.error('[getNewerPostsByUserIds] Error:', error);
     return [];
+  }
+}
+
+/**
+ * Get candidate posts for feed classification
+ * Fetches a larger batch of recent posts that will be classified into FOLLOWING and FOR YOU feeds
+ * @param options - Query options with cursor for pagination
+ * @returns Posts and next cursor for pagination
+ */
+export async function getCandidatePostsForClassification(options?: {
+  limit?: number;
+  cursor?: QueryDocumentSnapshot | null;
+}): Promise<{ posts: PostWithAuthor[]; nextCursor: QueryDocumentSnapshot | null }> {
+  try {
+    // Fetch larger batch (50-100) for classification
+    const postsLimit = options?.limit || 80;
+
+    const postsRef = collection(db, 'posts');
+    let q = query(
+      postsRef,
+      orderBy('createdAt', 'desc'),
+      limit(postsLimit)
+    );
+
+    if (options?.cursor) {
+      q = query(q, startAfter(options.cursor));
+    }
+
+    const snapshot = await getDocs(q);
+    const posts: PostWithAuthor[] = [];
+
+    snapshot.docs.forEach((docSnap) => {
+      try {
+        const raw = { id: docSnap.id, ...docSnap.data() };
+        const normalized = normalizePost(raw);
+
+        if (normalized && normalized.id && normalized.createdBy) {
+          const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage || 
+                              raw.finalCroppedUrl || null;
+          
+          let imageURLs: string[] = [];
+          
+          if (Array.isArray(raw.mediaUrls) && raw.mediaUrls.length > 0) {
+            imageURLs = raw.mediaUrls.filter((url: any) => url && typeof url === 'string');
+          } else if (Array.isArray(raw.gallery) && raw.gallery.length > 0) {
+            imageURLs = raw.gallery.filter((url: any) => url && typeof url === 'string');
+          } else if (Array.isArray(raw.media) && raw.media.length > 0) {
+            imageURLs = raw.media
+              .map((item: any) => {
+                if (typeof item === 'string') return item;
+                if (item && typeof item === 'object') {
+                  return item.url || item.uri || item.finalCroppedUrl || null;
+                }
+                return null;
+              })
+              .filter((url: any): url is string => url !== null && typeof url === 'string');
+          } else {
+            const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl || 
+                            normalized.mediaUrl || normalized.coverImage || null;
+            if (imageURL) {
+              imageURLs = [imageURL];
+            }
+          }
+
+          const post: PostWithAuthor = {
+            ...normalized,
+            authorId: normalized.createdBy || normalized.authorId || '',
+            imageURL: rawImageURL,
+            imageURLs: imageURLs.length > 0 ? imageURLs : (rawImageURL ? [rawImageURL] : []),
+          };
+
+          posts.push(post);
+        }
+      } catch (err: any) {
+        console.warn('[getCandidatePostsForClassification] Error normalizing post:', docSnap.id, err);
+      }
+    });
+
+    // Get next cursor (last document for pagination)
+    const nextCursor = snapshot.docs.length > 0 && snapshot.docs.length === postsLimit
+      ? snapshot.docs[snapshot.docs.length - 1]
+      : null;
+
+    return {
+      posts,
+      nextCursor,
+    };
+  } catch (error: any) {
+    console.error('[getCandidatePostsForClassification] Error:', error);
+    return { posts: [], nextCursor: null };
   }
 }
 
