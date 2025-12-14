@@ -7,20 +7,21 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import auth from '@react-native-firebase/auth';
-import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import { User, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../services/auth/authService';
+import { auth, db } from '../core/firebase';
 import { userStore } from '../global/stores/userStore';
+import type { UserPublicInfo } from '../global/services/user/user.types';
 
 interface AuthContextType {
-  user: FirebaseAuthTypes.User | null;
+  user: User | null;
   loading: boolean;
   initialized: boolean;
   needsKYCVerification?: boolean;
   userRole: 'super_admin' | 'user' | null;
   roleChecked: boolean;
   isSuperAdmin: boolean;
+  userProfile: UserPublicInfo | null;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -31,6 +32,7 @@ const AuthContext = createContext<AuthContextType>({
   userRole: null,
   roleChecked: false,
   isSuperAdmin: false,
+  userProfile: null,
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -51,23 +53,23 @@ const checkIfSuperAdmin = async (uid: string, email?: string | null): Promise<bo
       email?.toLowerCase().split('@')[0], // Email prefix (if email exists)
       'sanchariadmin', // Default admin username (fallback)
     ].filter(Boolean); // Remove undefined/null values
-    
+
     // Check all possible document IDs in parallel
     const docSnaps = await Promise.all(
-      possibleAdminIds.map(id => getDoc(doc(db, 'adminUsers', id)))
+      possibleAdminIds.map(id => getDoc(doc(db, 'adminUsers', id as string)))
     );
-    
+
     // Find the first existing document that matches the user's UID
     for (let i = 0; i < docSnaps.length; i++) {
       const docSnap = docSnaps[i];
-      if (docSnap.exists()) {
+      if (docSnap && docSnap.exists()) {
         const data = docSnap.data();
         // STRICT CHECK: UID must match OR document ID is UID and role is superAdmin
         // This prevents false positives from generic admin documents
         const docId = possibleAdminIds[i];
         const uidMatches = data?.uid === uid;
         const isUidDoc = docId === uid && data?.role === 'superAdmin';
-        
+
         if (uidMatches || isUidDoc) {
           console.log('✅ Super admin found in adminUsers collection', {
             docId,
@@ -86,7 +88,7 @@ const checkIfSuperAdmin = async (uid: string, email?: string | null): Promise<bo
         }
       }
     }
-    
+
     console.log('❌ User is not a super admin', { uid, email });
     return false;
   } catch (error) {
@@ -96,12 +98,18 @@ const checkIfSuperAdmin = async (uid: string, email?: string | null): Promise<bo
 };
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [user, setUser] = useState<FirebaseAuthTypes.User | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
   const [userRole, setUserRole] = useState<'super_admin' | 'user' | null>(null);
   const [roleChecked, setRoleChecked] = useState(false);
-  
+  const [userProfile, setUserProfile] = useState<UserPublicInfo | null>(null);
+
+  useEffect(() => {
+    // Subscribe to global user store to keep profile data in sync
+    return userStore.subscribe(setUserProfile);
+  }, []);
+
   // Auto-redirect to KYC verification if needed
   // Note: This requires navigation to be available, so it's best used in a component
   // that has access to navigation. For now, we'll just track the state.
@@ -109,21 +117,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     console.log('🔐 AuthContext: Setting up persistent Firebase auth state listener');
-    
-    // @react-native-firebase/auth automatically handles persistence
-    // onAuthStateChanged fires immediately with current user if logged in
-    const unsubscribe = auth().onAuthStateChanged(async (firebaseUser) => {
+
+    // JS SDK onAuthStateChanged
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: User | null) => {
       if (firebaseUser) {
         console.log('✅ Auth state restored:', firebaseUser.uid);
-        
+
         // Reset role check state
         setRoleChecked(false);
-        
+
         // Start fetching current user data (profile data retrieval)
         userStore.fetchCurrentUser(firebaseUser.uid).catch((error) => {
           console.error('[AuthProvider] Error fetching current user data:', error);
         });
-        
+
         // Check if user is super admin (try multiple document ID formats)
         try {
           const isSuperAdmin = await checkIfSuperAdmin(firebaseUser.uid, firebaseUser.email);
@@ -167,16 +174,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const isSuperAdmin = userRole === 'super_admin';
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      loading, 
-      initialized, 
-      userRole, 
+    <AuthContext.Provider value={{
+      user,
+      loading,
+      initialized,
+      userRole,
       roleChecked,
-      isSuperAdmin 
+      isSuperAdmin: userRole === 'super_admin',
+      userProfile,
     }}>
       {children}
     </AuthContext.Provider>
   );
 }
-

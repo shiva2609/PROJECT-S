@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../utils/colors';
-import { auth, firestore } from '../../services/api/firebaseConfig';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
 import { FontFamily } from '../../GlobalStyles';
 
 export default function ForgotPasswordScreen({ navigation }: any) {
@@ -16,7 +17,7 @@ export default function ForgotPasswordScreen({ navigation }: any) {
 
   const handleSendResetEmail = async () => {
     const trimmedIdentifier = identifier.trim();
-    
+
     if (!trimmedIdentifier) {
       Alert.alert('Error', 'Please enter your username or email address.');
       return;
@@ -43,7 +44,7 @@ export default function ForgotPasswordScreen({ navigation }: any) {
             .get();
 
           const usernameData = usernameDoc.data();
-          
+
           if (!usernameData || !usernameData.email) {
             console.error('❌ Username not found in usernames collection');
             Alert.alert(
@@ -76,7 +77,7 @@ export default function ForgotPasswordScreen({ navigation }: any) {
       try {
         await auth().sendPasswordResetEmail(email);
         console.log('✅ Password reset email sent successfully');
-        
+
         // Navigate to password changed screen (success confirmation)
         navigation.replace('AuthPasswordChanged', { isResetEmailSent: true });
       } catch (authError: any) {
@@ -87,7 +88,7 @@ export default function ForgotPasswordScreen({ navigation }: any) {
         });
 
         let errorMessage = 'Failed to send reset email. Please try again.';
-        
+
         if (authError?.code === 'auth/user-not-found') {
           errorMessage = 'No account found with this email address. Please check your email or try using your username.';
         } else if (authError?.code === 'auth/invalid-email') {
@@ -157,7 +158,7 @@ export default function ForgotPasswordScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   content: { paddingHorizontal: 24, paddingTop: 24 },
-  title: { fontSize: 35, fontWeight: '600', fontFamily: FontFamily.poppinsExtraBold,  color: colors.primary,  },
+  title: { fontSize: 35, fontWeight: '600', fontFamily: FontFamily.poppinsExtraBold, color: colors.primary, },
   subtitle: { fontSize: 14, color: colors.mutedText, marginBottom: 18, lineHeight: 20, fontFamily: FontFamily.poppinsRegular, },
   input: {
     backgroundColor: colors.background,
@@ -180,10 +181,9 @@ const styles = StyleSheet.create({
   primaryBtnDisabled: {
     opacity: 0.6,
   },
-  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16, fontFamily: FontFamily.poppinsBold,  },
+  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16, fontFamily: FontFamily.poppinsBold, },
   bottomRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
   muted: { color: colors.mutedText, fontFamily: FontFamily.poppinsRegular, },
   linkStrong: { color: colors.primary, fontFamily: FontFamily.poppinsBold, },
 });
 
- 

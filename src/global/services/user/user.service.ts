@@ -108,6 +108,8 @@ export async function getUserPublicInfo(userId: string): Promise<UserPublicInfo 
       email: normalized.email,
       accountType: normalized.accountType || (raw as any).accountType || (raw as any).role,
       aboutMe: (normalized as any).aboutMe || (raw as any).aboutMe || (raw as any).about || '',
+      travelPlan: normalized.travelPlan || [],
+      onboardingComplete: normalized.onboardingComplete || false,
     };
 
     // Update cache
@@ -241,6 +243,8 @@ export function listenToUserPublicInfo(
             email: normalized.email,
             accountType: normalized.accountType || (raw as any).accountType || (raw as any).role,
             aboutMe: (normalized as any).aboutMe || (raw as any).aboutMe || (raw as any).about || '',
+            travelPlan: normalized.travelPlan || [],
+            onboardingComplete: normalized.onboardingComplete || false,
           };
 
           callback(userInfo);

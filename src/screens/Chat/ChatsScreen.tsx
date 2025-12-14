@@ -12,25 +12,24 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../../providers/AuthProvider';
-import { db } from '../../services/auth/authService';
-import { collection, query, where, orderBy, onSnapshot, getDoc, doc } from 'firebase/firestore';
-import { ChatMessage } from '../../services/api/firebaseService';
 import { getCopilotChatMessages, hasCopilotChat } from '../../services/chat/chatService';
-import { getLastReadTimestamp, markChatAsRead } from '../../services/notifications/notificationService';
+import { getLastReadTimestamp } from '../../services/notifications/notificationService';
 import { useProfilePhoto } from '../../hooks/useProfilePhoto';
 import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/users/userProfilePhotoService';
 import { Colors } from '../../theme/colors';
+import { listenToUserChats, Chat } from '../../features/messages/services';
+import * as UsersAPI from '../../services/users/usersService';
 
 interface ChatListItem {
-  id: string;
-  userId: string;
+  id: string; // chatId
+  userId: string; // other user id
   username: string;
   profilePhoto?: string;
   lastMessage?: string;
   lastMessageTime?: number;
   unreadCount: number;
   isTyping?: boolean;
-  isUnread?: boolean; // For styling
+  isUnread?: boolean;
 }
 
 // Component to render chat avatar with unified profile photo hook
@@ -44,13 +43,11 @@ function ChatListItemAvatar({ userId, username }: { userId: string; username: st
     );
   }
   return (
-    <Image 
-      source={{ uri: profilePhoto }} 
+    <Image
+      source={{ uri: profilePhoto }}
       defaultSource={{ uri: getDefaultProfilePhoto() }}
-      onError={() => {
-        // Offline/CDN failure - Image component will use defaultSource
-      }}
-      style={styles.avatar} 
+      onError={() => { }}
+      style={styles.avatar}
       resizeMode="cover"
     />
   );
@@ -64,164 +61,99 @@ export default function ChatsScreen({ navigation }: any) {
   const [activeTab, setActiveTab] = useState<'All' | "Group's" | 'Communities' | 'Private'>('All');
 
   useEffect(() => {
-    if (!user) {
+    if (!user?.uid) {
       setLoading(false);
       return;
     }
 
-    // Listen to messages to build chat list
-    const messagesRef = collection(db, 'messages');
-    const unsubscribe = onSnapshot(
-      query(messagesRef, orderBy('createdAt', 'desc')),
-      async (snapshot) => {
-        try {
-          // Get all unique thread IDs involving current user
-          const threadMap = new Map<string, ChatMessage>();
-          
-          snapshot.docs.forEach((doc) => {
-            const msg = { id: doc.id, ...doc.data() } as ChatMessage;
-            const isInvolved = msg.senderId === user.uid || msg.recipientId === user.uid;
-            
-            if (isInvolved) {
-              const otherUserId = msg.senderId === user.uid ? msg.recipientId : msg.senderId;
-              const existing = threadMap.get(otherUserId);
-              
-              if (!existing || msg.createdAt > existing.createdAt) {
-                threadMap.set(otherUserId, msg);
-              }
-            }
-          });
+    // Subscribe to V1 chats
+    const unsubscribe = listenToUserChats(user.uid, async (chats) => {
+      try {
+        const chatItems = await Promise.all(chats.map(async (chat) => {
+          // Find other user ID
+          const otherUserId = chat.members.find(id => id !== user.uid);
+          if (!otherUserId) return null;
 
-          // Build chat list items
-          const chatList: ChatListItem[] = [];
-          
-          // Batch fetch all last read timestamps
-          const lastReadPromises = Array.from(threadMap.keys()).map(otherUserId => 
-            getLastReadTimestamp(user.uid, otherUserId).then(time => ({ userId: otherUserId, time }))
-          );
-          const lastReadTimes = await Promise.all(lastReadPromises);
-          const lastReadMap = new Map(lastReadTimes.map(r => [r.userId, r.time]));
-          
-          // Process all messages once for timestamp conversion
-          const allMessages = snapshot.docs.map(d => {
-            const data = d.data();
-            let createdAt = 0;
-            if (data.createdAt) {
-              if (typeof data.createdAt === 'number') {
-                createdAt = data.createdAt;
-              } else if (data.createdAt.toMillis) {
-                createdAt = data.createdAt.toMillis();
-              }
-            }
-            return { id: d.id, ...data, createdAt } as ChatMessage;
-          });
-          
-          for (const [otherUserId, lastMessage] of threadMap.entries()) {
-            // Fetch user data for the other user
-            try {
-              const userDocRef = doc(db, 'users', otherUserId);
-              const userDoc = await getDoc(userDocRef);
-              
-              const userData = userDoc.data();
-              const username = userData?.username || userData?.displayName || 'User';
-              const profilePhoto = userData?.photoURL;
-              
-              // Get last read time from map
-              const lastReadTime = lastReadMap.get(otherUserId) || 0;
-              
-              // Handle timestamp conversion
-              let lastMessageTime = 0;
-              if (lastMessage.createdAt) {
-                if (typeof lastMessage.createdAt === 'number') {
-                  lastMessageTime = lastMessage.createdAt;
-                } else if (lastMessage.createdAt.toMillis) {
-                  lastMessageTime = lastMessage.createdAt.toMillis();
-                }
-              }
-              
-              const isUnread = lastMessageTime > lastReadTime;
-              
-              // Count unread messages
-              let unreadCount = 0;
-              if (isUnread) {
-                const threadMessages = allMessages.filter(msg => {
-                  const isInThread = (msg.senderId === user.uid && msg.recipientId === otherUserId) ||
-                                    (msg.senderId === otherUserId && msg.recipientId === user.uid);
-                  return isInThread && msg.createdAt > lastReadTime && msg.senderId !== user.uid;
-                });
-                unreadCount = threadMessages.length;
-              }
-              
-              chatList.push({
-                id: otherUserId,
-                userId: otherUserId,
-                username,
-                profilePhoto,
-                lastMessage: lastMessage.text || 'Image',
-                lastMessageTime: lastMessage.createdAt,
-                unreadCount,
-                isTyping: false,
-                isUnread,
-              });
-            } catch (error) {
-              console.error('Error fetching user data:', error);
-              // Add with default data if user fetch fails
-              chatList.push({
-                id: otherUserId,
-                userId: otherUserId,
-                username: 'User',
-                profilePhoto: undefined,
-                lastMessage: lastMessage.text || 'Image',
-                lastMessageTime: lastMessage.createdAt,
-                unreadCount: 0,
-                isTyping: false,
-                isUnread: false,
-              });
-            }
+          // Fetch other user profile
+          let otherUser = undefined;
+          let username = 'User';
+          let profilePhoto = undefined;
+
+          try {
+            otherUser = await UsersAPI.getUserById(otherUserId);
+            // Fallback Rule: Name > Username > 'User'
+            username = otherUser?.name || otherUser?.username || 'User';
+            profilePhoto = otherUser?.photoUrl;
+          } catch (e) {
+            console.log('Error fetching user ' + otherUserId);
           }
 
-          // Add Sanchari Copilot chat if it exists
-          const hasCopilot = await hasCopilotChat(user.uid);
-          if (hasCopilot) {
+          const lastMessage = chat.lastMessage;
+          const lastMessageTime = lastMessage?.createdAt?.toMillis?.() || chat.updatedAt?.toMillis?.() || Date.now();
+
+          // Calculate unread status
+          // V1 Limitation: chat.lastMessage doesn't have seenBy yet. 
+          // Defaulting to false to safely render.
+          const isUnread = false;
+
+          const item: ChatListItem = {
+            id: chat.chatId,
+            userId: otherUserId,
+            username,
+            profilePhoto,
+            lastMessage: lastMessage?.text || 'Start a conversation',
+            lastMessageTime,
+            unreadCount: 0,
+            isTyping: false,
+            isUnread
+          };
+          return item;
+        }));
+
+
+        const validChats = chatItems.filter((i): i is ChatListItem => i !== null);
+
+        // Add Sanchari Copilot chat if it exists (Preserve existing logic)
+        const hasCopilot = await hasCopilotChat(user.uid);
+        if (hasCopilot) {
+          try {
             const copilotMessages = await getCopilotChatMessages(user.uid);
             if (copilotMessages.length > 0) {
-              const lastCopilotMessage = copilotMessages[0]; // Already sorted desc
+              const lastCopilotMessage: any = copilotMessages[0];
               const lastReadTime = await getLastReadTimestamp(user.uid, 'sanchari-copilot');
-              const lastMessageTime = lastCopilotMessage.timestamp || Date.now();
+              const lastMessageTime = lastCopilotMessage?.timestamp || Date.now();
               const isUnread = lastMessageTime > lastReadTime;
-              
-              chatList.push({
-                id: 'sanchari-copilot',
+
+              validChats.push({
+                id: 'sanchari-copilot', // Special ID
                 userId: 'sanchari-copilot',
                 username: 'Sanchari Copilot',
                 profilePhoto: undefined,
-                lastMessage: lastCopilotMessage.text || 'Your saved itinerary',
+                lastMessage: lastCopilotMessage?.text || 'Your saved itinerary',
                 lastMessageTime,
                 unreadCount: isUnread ? 1 : 0,
                 isTyping: false,
                 isUnread,
               });
             }
+          } catch (e) {
+            console.error('Error fetching copilot:', e);
           }
-
-          // Sort by last message time
-          chatList.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
-          
-          setChats(chatList);
-          setLoading(false);
-        } catch (error) {
-          console.error('Error building chat list:', error);
-          setLoading(false);
         }
-      },
-      (error) => {
-        console.error('Error listening to messages:', error);
+
+        // Sort by last message time
+        validChats.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+
+        setChats(validChats);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error processing chats:', error);
         setLoading(false);
       }
-    );
+    });
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user?.uid]);
 
   const filteredChats = chats.filter((chat) => {
     if (searchQuery.trim()) {
@@ -236,7 +168,7 @@ export default function ChatsScreen({ navigation }: any) {
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    
+
     if (days === 0) {
       const hours = date.getHours();
       const minutes = date.getMinutes();
@@ -254,7 +186,8 @@ export default function ChatsScreen({ navigation }: any) {
 
   const renderChatItem = ({ item, index }: { item: ChatListItem; index: number }) => {
     const isAlternate = index % 2 === 0 && !item.isUnread;
-    
+    const isPlaceholder = item.lastMessage === 'Start a conversation';
+
     return (
       <TouchableOpacity
         style={[
@@ -263,11 +196,6 @@ export default function ChatsScreen({ navigation }: any) {
           isAlternate && styles.chatItemAlternate,
         ]}
         onPress={async () => {
-          // Mark chat as read when user opens it
-          if (item.isUnread) {
-            await markChatAsRead(user?.uid || '', item.userId);
-          }
-          
           if (item.userId === 'sanchari-copilot') {
             navigation.navigate('Messaging', {
               userId: 'sanchari-copilot',
@@ -276,10 +204,9 @@ export default function ChatsScreen({ navigation }: any) {
               isCopilot: true,
             });
           } else {
-            navigation.navigate('Messaging', {
-              userId: item.userId,
-              username: item.username,
-              profilePhoto: item.profilePhoto,
+            // V1 Navigation to ChatRoom
+            navigation.navigate('ChatRoom', {
+              chatId: item.id,
             });
           }
         }}
@@ -292,12 +219,19 @@ export default function ChatsScreen({ navigation }: any) {
         ) : (
           <ChatListItemAvatar userId={item.userId} username={item.username} />
         )}
-        
+
         <View style={styles.chatContent}>
           <Text style={[styles.chatName, item.isUnread && styles.chatNameUnread]}>
             {item.username}
           </Text>
-          <Text style={[styles.chatMessage, item.isUnread && styles.chatMessageUnread]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.chatMessage,
+              item.isUnread && styles.chatMessageUnread,
+              isPlaceholder && { fontStyle: 'italic', color: Colors.brand.primary }
+            ]}
+            numberOfLines={1}
+          >
             {item.isTyping ? (
               <Text style={styles.typingText}>Typing...</Text>
             ) : (

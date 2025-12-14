@@ -14,6 +14,8 @@ export interface UserPublicInfo {
   email?: string;
   accountType?: string;
   aboutMe?: string;
+  travelPlan?: any[];
+  onboardingComplete?: boolean;
 }
 
 export interface UserCounts {

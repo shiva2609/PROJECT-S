@@ -54,7 +54,6 @@ export * from './contacts/contactsService';
 
 // API Services
 export * from './api/apiClient';
-export * from './api/firebaseConfig';
 export * from './api/firebaseService';
 
 

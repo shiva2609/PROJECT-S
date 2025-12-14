@@ -48,21 +48,33 @@ export async function toggleLike(postId: string, userId: string): Promise<void> 
 
   try {
     await runTransaction(db, async (transaction) => {
+      // First, verify the post exists
+      const postSnap = await transaction.get(postRef);
+      if (!postSnap.exists()) {
+        console.error('[toggleLike] Post does not exist:', postId);
+        throw new Error('Post not found');
+      }
+
       const likeSnap = await transaction.get(likeRef);
       const exists = likeSnap.exists();
+      const currentLikeCount = postSnap.data().likeCount || 0;
 
       if (exists) {
         // Unlike: delete the document and legacy doc
+        console.log('[toggleLike] Unliking post:', postId, 'Current count:', currentLikeCount);
         transaction.delete(likeRef);
         transaction.delete(legacyLikeRef);
 
-        // Decrement like count
+        // Decrement like count (ensure it doesn't go below 0)
+        const newCount = Math.max(0, currentLikeCount - 1);
         transaction.update(postRef, {
-          likeCount: increment(-1)
+          likeCount: newCount
         });
+        console.log('[toggleLike] New count after unlike:', newCount);
 
       } else {
         // Like: create the document and legacy doc
+        console.log('[toggleLike] Liking post:', postId, 'Current count:', currentLikeCount);
         const timestamp = serverTimestamp();
 
         transaction.set(likeRef, {
@@ -77,13 +89,23 @@ export async function toggleLike(postId: string, userId: string): Promise<void> 
         });
 
         // Increment like count
+        const newCount = currentLikeCount + 1;
         transaction.update(postRef, {
-          likeCount: increment(1)
+          likeCount: newCount
         });
+        console.log('[toggleLike] New count after like:', newCount);
       }
     });
+
+    console.log('[toggleLike] Transaction completed successfully for post:', postId);
   } catch (error) {
-    console.error('[toggleLike] Transaction failed:', error);
+    console.error('[toggleLike] Transaction failed:', {
+      postId,
+      userId,
+      error,
+      code: (error as any)?.code,
+      message: (error as any)?.message,
+    });
     throw error;
   }
 }

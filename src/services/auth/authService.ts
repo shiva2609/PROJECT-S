@@ -13,11 +13,11 @@
  * - Automatic Firestore user document creation
  */
 
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
+// Import centralized Firebase instances
+import { auth, db, storage, firebaseApp as app } from '../../core/firebase';
+
+// Import Firebase auth functions
 import {
-	initializeAuth,
-	getAuth,
-	Auth,
 	createUserWithEmailAndPassword,
 	signInWithEmailAndPassword,
 	sendPasswordResetEmail,
@@ -26,170 +26,23 @@ import {
 	deleteUser,
 	User,
 } from 'firebase/auth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Import Firestore functions
 import {
-	getFirestore,
-	Firestore,
 	doc,
 	getDoc,
 	setDoc,
 	updateDoc,
-	enableNetwork,
-	initializeFirestore,
 	collection,
 	query,
 	where,
 	getDocs,
 	serverTimestamp,
 } from 'firebase/firestore';
-import { getStorage, FirebaseStorage } from 'firebase/storage';
+
 import { AccountType, VerificationStatus } from '../../types/account';
 
-// ---------- Firebase Configuration ----------
-
-const firebaseConfig = {
-	apiKey: "AIzaSyCxjt5nfPlD6GwKpP3799rLefn7MrucFOQ",
-	authDomain: "sanchari-truetraveller.firebaseapp.com",
-	projectId: "sanchari-truetraveller",
-	storageBucket: "sanchari-truetraveller.firebasestorage.app",
-	messagingSenderId: "893206677174",
-	appId: "1:893206677174:web:91d611d0643d1a9f5f8817",
-	measurementId: "G-5N4YWHGJSL"
-};
-
-// Initialize Firebase App (reuse existing if available)
-const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
-
-console.log('🔥 Firebase App initialized:', {
-	projectId: app.options.projectId,
-	appId: app.options.appId,
-	authDomain: app.options.authDomain,
-});
-
-// Initialize Auth with persistent storage (AsyncStorage)
-// This is REQUIRED for React Native - getAuth() does NOT persist by default
-let auth: Auth;
-
-try {
-	console.log('🔧 Initializing Firebase Auth with AsyncStorage persistence...');
-	
-	// Try to use getReactNativePersistence if available (Firebase v12+)
-	let persistence: any;
-	const authModule = require('firebase/auth');
-	
-	if (authModule.getReactNativePersistence) {
-		persistence = authModule.getReactNativePersistence(AsyncStorage);
-		console.log('✅ Using getReactNativePersistence');
-	} else {
-		// Create a class-based persistence adapter (required by Firebase)
-		// This fixes the "Expected a class definition" error
-		console.log('⚠️ getReactNativePersistence not available, creating class-based adapter...');
-		
-		class ReactNativePersistence {
-			type = 'LOCAL' as const;
-			_storage: typeof AsyncStorage;
-			
-			constructor(storage: typeof AsyncStorage) {
-				this._storage = storage;
-			}
-			
-			async _isAvailable(): Promise<boolean> {
-				try {
-					await this._storage.getItem('__firebase_auth_test__');
-					return true;
-				} catch {
-					return false;
-				}
-			}
-			
-			async _set(key: string, value: string): Promise<void> {
-				await this._storage.setItem(key, value);
-			}
-			
-			async _get(key: string): Promise<string | null> {
-				return await this._storage.getItem(key);
-			}
-			
-			async _remove(key: string): Promise<void> {
-				await this._storage.removeItem(key);
-			}
-		}
-		
-		persistence = new ReactNativePersistence(AsyncStorage);
-	}
-	
-	auth = initializeAuth(app, {
-		persistence: persistence,
-	});
-	console.log('✅ Firebase Auth initialized with persistent storage (AsyncStorage)');
-} catch (error: any) {
-	// Handle initialization errors (especially "already-initialized" and "Expected a class definition")
-	if (error.code === 'auth/already-initialized' || 
-	    error.message?.includes('already-initialized') ||
-	    error.message?.includes('Firebase Auth has already been initialized') ||
-	    error.message?.includes('Expected a class definition')) {
-		// Auth was already initialized (common in dev with hot reload)
-		auth = getAuth(app);
-		console.log('⚠️ Auth already initialized, using existing instance');
-		console.log('⚠️ Note: If persistence was configured on first init, it should work');
-	} else {
-		console.error('❌ Failed to initialize auth with persistence:', {
-			code: error.code,
-			message: error.message,
-		});
-		// Last resort fallback - use getAuth (but it won't persist)
-		auth = getAuth(app);
-		console.error('❌ CRITICAL: Falling back to getAuth - AUTH WILL NOT PERSIST');
-		console.error('   User sessions will be lost on app reload!');
-		console.error('   Error details:', error.message);
-	}
-}
-
-// Initialize Firestore with long polling for React Native
-let dbInstance: Firestore;
-try {
-	dbInstance = initializeFirestore(app, {
-		experimentalForceLongPolling: true,
-		useFetchStreams: false,
-	});
-	console.log('✅ Firestore initialized with long polling');
-} catch (e: any) {
-	// If already initialized, get existing instance
-	console.log('⚠️ Firestore already initialized, getting existing instance:', e?.message);
-	dbInstance = getFirestore(app);
-}
-
-// Ensure network is enabled with retry logic
-(async () => {
-	let retries = 3;
-	while (retries > 0) {
-		try {
-			await enableNetwork(dbInstance);
-			console.log('✅ AuthService: Firestore network enabled');
-			console.log('✅ Firestore connection successful');
-			break;
-		} catch (e: any) {
-			retries--;
-			if (retries === 0) {
-				console.warn('⚠️ AuthService: Network enable failed after retries:', e?.message || e);
-				console.warn('⚠️ App will continue in offline mode');
-			} else {
-				console.warn(`⚠️ AuthService: Network enable failed, retrying... (${retries} attempts left)`);
-				await new Promise(resolve => setTimeout(resolve, 1000));
-			}
-		}
-	}
-})();
-
-// Initialize Firebase Storage
-const storage = getStorage(app);
-console.log('✅ Firebase Storage initialized');
-
-// Export Firestore instance
-const db: Firestore = dbInstance;
-console.log('📦 Firestore instance exported, ready for use');
-
-// Export app, auth, and db as specified
+// Re-export Firebase instances for backward compatibility
 export { app, auth, db, storage };
 
 // ---------- Types ----------
@@ -236,10 +89,10 @@ async function getEmailFromIdentifier(identifier: string): Promise<string> {
 	if (isEmail(identifier)) {
 		return identifier.trim().toLowerCase();
 	}
-	
+
 	// It's a username - lookup user document to get email
 	const usernameLower = identifier.trim().toLowerCase();
-	
+
 	// Try usernames collection first (faster)
 	try {
 		const usernameDoc = await getDoc(doc(db, 'usernames', usernameLower));
@@ -255,13 +108,13 @@ async function getEmailFromIdentifier(identifier: string): Promise<string> {
 		// Fall through to users collection query
 		console.log('⚠️ Usernames collection lookup failed, trying users collection...');
 	}
-	
+
 	// Fallback: Query users collection directly by usernameLower
 	try {
 		const usersRef = collection(db, 'users');
 		const q = query(usersRef, where('usernameLower', '==', usernameLower));
 		const querySnapshot = await getDocs(q);
-		
+
 		if (!querySnapshot.empty && querySnapshot.docs[0]) {
 			const userData = querySnapshot.docs[0].data() as UserData;
 			return userData.email;
@@ -269,7 +122,7 @@ async function getEmailFromIdentifier(identifier: string): Promise<string> {
 	} catch (e: any) {
 		console.error('Error querying users collection:', e);
 	}
-	
+
 	throw new Error('Username not found');
 }
 
@@ -285,7 +138,7 @@ async function getEmailFromIdentifier(identifier: string): Promise<string> {
 export async function isUsernameAvailable(username: string): Promise<boolean> {
 	try {
 		const usernameLower = username.trim().toLowerCase();
-		
+
 		if (!usernameLower || usernameLower.length === 0) {
 			return false;
 		}
@@ -294,12 +147,12 @@ export async function isUsernameAvailable(username: string): Promise<boolean> {
 		const usersRef = collection(db, 'users');
 		const q = query(usersRef, where('usernameLower', '==', usernameLower));
 		const querySnapshot = await getDocs(q);
-		
+
 		// If query result is empty, username is available
 		const isAvailable = querySnapshot.empty;
-		
+
 		console.log(`🔍 Username "${usernameLower}" availability check: ${isAvailable ? 'AVAILABLE' : 'TAKEN'}`);
-		
+
 		return isAvailable;
 	} catch (error: any) {
 		console.error('❌ Error checking username availability:', error);
@@ -410,7 +263,7 @@ export async function signUp(
 		}
 
 		console.log(`🎉 Signup complete for: ${usernameLower} (${cleanEmail})`);
-		
+
 		// Return user data with timestamp (convert serverTimestamp to number for response)
 		return {
 			...userData,
@@ -489,7 +342,7 @@ export async function signIn(
 
 		// Get user document from Firestore
 		const userDoc = await getDoc(doc(db, 'users', user.uid));
-		
+
 		if (!userDoc.exists()) {
 			throw new Error('User profile not found');
 		}

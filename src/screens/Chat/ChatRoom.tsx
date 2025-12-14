@@ -14,73 +14,132 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../../providers/AuthProvider';
-import { useMessageManager } from '../../hooks/useMessageManager';
+// Removed unused imports
 import MessageBubble from '../../components/chat/MessageBubble';
 import MediaPicker from '../../components/create/MediaPicker';
 import GlassHeader from '../../components/layout/GlassHeader';
 import UserAvatar from '../../components/user/UserAvatar';
 import { Colors } from '../../theme/colors';
-import * as MessagesAPI from '../../services/chat/MessagesAPI';
+// Removed unused MessagesAPI import
+import { getOrCreateChat, sendMessage, listenToChat, markMessageSeen, Message } from '../../features/messages/services';
 
 interface ChatRoomScreenProps {
   navigation: any;
-  route: {
-    params: {
-      conversationId: string;
-      otherUserId: string;
-      username: string;
-      avatarUri?: string;
-    };
-  };
+  route: any;
 }
 
 /**
  * Chat Room Screen
  * 
- * Displays messages in a conversation using useMessageManager.
- * Zero Firestore code - uses global hooks.
+ * NAVIGATION CONTRACT:
+ * - Requires: { chatId: string }
+ * - No other params needed
+ * 
+ * Displays messages using V1 Message Service.
  */
 export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProps) {
   const { user } = useAuth();
-  const { conversationId, otherUserId, username, avatarUri } = route.params;
-  const { messages, sendTextMessage, sendImageMessage, sendVideoMessage, fetchMessages, typingState } = useMessageManager();
+
+  // ENFORCE SINGLE NAVIGATION CONTRACT: Only chatId is required
+  const chatId = route?.params?.chatId;
+
+  // Validate chatId exists
+  if (!chatId) {
+    if (__DEV__) {
+      console.error('ChatRoomScreen missing chatId');
+    }
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.emptyState}>
+          <Icon name="alert-circle-outline" size={64} color={Colors.black.qua} />
+          <Text style={styles.emptyText}>Invalid Chat</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 20 }}>
+            <Text style={{ color: Colors.brand.primary }}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Extract other user ID (format: "userId1_userId2")
+  const [userId1, userId2] = chatId.split('_');
+  const otherUserId = userId1 === user?.uid ? userId2 : userId1;
+
+  // State
+  const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
+  const [otherUserData, setOtherUserData] = useState<any>(null);
   const flatListRef = useRef<FlatList>(null);
 
-  const conversationMessages = messages[conversationId] || [];
-  const isTyping = typingState[conversationId] || false;
-
+  // 1. Fetch other user data
   useEffect(() => {
-    if (conversationId) {
-      fetchMessages(conversationId).then(() => {
-        setLoading(false);
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      }).catch((error) => {
-        console.error('Error fetching messages:', error);
-        setLoading(false);
+    if (otherUserId) {
+      import('../../services/users/usersService').then(async (UsersAPI) => {
+        try {
+          const userData = await UsersAPI.getUserById(otherUserId);
+          setOtherUserData(userData);
+        } catch (error) {
+          console.error('[ChatRoom] Error fetching user data:', error);
+        }
       });
     }
-  }, [conversationId, fetchMessages]);
+  }, [otherUserId]);
 
+  // 2. Listen to Chat (V1 Service)
+  useEffect(() => {
+    if (!chatId) return;
+
+    const unsubscribe = listenToChat(chatId, (newMessages) => {
+      // Reverse messages for Inverted FlatList (Newest at index 0)
+      setMessages(newMessages.reverse());
+      setLoading(false);
+
+      // 3. Mark unseen messages as seen (V1 "Seen" Logic)
+      if (user?.uid) {
+        newMessages.forEach(msg => {
+          // If message is from other user and I haven't seen it yet
+          if (msg.senderId !== user.uid && !msg.seenBy?.includes(user.uid)) {
+            markMessageSeen(chatId, msg.id, user.uid)
+              .catch(err => console.error('Failed to mark seen:', err));
+          }
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [chatId, user?.uid]);
+
+  // 4. Send Message (V1 Service)
   const handleSendText = useCallback(async () => {
-    if (!messageText.trim() || !user?.uid) return;
+    if (!messageText.trim() || !user?.uid || !chatId) return;
 
     const text = messageText.trim();
-    setMessageText('');
+    setMessageText(''); // Optimistic clear
+
+    // Optimistic Update
+    const tempId = `temp_${Date.now()}`;
+    const tempMessage: any = {
+      id: tempId,
+      text,
+      senderId: user.uid,
+      createdAt: { toMillis: () => Date.now() }, // Mock Timestamp
+      seenBy: [user.uid]
+    };
+
+    setMessages(prev => [tempMessage, ...prev]); // Add to start (Bottom of inverted list)
 
     try {
-      await sendTextMessage(conversationId, text);
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      await sendMessage(chatId, user.uid, text);
+      // Listener will sync real data shortly
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to send message');
-      setMessageText(text); // Restore text on error
+      console.error('[ChatRoom] Send error:', error);
+      Alert.alert('Error', 'Failed to send message');
+      setMessageText(text); // Restore on error
+      // Remove temp message
+      setMessages(prev => prev.filter(m => m.id !== tempId));
     }
-  }, [messageText, conversationId, user?.uid, sendTextMessage]);
+  }, [messageText, chatId, user?.uid]);
 
   const handlePickImage = useCallback(async () => {
     // TODO: Integrate with useMediaManager
@@ -95,6 +154,7 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
   const renderMessage = useCallback(({ item }: { item: any }) => {
     const isSent = item.senderId === user?.uid;
     const type = isSent ? 'sent' : 'received';
+    const timestamp = item.createdAt?.toMillis ? item.createdAt.toMillis() : Date.now();
 
     return (
       <MessageBubble
@@ -102,10 +162,14 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
         text={item.text}
         imageUri={item.imageUri}
         videoUri={item.videoUri}
-        timestamp={item.timestamp}
+        timestamp={timestamp}
       />
     );
   }, [user?.uid]);
+
+  // Fallback Rule: Name > Username > 'User'
+  const username = otherUserData?.name || otherUserData?.username || 'User';
+  const avatarUri = otherUserData?.photoUrl;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -127,14 +191,14 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={Colors.brand.primary} />
           </View>
-        ) : conversationMessages.length === 0 ? (
+        ) : messages.length === 0 ? (
           <View style={styles.emptyState}>
             <Icon name="chatbubbles-outline" size={64} color={Colors.black.qua} />
             <Text style={styles.emptyText}>No messages yet</Text>
@@ -143,30 +207,21 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
         ) : (
           <FlatList
             ref={flatListRef}
-            data={conversationMessages}
+            data={messages}
             keyExtractor={(item) => item.id}
             renderItem={renderMessage}
             windowSize={10}
             initialNumToRender={15}
             maxToRenderPerBatch={10}
             removeClippedSubviews
+            inverted={true}
             contentContainerStyle={styles.messagesList}
             showsVerticalScrollIndicator={false}
           />
         )}
 
-        {isTyping && (
-          <View style={styles.typingContainer}>
-            <View style={styles.typingBubble}>
-              <View style={styles.typingDot} />
-              <View style={[styles.typingDot, styles.typingDotDelay1]} />
-              <View style={[styles.typingDot, styles.typingDotDelay2]} />
-            </View>
-          </View>
-        )}
-
         <View style={styles.inputContainer}>
-          <TouchableOpacity style={styles.attachButton} onPress={() => {}}>
+          <TouchableOpacity style={styles.attachButton} onPress={() => { }}>
             <Icon name="add" size={24} color={Colors.black.primary} />
           </TouchableOpacity>
 
