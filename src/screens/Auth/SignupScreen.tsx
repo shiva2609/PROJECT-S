@@ -2,13 +2,9 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../utils/colors';
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
 import { useDispatch } from 'react-redux';
-import { setUser } from '../../store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AUTH_USER_KEY } from '../../utils/constants';
 import { FontFamily } from '../../GlobalStyles';
+import { signUp, isUsernameAvailable } from '../../services/auth/authService';
 
 interface FormState {
   username: string;
@@ -64,19 +60,11 @@ export default function SignupScreen({ navigation }: any) {
 
     const t = setTimeout(async () => {
       try {
-        // Check username availability using /usernames/{username} collection
-        const usernameLower = u.toLowerCase();
-        const usernameDoc = await firestore()
-          .collection('usernames')
-          .doc(usernameLower)
-          .get();
-
+        const available = await isUsernameAvailable(u);
         if (cancelled) return;
-        const usernameData = usernameDoc.data();
-        const isTaken = usernameData !== undefined && usernameData !== null;
         setValidation(prev => ({
           ...prev,
-          username: isTaken ? 'taken' : 'available',
+          username: available ? 'available' : 'taken',
         }));
       } catch (error) {
         if (cancelled) return;
@@ -142,179 +130,22 @@ export default function SignupScreen({ navigation }: any) {
   const onSignup = async () => {
     if (!isFormValid || loading) return;
 
-    const username = form.username.trim().toLowerCase();
-    const email = form.email.trim().toLowerCase();
-    const password = form.password;
-
     try {
       setLoading(true);
 
-      // Check username availability in /usernames/{username} collection
-      console.log('🔍 Checking username availability...');
+      // Use centralized authService for sign up
+      // This handles Auth user creation, Firestore documents, username reservation
+      // and validation.
+      await signUp(form.email, form.username, form.password);
 
-      try {
-        const usernameDoc = await firestore()
-          .collection('usernames')
-          .doc(username)
-          .get();
+      console.log('✅ Signup successful');
 
-        const usernameData = usernameDoc.data();
-        if (usernameData) {
-          Alert.alert('Username already taken!', 'Please choose a different username.');
-          setLoading(false);
-          return;
-        }
-      } catch (firestoreError: any) {
-        console.error('❌ Firestore Error - Failed to check username availability:', {
-          code: firestoreError?.code,
-          message: firestoreError?.message,
-        });
-        Alert.alert('Network Error', 'Please check your connection and try again.');
-        return;
-      }
+      // Do not navigate manually. AuthProvider will update the state.
+      // AppNavigator will transition to the App Stack (starting with TravelPlanSelect).
 
-      console.log('✅ Username is available');
-
-      // Create Firebase Auth user
-      console.log('📝 Creating Firebase Auth user...');
-      let userCredential, firebaseUser;
-      try {
-        userCredential = await auth().createUserWithEmailAndPassword(email, password);
-        firebaseUser = userCredential.user;
-        console.log(`✅ User created successfully`);
-        console.log(`   User ID: ${firebaseUser.uid}`);
-      } catch (authError: any) {
-        console.error('❌ Auth Error - Failed to create user:', {
-          code: authError?.code,
-          message: authError?.message,
-          email: email,
-        });
-        throw authError;
-      }
-
-      // Update displayName in Firebase Auth
-      console.log('📝 Setting display name in Firebase Auth...');
-      try {
-        await firebaseUser.updateProfile({
-          displayName: username,
-        });
-        console.log('👤 Display name set in Firebase Auth');
-      } catch (authError: any) {
-        console.error('❌ Auth Error - Failed to update display name:', {
-          code: authError?.code,
-          message: authError?.message,
-          uid: firebaseUser.uid,
-        });
-        // Non-critical, continue with signup
-      }
-
-      // Create Firestore documents
-      const user = firebaseUser;
-      const uid = user.uid;
-      const createdAt = new Date().toISOString();
-
-      // Create user document at /users/{uid} with exact field order
-      console.log('📝 Creating user document in Firestore...');
-      const userData = {
-        username,
-        email,
-        role: 'traveler',
-        travelPlan: [],
-        createdAt,
-        updatedAt: createdAt,
-      };
-
-      const userDocRef = firestore().collection('users').doc(uid);
-      try {
-        await userDocRef.set(userData, { merge: true });
-        console.log('✅ Firestore user record created:', userData);
-      } catch (firestoreError: any) {
-        console.error('❌ Firestore Error - Failed to create user document:', {
-          code: firestoreError?.code,
-          message: firestoreError?.message,
-          uid: uid,
-        });
-        throw new Error('Failed to save user data. Please try again.');
-      }
-
-      // Create username reservation document at /usernames/{username}
-      // Firestore will auto-create the collection if it doesn't exist
-      console.log('📝 Creating username reservation document in usernames collection...');
-      const usernameDocRef = firestore().collection('usernames').doc(username);
-      try {
-        await usernameDocRef.set({
-          uid,
-          email,
-          createdAt: new Date().toISOString(),
-        }, { merge: true });
-        console.log('✅ Username reservation created:', username);
-        console.log('   Document path: /usernames/' + username);
-      } catch (firestoreError: any) {
-        console.error('❌ Firestore Error - Failed to create username document:', {
-          code: firestoreError?.code,
-          message: firestoreError?.message,
-          username: username,
-        });
-        // Try to delete user document if username reservation fails
-        try {
-          await userDocRef.delete();
-          console.log('✅ Rolled back user document');
-        } catch (deleteError: any) {
-          console.error('❌ Failed to rollback user document:', {
-            code: deleteError?.code,
-            message: deleteError?.message,
-            error: deleteError,
-          });
-        }
-        throw new Error('Failed to reserve username. Please try again.');
-      }
-
-      // Update Redux store
-      dispatch(
-        setUser({
-          id: firebaseUser.uid,
-          email: email,
-          displayName: username,
-          photoURL: '',
-        })
-      );
-
-      // Save to AsyncStorage
-      try {
-        await AsyncStorage.setItem(
-          AUTH_USER_KEY,
-          JSON.stringify({ id: firebaseUser.uid, username: username })
-        );
-        console.log('✅ User data saved to AsyncStorage');
-      } catch (e) {
-        console.warn('⚠️ Failed to save to AsyncStorage:', e);
-      }
-
-      // Navigate to TravelPlanSelect only after all Firestore writes are complete
-      console.log('✅ Signup complete - Navigating to TravelPlanSelect');
-      navigation.replace('TravelPlanSelect');
     } catch (error: any) {
-      console.error('❌ Signup failed:', {
-        code: error?.code,
-        message: error?.message,
-        error: error,
-      });
-
-      let errorMessage = 'Unable to create account. Please try again.';
-
-      if (error?.message) {
-        errorMessage = error.message;
-      } else if (error?.code === 'auth/email-already-in-use') {
-        errorMessage = 'Email is already registered';
-      } else if (error?.code === 'auth/invalid-email') {
-        errorMessage = 'Invalid email address';
-      } else if (error?.code === 'auth/weak-password') {
-        errorMessage = 'Password is too weak';
-      } else if (error?.code === 'auth/network-request-failed') {
-        errorMessage = 'Network error. Please check your connection.';
-      }
-
-      Alert.alert('Signup Failed', errorMessage);
+      console.error('❌ Signup failed:', error);
+      Alert.alert('Signup Failed', error.message || 'Unable to create account');
     } finally {
       setLoading(false);
     }

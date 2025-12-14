@@ -1,24 +1,26 @@
-/**
- * Travel Plan Select Screen
- * 
- * Placeholder screen for travel plan selection.
- * TODO: Implement travel plan selection functionality.
- */
-
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
+import { useAuth } from '../../providers/AuthProvider';
 
 export default function TravelPlanSelectScreen() {
   const navigation = useNavigation();
+  const { user, userProfile } = useAuth();
 
-  const handleSkip = () => {
-    // Navigate to main tabs
-    navigation.replace('MainTabs');
-  };
+  useEffect(() => {
+    // Safety Net: Automatic redirect for users who already have a plan or completed onboarding,
+    // in case they land here by mistake (AppNavigator should handle this, but this is a fail-safe).
+    const hasPlan = userProfile?.travelPlan && Array.isArray(userProfile.travelPlan) && userProfile.travelPlan.length > 0;
+    const completedOnboarding = userProfile?.onboardingComplete;
+
+    if (hasPlan || completedOnboarding) {
+      // Use replace to ensure back button doesn't come here
+      navigation.replace('MainTabs');
+    }
+  }, [user, userProfile, navigation]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -27,9 +29,7 @@ export default function TravelPlanSelectScreen() {
         <Text style={styles.subtitle}>
           This screen is a placeholder. Travel plan selection functionality will be implemented here.
         </Text>
-        <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
-          <Text style={styles.skipButtonText}>Skip for Now</Text>
-        </TouchableOpacity>
+        {/* Skip button removed to enforce flow for new users */}
       </View>
     </SafeAreaView>
   );
@@ -60,19 +60,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 32,
   },
-  skipButton: {
-    backgroundColor: Colors.brand.primary,
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  skipButtonText: {
-    color: Colors.white.primary,
-    fontSize: 16,
-    fontFamily: Fonts.semibold,
-  },
 });
-
-
-
-

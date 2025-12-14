@@ -32,9 +32,12 @@ import { useUser } from '../../global/hooks/useUser';
 import { useFollowStatus } from '../../global/hooks/useFollowStatus';
 import { listenToSavedPosts, getSavedPosts } from '../../global/services/posts/post.interactions.service';
 import { getPostsByIds } from '../../global/services/posts/post.service';
+import { useSession } from '../../core/session';
+import { getOrCreateChat } from '../../features/messages/services';
 
 export default function ProfileScreen({ navigation, route }: any) {
   const { user: currentUser } = useAuth();
+  const { userId: sessionUserId } = useSession();
   const userId = route?.params?.userId;
   const currentUserId = currentUser?.uid || '';
   const targetUserId = (userId || currentUserId || '').trim() || undefined;
@@ -51,6 +54,7 @@ export default function ProfileScreen({ navigation, route }: any) {
   const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
   const [savedPosts, setSavedPosts] = useState<Post[]>([]);
   const [savedPostIds, setSavedPostIds] = useState<string[]>([]);
+  const [creatingChat, setCreatingChat] = useState<boolean>(false);
 
   // Fetch saved posts using global service
   useEffect(() => {
@@ -146,6 +150,36 @@ export default function ProfileScreen({ navigation, route }: any) {
       type: 'following'
     });
   }, [navigation, targetUserId]);
+
+  // Handle message - create chat and navigate to ChatRoom
+  const handleMessage = useCallback(async () => {
+    if (!sessionUserId || !targetUserId || isOwnProfile || creatingChat) {
+      console.log('[ProfileScreen] Cannot create chat:', { sessionUserId, targetUserId, isOwnProfile, creatingChat });
+      return;
+    }
+
+    console.log('[ProfileScreen] Creating chat between:', sessionUserId, 'and', targetUserId);
+    setCreatingChat(true);
+    try {
+      // Create or get existing chat using deterministic chatId
+      const chat = await getOrCreateChat(sessionUserId, targetUserId);
+      console.log('[ProfileScreen] Chat created/retrieved:', chat.chatId);
+
+      // SINGLE NAVIGATION CONTRACT: Only chatId is required
+      console.log('[ProfileScreen] Navigating to ChatRoom with chatId:', chat.chatId);
+      navigation?.navigate('ChatRoom', {
+        chatId: chat.chatId,
+      });
+    } catch (error: any) {
+      console.error('[ProfileScreen] Error creating chat:', error);
+      // Show error to user
+      if (error?.message) {
+        console.error('[ProfileScreen] Error message:', error.message);
+      }
+    } finally {
+      setCreatingChat(false);
+    }
+  }, [sessionUserId, targetUserId, isOwnProfile, creatingChat, navigation]);
 
   // Handle refresh
   const handleRefresh = useCallback(async () => {
@@ -252,7 +286,7 @@ export default function ProfileScreen({ navigation, route }: any) {
                   <View style={styles.nameColumn}>
                     <View style={styles.nameBadgeRow}>
                       <Text style={styles.profileDisplayName} numberOfLines={1}>
-                        {profileUser.displayName || profileUser.name || profileUser.username}
+                        {profileUser.name || profileUser.username || 'User'}
                       </Text>
                       {profileUser.verified && (
                         <View style={styles.badgeWrapper}>
@@ -285,16 +319,32 @@ export default function ProfileScreen({ navigation, route }: any) {
               </View>
             </View>
 
-            {/* Footer Action Row: Follow Button Placement */}
+            {/* Footer Action Row: Follow and Message Buttons */}
             {!isOwnProfile && (
               <View style={styles.cardFooterAction}>
-                <FollowButton
-                  isFollowing={followStatus.isFollowing}
-                  isFollowedBack={followStatus.isFollowedBy}
-                  isLoading={followStatus.loading}
-                  onToggleFollow={handleFollowToggle}
-                  followersCount={profileUser.followersCount}
-                />
+                <View style={styles.actionButtonsRow}>
+                  <View style={styles.followButtonContainer}>
+                    <FollowButton
+                      isFollowing={followStatus.isFollowing}
+                      isFollowedBack={followStatus.isFollowedBy}
+                      isLoading={followStatus.loading}
+                      onToggleFollow={handleFollowToggle}
+                      followersCount={profileUser.followersCount}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    style={styles.messageButton}
+                    onPress={handleMessage}
+                    disabled={creatingChat}
+                    activeOpacity={0.7}
+                  >
+                    {creatingChat ? (
+                      <ActivityIndicator size="small" color={Colors.brand.primary} />
+                    ) : (
+                      <Icon name="chatbubble-outline" size={20} color={Colors.brand.primary} />
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
 
@@ -498,6 +548,26 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: Colors.white.tertiary,
+  },
+  actionButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    gap: 12,
+  },
+  followButtonContainer: {
+    flex: 1,
+  },
+  messageButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.white.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.brand.primary,
   },
   statsRow: {
     flexDirection: 'row',

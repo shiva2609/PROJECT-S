@@ -4,8 +4,9 @@ import {
   DefaultTheme,
 } from '@react-navigation/native';
 import {
-  createNativeStackNavigator,} from '@react-navigation/native-stack';
-import {TransitionPresets} from '@react-navigation/stack'
+  createNativeStackNavigator,
+} from '@react-navigation/native-stack';
+import { TransitionPresets } from '@react-navigation/stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -43,6 +44,7 @@ import CreatorVerification from '../../screens/kyc/CreatorVerification';
 import AccountChangeFlowScreen from '../../screens/kyc/AccountChangeFlowScreen';
 import MessagingScreen from '../../screens/Chat/MessagingScreen';
 import ChatsScreen from '../../screens/Chat/ChatsScreen';
+import ChatRoomScreen from '../../screens/Chat/ChatRoom';
 import NotificationsScreen from '../../screens/Notifications/index';
 import PostDetailScreen from '../../screens/Post/PostDetails/index';
 import CommentsScreen from '../../screens/Post/CommentsScreen';
@@ -78,12 +80,12 @@ export function Tabs() {
             route.name === 'Home'
               ? 'home'
               : route.name === 'Explore'
-              ? 'search'
-              : route.name === 'Create'
-              ? 'add-circle'
-              : route.name === 'Trips'
-              ? 'airplane'
-              : 'person';
+                ? 'search'
+                : route.name === 'Create'
+                  ? 'add-circle'
+                  : route.name === 'Trips'
+                    ? 'airplane'
+                    : 'person';
           return <Icon name={name} color={color} size={size} />;
         },
       })}
@@ -98,16 +100,26 @@ export function Tabs() {
 }
 
 export default function AppNavigator() {
-  const { initialized, loading } = useAuth();
+  const { user, initialized, loading, userProfile } = useAuth();
 
   // Wait for Firebase Auth to initialize before rendering routes
-  if (!initialized || loading) {
+  // Wait for Firebase Auth to initialize AND user profile to load
+  if (!initialized || loading || (user && !userProfile)) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
         <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
+
+  // Determine initial route based on user profile
+  // If user has a travel plan or completed onboarding, go to MainTabs
+  // Otherwise, go to TravelPlanSelect (Onboarding)
+  const initialRouteName = !user
+    ? "Splash"
+    : ((userProfile?.travelPlan?.length ?? 0) > 0 || userProfile?.onboardingComplete)
+      ? "MainTabs"
+      : "TravelPlanSelect";
 
   return (
     <CreateFlowProvider>
@@ -118,262 +130,278 @@ export default function AppNavigator() {
         }}
       >
         <Stack.Navigator
-        screenOptions={{
-          headerShown: false,
-          gestureEnabled: true,
-          fullScreenGestureEnabled: true,
-          animation: 'slide_from_right',
-          animationDuration: 350,
-        }}
-      >
-        <Stack.Screen name="Splash" component={SplashScreen} />
-
-        {/* Onboarding Flow */}
-        <Stack.Group
+          initialRouteName={initialRouteName}
           screenOptions={{
-            ...TransitionPresets.SlideFromRightIOS,
+            headerShown: false,
             gestureEnabled: true,
             fullScreenGestureEnabled: true,
+            animation: 'slide_from_right',
+            animationDuration: 350,
           }}
         >
-          <Stack.Screen name="Onboarding1" component={OnboardingScreen1} />
-          <Stack.Screen name="Onboarding2" component={OnboardingScreen2} />
-          <Stack.Screen name="Onboarding3" component={OnboardingScreen3} />
-          <Stack.Screen name="Onboarding4" component={OnboardingScreen4} />
-        </Stack.Group>
+          {!user ? (
+            <>
+              <Stack.Screen name="Splash" component={SplashScreen} />
 
-        {/* Auth Screens */}
-        <Stack.Screen name="AuthLogin" component={LoginScreen} />
-        <Stack.Screen name="AuthSignup" component={SignupScreen} />
-        <Stack.Screen name="AuthForgotPassword" component={ForgotPasswordScreen} />
-        <Stack.Screen name="AuthChangePassword" component={ChangePasswordScreen} />
-        <Stack.Screen name="AuthPasswordChanged" component={PasswordChangedScreen} />
+              {/* Onboarding Flow */}
+              <Stack.Group
+                screenOptions={{
+                  animation: 'slide_from_right',
+                  gestureEnabled: true,
+                  fullScreenGestureEnabled: true,
+                }}
+              >
+                <Stack.Screen name="Onboarding1" component={OnboardingScreen1} />
+                <Stack.Screen name="Onboarding2" component={OnboardingScreen2} />
+                <Stack.Screen name="Onboarding3" component={OnboardingScreen3} />
+                <Stack.Screen name="Onboarding4" component={OnboardingScreen4} />
+              </Stack.Group>
 
-        {/* Travel Select */}
-        <Stack.Screen name="TravelPlanSelect" component={TravelPlanSelectScreen} />
+              {/* Auth Screens */}
+              <Stack.Screen name="AuthLogin" component={LoginScreen} />
+              <Stack.Screen name="AuthSignup" component={SignupScreen} />
+              <Stack.Screen name="AuthForgotPassword" component={ForgotPasswordScreen} />
+              <Stack.Screen name="AuthChangePassword" component={ChangePasswordScreen} />
+              <Stack.Screen name="AuthPasswordChanged" component={PasswordChangedScreen} />
+            </>
+          ) : (
+            <>
+              {/* Travel Select */}
+              <Stack.Screen name="TravelPlanSelect" component={TravelPlanSelectScreen} />
 
-        {/* Main Tabs - wrapped with Drawer */}
-        <Stack.Screen name="MainTabs" component={DrawerNavigator} />
-        <Stack.Screen name="Home" component={HomeScreen} />
-        <Stack.Screen name="Dashboard" component={DashboardScreen} />
-        <Stack.Screen name="Account" component={AccountScreen} />
-        <Stack.Screen 
-          name="EditProfile" 
-          component={EditProfileScreen}
-          options={{
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen name="AdminVerification" component={AdminVerificationScreen} />
-        <Stack.Screen 
-          name="SuperAdminDashboard" 
-          component={SuperAdminDashboardScreen}
-          options={{
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen name="RoleUpgrade" component={RoleUpgradeScreen} />
-        <Stack.Screen 
-          name="CreatePostScreen" 
-          component={CreatePostScreen}
-          options={{
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="CreateReelScreen" 
-          component={CreateReelScreen}
-          options={{
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        
-        {/* KYC Verification Screens */}
-        <Stack.Screen 
-          name="HostVerification" 
-          component={HostVerification}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="AgencyVerification" 
-          component={AgencyVerification}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="StayHostVerification" 
-          component={StayHostVerification}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="CreatorVerification" 
-          component={CreatorVerification}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="AccountChangeFlow" 
-          component={AccountChangeFlowScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="Chats" 
-          component={ChatsScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="Messaging" 
-          component={MessagingScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="Notifications" 
-          component={NotificationsScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="PostDetail" 
-          component={PostDetailScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="Comments" 
-          component={CommentsScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="CropAdjust" 
-          component={CropAdjustScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="ProfilePhotoCrop" 
-          component={ProfilePhotoCropScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="AddPostDetails" 
-          component={AddPostDetailsScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="PhotoSelect" 
-          component={PhotoSelectScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        {/* PostPreview kept for manual preview only - not used in create flow */}
-        <Stack.Screen 
-          name="PostPreview" 
-          component={PostPreviewScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        {/* New Create Post Flow */}
-        <Stack.Screen 
-          name="CreatePost" 
-          component={CreatePostScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="UnifiedEdit" 
-          component={UnifiedEditScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="AddDetails" 
-          component={AddDetailsScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="Followers" 
-          component={FollowersScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="FollowersScreen" 
-          component={FollowersScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="FollowingScreen" 
-          component={FollowersScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen 
-          name="ProfileScreen" 
-          component={ProfileScreen}
-          options={{ 
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
-      </Stack.Navigator>
-    </NavigationContainer>
-    </CreateFlowProvider>
+              {/* Main Tabs - wrapped with Drawer */}
+              <Stack.Screen name="MainTabs" component={DrawerNavigator} />
+              <Stack.Screen name="Home" component={HomeScreen} />
+              <Stack.Screen name="Dashboard" component={DashboardScreen} />
+              <Stack.Screen name="Account" component={AccountScreen} />
+              <Stack.Screen
+                name="EditProfile"
+                component={EditProfileScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen name="AdminVerification" component={AdminVerificationScreen} />
+              <Stack.Screen
+                name="SuperAdminDashboard"
+                component={SuperAdminDashboardScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen name="RoleUpgrade" component={RoleUpgradeScreen} />
+              <Stack.Screen
+                name="CreatePostScreen"
+                component={CreatePostScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="CreateReelScreen"
+                component={CreateReelScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+
+              {/* KYC Verification Screens */}
+              <Stack.Screen
+                name="HostVerification"
+                component={HostVerification}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="AgencyVerification"
+                component={AgencyVerification}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="StayHostVerification"
+                component={StayHostVerification}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="CreatorVerification"
+                component={CreatorVerification}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="AccountChangeFlow"
+                component={AccountChangeFlowScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="Chats"
+                component={ChatsScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="Messaging"
+                component={MessagingScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="ChatRoom"
+                component={ChatRoomScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="Notifications"
+                component={NotificationsScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="PostDetail"
+                component={PostDetailScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="Comments"
+                component={CommentsScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="CropAdjust"
+                component={CropAdjustScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="ProfilePhotoCrop"
+                component={ProfilePhotoCropScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="AddPostDetails"
+                component={AddPostDetailsScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="PhotoSelect"
+                component={PhotoSelectScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              {/* PostPreview kept for manual preview only - not used in create flow */}
+              <Stack.Screen
+                name="PostPreview"
+                component={PostPreviewScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              {/* New Create Post Flow */}
+              <Stack.Screen
+                name="CreatePost"
+                component={CreatePostScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="UnifiedEdit"
+                component={UnifiedEditScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="AddDetails"
+                component={AddDetailsScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="Followers"
+                component={FollowersScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="FollowersScreen"
+                component={FollowersScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="FollowingScreen"
+                component={FollowersScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="ProfileScreen"
+                component={ProfileScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+            </>
+          )}
+        </Stack.Navigator>
+
+      </NavigationContainer>
+    </CreateFlowProvider >
   );
 }
 

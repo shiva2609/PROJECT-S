@@ -49,12 +49,18 @@ function toTimestamp(v: any): Timestamp {
  * @returns Normalized User object with safe defaults
  */
 export function normalizeUser(raw: any): User {
+  // Handle Firestore Snapshot
+  if (raw && typeof raw.data === 'function') {
+    const data = raw.data();
+    raw = { ...data, id: raw.id };
+  }
+
   if (!raw || typeof raw !== 'object') {
     // Return minimal safe user
     return {
       id: raw?.id || '',
       username: '',
-      name: 'Unknown',
+      name: 'User',
       bio: '',
       profilePhoto: null,
       accountType: 'Traveler',
@@ -66,10 +72,12 @@ export function normalizeUser(raw: any): User {
     };
   }
 
+  const username = raw.username || raw.handle || '';
+
   return {
     id: raw.id || raw.uid || '',
-    username: raw.username || raw.handle || '',
-    name: raw.name || raw.fullName || raw.displayName || 'Unknown',
+    username: username,
+    name: raw.name || raw.fullName || raw.displayName || username || 'User',
     bio: raw.bio || raw.aboutMe || raw.about || '',
     profilePhoto: raw.profilePhoto || raw.photoURL || raw.photoUrl || raw.profilePic || null,
     photoUrl: raw.photoUrl || raw.photoURL || raw.profilePhoto || raw.profilePic || null,
@@ -92,6 +100,8 @@ export function normalizeUser(raw: any): User {
     displayName: raw.displayName || raw.name || undefined,
     fullName: raw.fullName || raw.name || undefined,
     verificationStatus: raw.verificationStatus || undefined,
+    travelPlan: Array.isArray(raw.travelPlan) ? raw.travelPlan : [],
+    onboardingComplete: raw.onboardingComplete === true,
   };
 }
 

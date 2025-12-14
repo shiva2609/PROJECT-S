@@ -65,7 +65,8 @@ export default function NotificationsScreen({ navigation }: any) {
     if (notification.metadata?.postId) {
       navigation.navigate('PostDetails', { postId: notification.metadata.postId });
     } else if (notification.metadata?.conversationId) {
-      navigation.navigate('ChatRoom', { conversationId: notification.metadata.conversationId });
+      // SINGLE NAVIGATION CONTRACT: Only chatId is required
+      navigation.navigate('ChatRoom', { chatId: notification.metadata.conversationId });
     } else if (notification.type === 'follow') {
       navigation.navigate('Profile', { userId: notification.sourceUserId });
     }

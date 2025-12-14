@@ -37,6 +37,8 @@ export interface User {
   displayName?: string;
   fullName?: string;
   verificationStatus?: string;
+  travelPlan?: any[];
+  onboardingComplete?: boolean;
   [key: string]: any; // Allow additional fields
 }
 

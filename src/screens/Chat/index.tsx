@@ -25,13 +25,16 @@ interface ConversationItem {
   lastMessageTime?: number;
   unreadCount: number;
   otherUser?: UsersAPI.User;
+  hasMessage?: boolean; // Added optional property
 }
+
+import { listenToUserChats, Chat } from '../../features/messages/services';
 
 /**
  * Chat List Screen
  * 
- * Displays list of conversations using global APIs.
- * Zero Firestore code - uses MessagesAPI.
+ * Displays list of conversations using V1 Message Service.
+ * Real-time updates via listenToUserChats.
  */
 export default function ChatListScreen({ navigation }: any) {
   const { user } = useAuth();
@@ -39,56 +42,57 @@ export default function ChatListScreen({ navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchConversations = useCallback(async () => {
+  useEffect(() => {
     if (!user?.uid) {
       setLoading(false);
       return;
     }
 
-    try {
-      setLoading(true);
-      const { conversations: convs } = await MessagesAPI.getConversations(user.uid);
+    setLoading(true);
 
-      // Fetch user data for other participants
-      const conversationItems: ConversationItem[] = await Promise.all(
-        convs.map(async (conv: any) => {
-          const otherUserId = conv.participants?.find((id: string) => id !== user.uid);
-          if (!otherUserId) return null;
+    // Subscribe to V1 chats
+    const unsubscribe = listenToUserChats(user.uid, async (chats) => {
+      // Map V1 Chats to ConversationItems
+      const itemsPromises = chats.map(async (chat) => {
+        // Find other user ID
+        const otherUserId = chat.members.find(id => id !== user.uid);
+        if (!otherUserId) return null;
 
-          try {
-            const otherUser = await UsersAPI.getUserById(otherUserId);
-            return {
-              id: conv.id,
-              participants: conv.participants || [],
-              lastMessage: conv.lastMessage || '',
-              lastMessageTime: conv.updatedAt?.toMillis?.() || conv.updatedAt || Date.now(),
-              unreadCount: 0, // TODO: Calculate from messages
-              otherUser: otherUser || undefined,
-            };
-          } catch (error) {
-            console.error(`Error fetching user ${otherUserId}:`, error);
-            return {
-              id: conv.id,
-              participants: conv.participants || [],
-              lastMessage: conv.lastMessage || '',
-              lastMessageTime: conv.updatedAt?.toMillis?.() || conv.updatedAt || Date.now(),
-              unreadCount: 0,
-            };
-          }
-        })
-      );
+        // Fetch other user profile
+        let otherUser = undefined;
+        try {
+          otherUser = await UsersAPI.getUserById(otherUserId);
+        } catch (e) {
+          console.log('Error fetching user ' + otherUserId);
+        }
 
-      setConversations(conversationItems.filter(Boolean) as ConversationItem[]);
-    } catch (error) {
-      console.error('Error fetching conversations:', error);
-    } finally {
+        const lastCheck = chat.lastMessage;
+
+        const item: ConversationItem = {
+          id: chat.chatId,
+          participants: chat.members,
+          lastMessage: lastCheck?.text || 'Start a conversation',
+          lastMessageTime: lastCheck?.createdAt?.toMillis?.() || chat.updatedAt?.toMillis?.() || Date.now(),
+          unreadCount: 0,
+          otherUser: otherUser || undefined,
+          hasMessage: !!lastCheck
+        };
+        return item;
+      });
+
+      const results = await Promise.all(itemsPromises);
+
+      // Filter nulls and sort by time desc
+      const sorted = results
+        .filter((i): i is ConversationItem => i !== null)
+        .sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+
+      setConversations(sorted);
       setLoading(false);
-    }
-  }, [user?.uid]);
+    });
 
-  useEffect(() => {
-    fetchConversations();
-  }, [fetchConversations]);
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   const filteredConversations = conversations.filter((conv) => {
     if (searchQuery.trim()) {
@@ -102,18 +106,17 @@ export default function ChatListScreen({ navigation }: any) {
     const username = otherUser?.username || 'User';
     const avatarUri = otherUser?.photoUrl;
 
+    // Check if it's an empty chat
+    const isPlaceholder = item.lastMessage === 'Start a conversation';
+
     return (
       <TouchableOpacity
         style={styles.conversationItem}
         onPress={() => {
-          if (otherUser) {
-            navigation.navigate('ChatRoom', {
-              conversationId: item.id,
-              otherUserId: otherUser.id,
-              username,
-              avatarUri,
-            });
-          }
+          // SINGLE NAVIGATION CONTRACT: Only chatId is required
+          navigation.navigate('ChatRoom', {
+            chatId: item.id,
+          });
         }}
         activeOpacity={0.7}
       >
@@ -125,8 +128,14 @@ export default function ChatListScreen({ navigation }: any) {
         />
         <View style={styles.conversationContent}>
           <Text style={styles.conversationName}>{username}</Text>
-          <Text style={styles.conversationMessage} numberOfLines={1}>
-            {item.lastMessage || 'No messages yet'}
+          <Text
+            style={[
+              styles.conversationMessage,
+              isPlaceholder && { fontStyle: 'italic', color: Colors.brand.primary }
+            ]}
+            numberOfLines={1}
+          >
+            {item.lastMessage}
           </Text>
         </View>
         {item.unreadCount > 0 && (
@@ -136,7 +145,7 @@ export default function ChatListScreen({ navigation }: any) {
             </Text>
           </View>
         )}
-        {item.lastMessageTime && (
+        {item.lastMessageTime && !isPlaceholder && (
           <Text style={styles.timeText}>
             {formatTimestamp(item.lastMessageTime)}
           </Text>
