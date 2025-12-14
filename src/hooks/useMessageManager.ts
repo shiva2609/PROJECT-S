@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { useAuth } from '../providers/AuthProvider';
+import { useSession } from '../core/session';
 import * as MessagesAPI from '../services/chat/MessagesAPI';
 import * as GroupsAPI from '../services/chat/GroupsAPI';
 
@@ -40,7 +40,7 @@ interface UseMessageManagerReturn {
  * Handles optimistic updates and typing indicators
  */
 export function useMessageManager(): UseMessageManagerReturn {
-  const { user } = useAuth();
+  const { userId } = useSession();
   const [conversations, setConversations] = useState<Record<string, Message[]>>({});
   const [typingState, setTypingState] = useState<Record<string, boolean>>({});
   const typingTimeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
@@ -88,7 +88,7 @@ export function useMessageManager(): UseMessageManagerReturn {
 
     try {
       const sentMessage = await MessagesAPI.sendTextMessage(conversationId, text);
-      
+
       // Replace temp message with real message
       setConversations(prev => ({
         ...prev,
@@ -111,7 +111,7 @@ export function useMessageManager(): UseMessageManagerReturn {
   }, []);
 
   const sendImageMessage = useCallback(async (conversationId: string, uri: string, participants?: string[]): Promise<Message> => {
-    if (!user?.uid) {
+    if (!userId) {
       throw new Error('User must be authenticated to send messages');
     }
 
@@ -119,7 +119,7 @@ export function useMessageManager(): UseMessageManagerReturn {
     const tempMessage: Message = {
       id: `temp_${Date.now()}`,
       conversationId,
-      senderId: user.uid,
+      senderId: userId,
       imageUri: uri,
       timestamp: Date.now(),
       read: false,
@@ -131,7 +131,7 @@ export function useMessageManager(): UseMessageManagerReturn {
     }));
 
     try {
-      const apiMessage = await MessagesAPI.sendImageMessage(conversationId, uri, user.uid, participants);
+      const apiMessage = await MessagesAPI.sendImageMessage(conversationId, uri, userId, participants);
       // Normalize API message to hook format
       const sentMessage: Message = {
         id: apiMessage.id,
@@ -141,7 +141,7 @@ export function useMessageManager(): UseMessageManagerReturn {
         timestamp: typeof apiMessage.createdAt === 'number' ? apiMessage.createdAt : apiMessage.createdAt?.toMillis?.() || Date.now(),
         read: apiMessage.read || false,
       };
-      
+
       setConversations(prev => ({
         ...prev,
         [conversationId]: [
@@ -159,10 +159,10 @@ export function useMessageManager(): UseMessageManagerReturn {
       console.error('Error sending image message:', error);
       throw error;
     }
-  }, [user?.uid]);
+  }, [userId]);
 
   const sendVideoMessage = useCallback(async (conversationId: string, uri: string, participants?: string[]): Promise<Message> => {
-    if (!user?.uid) {
+    if (!userId) {
       throw new Error('User must be authenticated to send messages');
     }
 
@@ -170,7 +170,7 @@ export function useMessageManager(): UseMessageManagerReturn {
     const tempMessage: Message = {
       id: `temp_${Date.now()}`,
       conversationId,
-      senderId: user.uid,
+      senderId: userId,
       videoUri: uri,
       timestamp: Date.now(),
       read: false,
@@ -182,7 +182,7 @@ export function useMessageManager(): UseMessageManagerReturn {
     }));
 
     try {
-      const apiMessage = await MessagesAPI.sendVideoMessage(conversationId, uri, user.uid, participants);
+      const apiMessage = await MessagesAPI.sendVideoMessage(conversationId, uri, userId, participants);
       // Normalize API message to hook format
       const sentMessage: Message = {
         id: apiMessage.id,
@@ -192,7 +192,7 @@ export function useMessageManager(): UseMessageManagerReturn {
         timestamp: typeof apiMessage.createdAt === 'number' ? apiMessage.createdAt : apiMessage.createdAt?.toMillis?.() || Date.now(),
         read: apiMessage.read || false,
       };
-      
+
       setConversations(prev => ({
         ...prev,
         [conversationId]: [
@@ -210,7 +210,7 @@ export function useMessageManager(): UseMessageManagerReturn {
       console.error('Error sending video message:', error);
       throw error;
     }
-  }, [user?.uid]);
+  }, [userId]);
 
   const createGroup = useCallback(async (userIds: string[], groupName?: string): Promise<Conversation> => {
     try {

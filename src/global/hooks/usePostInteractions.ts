@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useAuth } from '../../providers/AuthProvider';
+import { useSession } from '../../core/session';
 import * as PostInteractions from '../services/posts/post.interactions.service';
 
 interface InitialState {
@@ -51,7 +51,7 @@ export function usePostInteractions(
   postId: string,
   initialState?: InitialState
 ): UsePostInteractionsReturn {
-  const { user } = useAuth();
+  const { user, userId } = useSession();
 
   // Initialize with passed props or default values
   const [isLiked, setIsLiked] = useState(initialState?.initialIsLiked || false);
@@ -71,7 +71,7 @@ export function usePostInteractions(
 
   // Set up real-time listeners
   useEffect(() => {
-    if (!postId || !user?.uid) {
+    if (!postId || !userId) {
       return;
     }
 
@@ -80,7 +80,7 @@ export function usePostInteractions(
     // Listen to like state
     const unsubscribeLike = PostInteractions.listenToPostLikeState(
       postId,
-      user.uid,
+      userId,
       (liked) => {
         // Only update if value is different (avoids fighting with optimistic update)
         setIsLiked(prev => prev === liked ? prev : liked);
@@ -100,7 +100,7 @@ export function usePostInteractions(
     // Listen to saved state
     const unsubscribeSaved = PostInteractions.listenToSavedState(
       postId,
-      user.uid,
+      userId,
       (saved) => {
         setIsSaved(prev => prev === saved ? prev : saved);
       }
@@ -122,11 +122,11 @@ export function usePostInteractions(
     return () => {
       unsubscribes.forEach((unsub) => unsub());
     };
-  }, [postId, user?.uid]);
+  }, [postId, userId]);
 
   // Toggle like (Optimistic)
   const toggleLike = useCallback(async () => {
-    if (!user?.uid) {
+    if (!userId) {
       throw new Error('User must be authenticated');
     }
 
@@ -138,7 +138,7 @@ export function usePostInteractions(
     setLikeCount(prev => previousLiked ? Math.max(0, prev - 1) : prev + 1);
 
     try {
-      await PostInteractions.toggleLike(postId, user.uid);
+      await PostInteractions.toggleLike(postId, userId);
     } catch (error) {
       console.error('[usePostInteractions] Error toggling like:', error);
       // Revert on error
@@ -146,11 +146,11 @@ export function usePostInteractions(
       setLikeCount(previousCount);
       throw error;
     }
-  }, [postId, user?.uid, isLiked, likeCount]);
+  }, [postId, userId, isLiked, likeCount]);
 
   // Toggle save (Optimistic)
   const toggleSave = useCallback(async () => {
-    if (!user?.uid) {
+    if (!userId) {
       throw new Error('User must be authenticated');
     }
 
@@ -160,37 +160,37 @@ export function usePostInteractions(
     setIsSaved(!previousSaved);
 
     try {
-      await PostInteractions.toggleSavePost(postId, user.uid);
+      await PostInteractions.toggleSavePost(postId, userId);
     } catch (error) {
       console.error('[usePostInteractions] Error toggling save:', error);
       // Revert on error
       setIsSaved(previousSaved);
       throw error;
     }
-  }, [postId, user?.uid, isSaved]);
+  }, [postId, userId, isSaved]);
 
   // Add comment
   const addComment = useCallback(async (text: string) => {
-    if (!user?.uid) {
+    if (!userId || !user) {
       throw new Error('User must be authenticated');
     }
     const photoURL = user.photoURL || null;
     await PostInteractions.addComment(
       postId,
-      user.uid,
-      user.displayName || user.username || 'User',
+      userId,
+      user.displayName || 'User',
       photoURL,
       text
     );
-  }, [postId, user?.uid, user.displayName, user.username, user.photoURL]);
+  }, [postId, userId, user]);
 
   // Report post
   const reportPost = useCallback(async (reason: string) => {
-    if (!user?.uid) {
+    if (!userId) {
       throw new Error('User must be authenticated');
     }
-    await PostInteractions.reportPost(postId, user.uid, reason);
-  }, [postId, user?.uid]);
+    await PostInteractions.reportPost(postId, userId, reason);
+  }, [postId, userId]);
 
   return {
     isLiked,
