@@ -4,7 +4,8 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { colors } from '../utils/colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_USER_KEY } from '../utils/constants';
-import { auth, firestore } from '../services/api/firebaseConfig';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
 import { useDispatch } from 'react-redux';
 import { setUser } from '../store';
 
@@ -25,10 +26,10 @@ export default function SplashScreen({ navigation }: Props) {
         // Check Firebase Auth state using React Native Firebase
         const unsubscribe = auth().onAuthStateChanged(async (firebaseUser) => {
           unsubscribe(); // Remove listener after first check
-          
+
           if (firebaseUser) {
             const uid = firebaseUser.uid;
-            
+
             // Check and create/update user document if needed
             let userData: any = {};
             try {
@@ -68,7 +69,7 @@ export default function SplashScreen({ navigation }: Props) {
                 if (!userData.travelPlan) updates.travelPlan = [];
                 if (!userData.createdAt) updates.createdAt = new Date().toISOString();
                 if (!userData.updatedAt) updates.updatedAt = new Date().toISOString();
-                
+
                 if (Object.keys(updates).length > 0) {
                   try {
                     await userDocRef.set(updates, { merge: true });
@@ -106,7 +107,7 @@ export default function SplashScreen({ navigation }: Props) {
                 error: error,
               });
             }
-            
+
             // Restore user in Redux
             dispatch(setUser({
               id: uid,
@@ -118,7 +119,7 @@ export default function SplashScreen({ navigation }: Props) {
             // Skip onboarding and travel plan screens - go directly to MainTabs if user is logged in
             // Check if travelPlan exists, but still go to MainTabs (user can update travel plan later)
             const hasTravelPlan = userData.travelPlan && Array.isArray(userData.travelPlan) && userData.travelPlan.length > 0;
-            
+
             if (hasTravelPlan) {
               console.log('✅ User authenticated with travel plan, navigating to MainTabs');
               navigation.replace('MainTabs');

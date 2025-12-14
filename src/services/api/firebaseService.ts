@@ -1,35 +1,37 @@
-import { initializeApp, FirebaseApp, getApps } from 'firebase/app';
+// Import centralized Firebase instances
+import { auth, db as firebaseDb, storage as firebaseStorage, firebaseApp as app } from '../../core/firebase';
+
+// Import Firebase auth functions
 import {
 	createUserWithEmailAndPassword,
 	signInWithEmailAndPassword,
 	updateProfile,
 	User as FirebaseUser,
 } from 'firebase/auth';
-import { auth } from '../auth/authService';
+
+// Import Firestore functions
 import {
-    initializeFirestore,
-    getFirestore,
-    enableNetwork,
-    doc,
-    setDoc,
-    getDoc,
-    updateDoc,
-    addDoc,
-    collection,
-    query,
-    orderBy,
-    onSnapshot,
-    where,
-    serverTimestamp,
-    arrayUnion,
-    arrayRemove,
-    increment,
-    runTransaction,
-    deleteDoc,
-    Firestore,
+	doc,
+	setDoc,
+	getDoc,
+	updateDoc,
+	addDoc,
+	collection,
+	query,
+	orderBy,
+	onSnapshot,
+	where,
+	serverTimestamp,
+	arrayUnion,
+	arrayRemove,
+	increment,
+	runTransaction,
+	deleteDoc,
+	enableNetwork,
 } from 'firebase/firestore';
+
+// Import Storage functions
 import {
-	getStorage,
 	ref as storageRef,
 	uploadBytes,
 	uploadBytesResumable,
@@ -67,11 +69,11 @@ export interface Post {
 	mediaUrls?: string[];
 	// CRITICAL: media is ALWAYS an array, never a single string
 	// Each item has: { type: 'image' | 'video', url: string, uri?: string, id?: string }
-	media?: Array<{ 
-		type: 'image' | 'video'; 
+	media?: Array<{
+		type: 'image' | 'video';
 		url: string; // Primary field
 		uri?: string; // Backward compatibility
-		id?: string; 
+		id?: string;
 	}>;
 	caption?: string;
 	likeCount: number;
@@ -123,56 +125,15 @@ export interface ChatMessage {
 	createdAt: number;
 }
 
-// ---------- Firebase Bootstrap ----------
+// ---------- Firebase Instances ----------
 
-const firebaseConfig = {
-	apiKey: "AIzaSyCxjt5nfPlD6GwKpP3799rLefn7MrucFOQ",
-    authDomain: "sanchari-truetraveller.firebaseapp.com",
-    projectId: "sanchari-truetraveller",
-    storageBucket: "sanchari-truetraveller.firebasestorage.app",
-    messagingSenderId: "893206677174",
-    appId: "1:893206677174:web:91d611d0643d1a9f5f8817",
-    measurementId: "G-5N4YWHGJSL"
-};
-
-// Reuse Firebase app if already initialized (should match authService.ts)
-const app: FirebaseApp = getApps().length ? getApps()[0]! : initializeApp(firebaseConfig);
-// Use the persistent auth instance from authService.ts
-
-// Initialize Firestore (with error handling for already-initialized case)
-let dbInstance: Firestore;
-try {
-  dbInstance = initializeFirestore(app, {
-    experimentalForceLongPolling: true,
-  });
-  console.log('✅ FirebaseService: Firestore initialized');
-} catch (e: any) {
-    // If already initialized, get existing instance
-    console.log('⚠️ FirebaseService: Firestore already initialized, getting existing');
-    dbInstance = getFirestore(app);
-  }
-
-// Ensure network is enabled
-(async () => {
-  try {
-    await enableNetwork(dbInstance);
-    console.log("✅ FirebaseService: Firestore network enabled");
-  } catch (e: any) {
-    console.error("❌ FirebaseService: Network enable failed:", e?.message || e);
-  }
-})();
-
-const storageInstance = getStorage(app);
-
-// Use the persistent auth instance from authService.ts
-// No need for a wrapper function, just export auth directly if needed
-
+// Wrapper functions for backward compatibility
 function db() {
-    return dbInstance;
+	return firebaseDb;
 }
 
 function storage() {
-    return storageInstance;
+	return firebaseStorage;
 }
 
 // ---------- Helpers ----------
@@ -184,12 +145,12 @@ function synthesizeEmailFromUsername(username: string) {
 }
 
 async function usernameAvailable(username: string): Promise<boolean> {
-    const snap = await withRetry(() => getDoc(doc(db(), 'usernames', username.toLowerCase())));
-    return !snap.exists();
+	const snap = await withRetry(() => getDoc(doc(db(), 'usernames', username.toLowerCase())));
+	return !snap.exists();
 }
 
 async function reserveUsername(username: string, uid: string): Promise<void> {
-    await withRetry(() => setDoc(doc(db(), 'usernames', username.toLowerCase()), { uid }));
+	await withRetry(() => setDoc(doc(db(), 'usernames', username.toLowerCase()), { uid }));
 }
 
 async function releaseUsername(username: string): Promise<void> {
@@ -224,7 +185,7 @@ export async function signUpWithUsernamePassword(params: {
 	const cred = await createUserWithEmailAndPassword(auth, email, password);
 	const user = cred.user;
 	console.log('✅ Firebase Auth user created:', user.uid);
-	
+
 	if (displayName || photoURL) {
 		await updateProfile(user, { displayName: displayName ?? undefined, photoURL: photoURL ?? undefined });
 	}
@@ -243,7 +204,7 @@ export async function signUpWithUsernamePassword(params: {
 	};
 
 	console.log('📝 Creating Firestore user document:', user.uid);
-    await withRetry(() => setDoc(doc(db(), 'users', user.uid), profile));
+	await withRetry(() => setDoc(doc(db(), 'users', user.uid), profile));
 	console.log('✅ User profile saved to Firestore:', user.uid);
 	console.log('🎉 Signup complete - User ID:', user.uid, 'Username:', cleanUsername);
 	return profile;
@@ -257,26 +218,26 @@ export async function signInWithUsernamePassword(username: string, password: str
 	if (!cleanUsername) throw new Error('Username required');
 	const email = synthesizeEmailFromUsername(cleanUsername);
 	const cred = await signInWithEmailAndPassword(auth, email, password);
-    const profileSnap = await withRetry(() => getDoc(doc(db(), 'users', cred.user.uid)));
+	const profileSnap = await withRetry(() => getDoc(doc(db(), 'users', cred.user.uid)));
 	return { authUser: cred.user, profile: profileSnap.exists() ? (profileSnap.data() as UserProfile) : null };
 }
 
 export async function completeProfile(uid: string, updates: Partial<Pick<UserProfile, 'displayName' | 'photoURL' | 'email' | 'phone' | 'bio'>>): Promise<void> {
 	const userRef = doc(db(), 'users', uid);
-    const snap = await withRetry(() => getDoc(userRef));
+	const snap = await withRetry(() => getDoc(userRef));
 	if (!snap.exists()) throw new Error('Profile not found');
-    await withRetry(() => updateDoc(userRef, { ...updates, updatedAt: nowMs() }));
+	await withRetry(() => updateDoc(userRef, { ...updates, updatedAt: nowMs() }));
 }
 
 export async function upgradeToHost(uid: string): Promise<void> {
 	const userRef = doc(db(), 'users', uid);
-    await withRetry(() => updateDoc(userRef, { role: 'host', updatedAt: nowMs() }));
+	await withRetry(() => updateDoc(userRef, { role: 'host', updatedAt: nowMs() }));
 }
 
 export async function saveUserTravelPlan(uid: string, planData: { selectedTypes: string[] }): Promise<void> {
 	try {
 		const userRef = doc(db(), 'users', uid);
-		await withRetry(() => updateDoc(userRef, { 
+		await withRetry(() => updateDoc(userRef, {
 			travelPlan: planData,
 			travelPlanUpdatedAt: nowMs(),
 			updatedAt: nowMs(),
@@ -298,7 +259,7 @@ function base64ToBlob(base64: string, mimeType: string = 'image/jpeg'): Blob {
 		if (cleanBase64.includes(',')) {
 			cleanBase64 = cleanBase64.split(',')[1];
 		}
-		
+
 		// Decode base64 to binary
 		const byteCharacters = atob(cleanBase64);
 		const byteNumbers = new Array(byteCharacters.length);
@@ -318,7 +279,7 @@ function base64ToBlob(base64: string, mimeType: string = 'image/jpeg'): Blob {
 async function readFileAsBase64(uri: string): Promise<string> {
 	return new Promise((resolve, reject) => {
 		console.log('📖 Starting file read for:', uri.substring(0, 60) + '...');
-		
+
 		// Try different URI formats for React Native compatibility
 		const urisToTry: string[] = [uri];
 		if (Platform.OS === 'android') {
@@ -331,24 +292,24 @@ async function readFileAsBase64(uri: string): Promise<string> {
 				urisToTry.push(uri.replace('file://', ''));
 			}
 		}
-		
+
 		let attempts = 0;
 		const maxAttempts = urisToTry.length;
-		
+
 		function tryNextUri() {
 			if (attempts >= maxAttempts) {
 				reject(new Error('All URI format attempts failed'));
 				return;
 			}
-			
+
 			const testUri = urisToTry[attempts++];
 			console.log(`📤 Attempt ${attempts}/${maxAttempts}: Trying URI format...`);
-			
+
 			const xhr = new XMLHttpRequest();
 			xhr.open('GET', testUri, true);
 			xhr.responseType = 'arraybuffer';
-			
-			xhr.onload = function() {
+
+			xhr.onload = function () {
 				console.log(`📊 XHR status for URI ${attempts}:`, xhr.status);
 				if (xhr.status === 200 || xhr.status === 0) {
 					try {
@@ -362,10 +323,10 @@ async function readFileAsBase64(uri: string): Promise<string> {
 							}
 							return;
 						}
-						
+
 						console.log('✅ Got arraybuffer, size:', arrayBuffer.byteLength);
 						const bytes = new Uint8Array(arrayBuffer);
-						
+
 						// Convert to base64 in chunks to avoid stack overflow
 						let binary = '';
 						const chunkSize = 8192;
@@ -373,7 +334,7 @@ async function readFileAsBase64(uri: string): Promise<string> {
 							const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.byteLength));
 							binary += String.fromCharCode.apply(null, Array.from(chunk) as any);
 						}
-						
+
 						const base64 = btoa(binary);
 						console.log('✅ Converted to base64, length:', base64.length);
 						resolve(base64);
@@ -394,8 +355,8 @@ async function readFileAsBase64(uri: string): Promise<string> {
 					}
 				}
 			};
-			
-			xhr.onerror = function(e) {
+
+			xhr.onerror = function (e) {
 				console.error(`❌ XHR error for attempt ${attempts}:`, e);
 				if (attempts < maxAttempts) {
 					console.log('⚠️ XHR error, trying next URI format...');
@@ -404,8 +365,8 @@ async function readFileAsBase64(uri: string): Promise<string> {
 					reject(new Error('Failed to read file - XHR error'));
 				}
 			};
-			
-			xhr.ontimeout = function() {
+
+			xhr.ontimeout = function () {
 				console.error(`⏱️ XHR timeout for attempt ${attempts}`);
 				if (attempts < maxAttempts) {
 					tryNextUri();
@@ -413,9 +374,9 @@ async function readFileAsBase64(uri: string): Promise<string> {
 					reject(new Error('Timeout reading file'));
 				}
 			};
-			
+
 			xhr.timeout = 30000;
-			
+
 			try {
 				xhr.send(null);
 			} catch (sendError: any) {
@@ -427,7 +388,7 @@ async function readFileAsBase64(uri: string): Promise<string> {
 				}
 			}
 		}
-		
+
 		tryNextUri();
 	});
 }
@@ -436,41 +397,41 @@ async function readFileAsBase64(uri: string): Promise<string> {
 // 1) Legacy: uploadImageAsync({ uri, path })
 // 2) New:    uploadImageAsync(imageAsset, userId)
 export async function uploadImageAsync(
-  arg1: { uri: string; path: string } | any,
-  userId?: string,
+	arg1: { uri: string; path: string } | any,
+	userId?: string,
 ): Promise<string> {
-  try {
-    // New signature: (imageAsset, userId)
-    if (userId && arg1 && typeof arg1 === 'object' && 'uri' in arg1 && !('path' in arg1)) {
-      const image: any = arg1;
-      if (!image?.uri) throw new Error('No image URI found');
-      const fileName = `${userId}_${Date.now()}.jpg`;
-      const reference = rnfbStorage().ref(`posts/${fileName}`);
-      const pathToFile = Platform.OS === 'ios' ? String(image.uri).replace('file://', '') : String(image.uri);
-      console.log('🚀 Uploading to Firebase Storage (new signature):', pathToFile);
-      await reference.putFile(pathToFile);
-      const downloadURL = await reference.getDownloadURL();
-      console.log('✅ File uploaded! URL:', downloadURL);
-      return downloadURL;
-    }
+	try {
+		// New signature: (imageAsset, userId)
+		if (userId && arg1 && typeof arg1 === 'object' && 'uri' in arg1 && !('path' in arg1)) {
+			const image: any = arg1;
+			if (!image?.uri) throw new Error('No image URI found');
+			const fileName = `${userId}_${Date.now()}.jpg`;
+			const reference = rnfbStorage().ref(`posts/${fileName}`);
+			const pathToFile = Platform.OS === 'ios' ? String(image.uri).replace('file://', '') : String(image.uri);
+			console.log('🚀 Uploading to Firebase Storage (new signature):', pathToFile);
+			await reference.putFile(pathToFile);
+			const downloadURL = await reference.getDownloadURL();
+			console.log('✅ File uploaded! URL:', downloadURL);
+			return downloadURL;
+		}
 
-    // Legacy signature: ({ uri, path })
-    if (arg1 && typeof arg1 === 'object' && 'uri' in arg1 && 'path' in arg1) {
-      const { uri, path } = arg1 as { uri: string; path: string };
-      const reference = rnfbStorage().ref(path);
-      const uploadUri = Platform.OS === 'ios' ? uri.replace('file://', '') : uri;
-      console.log('🚀 Uploading to Firebase Storage (legacy signature):', uploadUri);
-      await reference.putFile(uploadUri);
-      const downloadURL = await reference.getDownloadURL();
-      console.log('✅ File uploaded! URL:', downloadURL);
-      return downloadURL;
-    }
+		// Legacy signature: ({ uri, path })
+		if (arg1 && typeof arg1 === 'object' && 'uri' in arg1 && 'path' in arg1) {
+			const { uri, path } = arg1 as { uri: string; path: string };
+			const reference = rnfbStorage().ref(path);
+			const uploadUri = Platform.OS === 'ios' ? uri.replace('file://', '') : uri;
+			console.log('🚀 Uploading to Firebase Storage (legacy signature):', uploadUri);
+			await reference.putFile(uploadUri);
+			const downloadURL = await reference.getDownloadURL();
+			console.log('✅ File uploaded! URL:', downloadURL);
+			return downloadURL;
+		}
 
-    throw new Error('Invalid parameters for uploadImageAsync');
-  } catch (error) {
-    console.error('🔥 Upload failed:', error);
-    throw error;
-  }
+		throw new Error('Invalid parameters for uploadImageAsync');
+	} catch (error) {
+		console.error('🔥 Upload failed:', error);
+		throw error;
+	}
 }
 
 // ---------- Posts ----------
@@ -495,7 +456,7 @@ export async function createPost(params: {
 		sharedBy: [],
 		createdAt: serverTimestamp(), // Always use serverTimestamp
 	};
-    const ref = await withRetry(() => addDoc(collection(db(), 'posts'), base));
+	const ref = await withRetry(() => addDoc(collection(db(), 'posts'), base));
 	return { id: ref.id, ...base } as Post;
 }
 
@@ -519,7 +480,7 @@ export async function createReel(params: {
 		sharedBy: [],
 		createdAt: serverTimestamp(), // Always use serverTimestamp
 	};
-    const ref = await withRetry(() => addDoc(collection(db(), 'reels'), base));
+	const ref = await withRetry(() => addDoc(collection(db(), 'reels'), base));
 	return { id: ref.id, ...base };
 }
 
@@ -535,16 +496,16 @@ export async function deletePost(postId: string, ownerId: string): Promise<void>
 		// Step 1: Get post data to extract media URLs
 		const postRef = doc(db(), 'posts', postId);
 		const postSnap = await getDoc(postRef);
-		
+
 		if (!postSnap.exists()) {
 			throw new Error('Post not found');
 		}
-		
+
 		const postData = postSnap.data() as any;
-		
+
 		// Step 2: Delete media from Firebase Storage
 		const mediaUrls: string[] = [];
-		
+
 		// Collect all media URLs
 		if (postData.mediaUrls && Array.isArray(postData.mediaUrls)) {
 			mediaUrls.push(...postData.mediaUrls);
@@ -567,14 +528,14 @@ export async function deletePost(postId: string, ownerId: string): Promise<void>
 				if (item.uri) mediaUrls.push(item.uri);
 			});
 		}
-		
+
 		// Remove duplicates
 		const uniqueMediaUrls = [...new Set(mediaUrls)];
-		
+
 		// Delete each media file from Storage
 		for (const url of uniqueMediaUrls) {
 			if (!url || typeof url !== 'string' || !url.includes('firebasestorage')) continue;
-			
+
 			try {
 				// Extract storage path from URL
 				// URL format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encodedPath}?alt=media&token=...
@@ -583,7 +544,7 @@ export async function deletePost(postId: string, ownerId: string): Promise<void>
 				if (pathMatch && pathMatch[1]) {
 					const encodedPath = pathMatch[1];
 					const storagePath = decodeURIComponent(encodedPath);
-					
+
 					// Delete using React Native Firebase Storage
 					const storageRef = rnfbStorage().ref(storagePath);
 					await storageRef.delete();
@@ -594,11 +555,11 @@ export async function deletePost(postId: string, ownerId: string): Promise<void>
 				console.warn('⚠️ Could not delete media from Storage:', url, storageError.message);
 			}
 		}
-		
+
 		// Step 3: Delete from main posts collection
 		await deleteDoc(postRef);
 		console.log('✅ Deleted post from posts collection');
-		
+
 		// Step 4: Delete from user's posts subcollection (if exists)
 		try {
 			const userPostRef = doc(db(), 'users', ownerId, 'posts', postId);
@@ -611,7 +572,7 @@ export async function deletePost(postId: string, ownerId: string): Promise<void>
 			// Subcollection might not exist, that's okay
 			console.log('ℹ️ User posts subcollection not found or already deleted');
 		}
-		
+
 		// Step 5: Delete from explore/feed collections (if they exist)
 		const feedCollections = ['explore', 'feed/global', 'user_feed'];
 		for (const collectionPath of feedCollections) {
@@ -627,7 +588,7 @@ export async function deletePost(postId: string, ownerId: string): Promise<void>
 				console.log(`ℹ️ ${collectionPath} not found or already deleted`);
 			}
 		}
-		
+
 		// Step 6: Delete from likes/bookmarks collections (if they exist as separate docs)
 		const interactionCollections = ['likes', 'bookmarks'];
 		for (const collectionPath of interactionCollections) {
@@ -643,7 +604,7 @@ export async function deletePost(postId: string, ownerId: string): Promise<void>
 				console.log(`ℹ️ ${collectionPath} not found or already deleted`);
 			}
 		}
-		
+
 		// Step 7: Decrement postsCount in user document
 		try {
 			const userRef = doc(db(), 'users', ownerId);
@@ -655,7 +616,7 @@ export async function deletePost(postId: string, ownerId: string): Promise<void>
 			// postsCount might not exist, that's okay
 			console.log('ℹ️ Could not decrement postsCount (field might not exist)');
 		}
-		
+
 		console.log('✅ Post deleted successfully from all locations');
 	} catch (error: any) {
 		console.error('❌ Error deleting post:', error);
@@ -665,7 +626,7 @@ export async function deletePost(postId: string, ownerId: string): Promise<void>
 
 export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
 	const q = query(collection(db(), 'posts'), orderBy('createdAt', 'desc'));
-    return onSnapshot(q, (snap) => {
+	return onSnapshot(q, (snap) => {
 		const posts: Post[] = snap.docs
 			.map((d) => {
 				const data = d.data();
@@ -675,7 +636,7 @@ export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
 			})
 			.filter((post): post is Post => post !== null);
 		onUpdate(posts);
-    }, (error: any) => {
+	}, (error: any) => {
 		// Suppress Firestore internal assertion errors (non-fatal SDK bugs)
 		if (error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('Unexpected state')) {
 			console.warn('⚠️ Firestore internal error (non-fatal, will retry):', error.message?.substring(0, 100));
@@ -686,23 +647,23 @@ export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
 		} else {
 			console.warn('listenToFeed error:', error?.message || error);
 		}
-    });
+	});
 }
 
 export async function toggleLikePost(postId: string, userId: string): Promise<boolean> {
 	const ref = doc(db(), 'posts', postId);
-	
+
 	// Use withRetry wrapper to handle version conflicts and other transient errors
 	return await withRetry(async () => {
 		return await runTransaction(db(), async (transaction) => {
 			const snap = await transaction.get(ref);
 			if (!snap.exists()) throw new Error('Post not found');
-			
+
 			const data = snap.data() as any;
 			const likedBy = data.likedBy || [];
 			const currentLikeCount = Math.max(0, data.likeCount || 0);
 			const isLiked = likedBy.includes(userId);
-			
+
 			// Prevent double-like/unlike by checking current state
 			if (isLiked) {
 				// Unlike: remove from array and decrement count (never go below 0)
@@ -711,10 +672,10 @@ export async function toggleLikePost(postId: string, userId: string): Promise<bo
 					// User not in array, nothing to do
 					return false;
 				}
-				
+
 				const newLikedBy = likedBy.filter((id: string) => id !== userId);
 				const newLikeCount = Math.max(0, currentLikeCount - 1);
-				
+
 				transaction.update(ref, {
 					likedBy: newLikedBy,
 					likeCount: newLikeCount,
@@ -727,10 +688,10 @@ export async function toggleLikePost(postId: string, userId: string): Promise<bo
 					// User already in array, nothing to do
 					return true;
 				}
-				
+
 				const newLikedBy = [...likedBy, userId];
 				const newLikeCount = currentLikeCount + 1;
-				
+
 				transaction.update(ref, {
 					likedBy: newLikedBy,
 					likeCount: newLikeCount,
@@ -761,45 +722,45 @@ export async function addComment(params: { postId: string; userId: string; usern
 		text: params.text,
 		createdAt: nowMs(),
 	};
-    const ref = await withRetry(() => addDoc(collection(db(), 'comments'), base));
-	
+	const ref = await withRetry(() => addDoc(collection(db(), 'comments'), base));
+
 	// Update commentCount atomically - only increment, never decrement
 	const postRef = doc(db(), 'posts', params.postId);
 	await withRetry(() => updateDoc(postRef, {
 		commentCount: increment(1),
 	}));
-	
+
 	return { id: ref.id, ...base } as Comment;
 }
 
 export function listenToComments(postId: string, onUpdate: (comments: Comment[]) => void): () => void {
 	const q = query(collection(db(), 'comments'), where('postId', '==', postId), orderBy('createdAt', 'asc'));
-    return onSnapshot(q, (snap) => {
+	return onSnapshot(q, (snap) => {
 		const comments: Comment[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
 		onUpdate(comments);
-    }, (error) => {
-        console.log('listenToComments error:', error?.message || error);
-    });
+	}, (error) => {
+		console.log('listenToComments error:', error?.message || error);
+	});
 }
 
 // Toggle share post - increment/decrement share count
 export async function toggleSharePost(postId: string, userId: string): Promise<boolean> {
 	const ref = doc(db(), 'posts', postId);
-	
+
 	return await runTransaction(db(), async (transaction) => {
 		const snap = await transaction.get(ref);
 		if (!snap.exists()) throw new Error('Post not found');
-		
+
 		const data = snap.data() as any;
 		const sharedBy = data.sharedBy || [];
 		const currentShareCount = Math.max(0, data.shareCount || 0);
 		const hasShared = sharedBy.includes(userId);
-		
+
 		if (hasShared) {
 			// Unshare: remove from array and decrement count (never go below 0)
 			const newSharedBy = sharedBy.filter((id: string) => id !== userId);
 			const newShareCount = Math.max(0, currentShareCount - 1);
-			
+
 			transaction.update(ref, {
 				sharedBy: newSharedBy,
 				shareCount: newShareCount,
@@ -809,7 +770,7 @@ export async function toggleSharePost(postId: string, userId: string): Promise<b
 			// Share: add to array and increment count
 			const newSharedBy = [...sharedBy, userId];
 			const newShareCount = currentShareCount + 1;
-			
+
 			transaction.update(ref, {
 				sharedBy: newSharedBy,
 				shareCount: newShareCount,
@@ -829,13 +790,13 @@ export async function sharePost(postId: string): Promise<void> {
 // Toggle bookmark/save post
 export async function toggleBookmarkPost(postId: string, userId: string): Promise<boolean> {
 	const ref = doc(db(), 'posts', postId);
-    const snap = await withRetry(() => getDoc(ref));
+	const snap = await withRetry(() => getDoc(ref));
 	if (!snap.exists()) throw new Error('Post not found');
-	
+
 	const data = snap.data() as any;
 	const savedBy = data.savedBy || [];
 	const isSaved = savedBy.includes(userId);
-	
+
 	if (isSaved) {
 		// Unsave: remove from array
 		await withRetry(() => updateDoc(ref, {
@@ -893,18 +854,18 @@ export async function createTripPackage(params: {
 		location: params.location ?? '',
 		createdAt: nowMs(),
 	};
-    const ref = await withRetry(() => addDoc(collection(db(), 'trips'), base));
+	const ref = await withRetry(() => addDoc(collection(db(), 'trips'), base));
 	return { id: ref.id, ...base } as TripPackage;
 }
 
 export function listenToTrips(onUpdate: (trips: TripPackage[]) => void): () => void {
 	const q = query(collection(db(), 'trips'), orderBy('createdAt', 'desc'));
-    return onSnapshot(q, (snap) => {
+	return onSnapshot(q, (snap) => {
 		const trips: TripPackage[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
 		onUpdate(trips);
-    }, (error) => {
-        console.log('listenToTrips error:', error?.message || error);
-    });
+	}, (error) => {
+		console.log('listenToTrips error:', error?.message || error);
+	});
 }
 
 // ---------- Chat ----------
@@ -927,19 +888,19 @@ export async function sendMessage(params: {
 		imageUrl: params.imageUrl ?? '',
 		createdAt: nowMs(),
 	};
-    const ref = await withRetry(() => addDoc(collection(db(), 'messages'), base));
+	const ref = await withRetry(() => addDoc(collection(db(), 'messages'), base));
 	return { id: ref.id, ...base } as ChatMessage;
 }
 
 export function listenToDirectMessages(a: string, b: string, onUpdate: (messages: ChatMessage[]) => void): () => void {
 	const tid = threadIdFor(a, b);
 	const q = query(collection(db(), 'messages'), where('threadId', '==', tid), orderBy('createdAt', 'asc'));
-    return onSnapshot(q, (snap) => {
+	return onSnapshot(q, (snap) => {
 		const msgs: ChatMessage[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
 		onUpdate(msgs);
-    }, (error) => {
-        console.log('listenToDirectMessages error:', error?.message || error);
-    });
+	}, (error) => {
+		console.log('listenToDirectMessages error:', error?.message || error);
+	});
 }
 
 // ---------- Utilities for UI ----------
@@ -951,7 +912,7 @@ export async function isUsernameAvailable(username: string): Promise<boolean> {
 export async function getCurrentUserProfile(): Promise<UserProfile | null> {
 	const user = auth.currentUser;
 	if (!user) return null;
-    const snap = await withRetry(() => getDoc(doc(db(), 'users', user.uid)));
+	const snap = await withRetry(() => getDoc(doc(db(), 'users', user.uid)));
 	return snap.exists() ? (snap.data() as UserProfile) : null;
 }
 
@@ -992,7 +953,7 @@ export async function reportPost(
 export async function blockUser(currentUserId: string, blockedUserId: string): Promise<void> {
 	try {
 		const userRef = doc(db(), 'users', currentUserId);
-		
+
 		// Add to blockedUsers array
 		await updateDoc(userRef, {
 			blockedUsers: arrayUnion(blockedUserId),
@@ -1002,17 +963,17 @@ export async function blockUser(currentUserId: string, blockedUserId: string): P
 		const followId = `${currentUserId}_${blockedUserId}`;
 		const followRef = doc(db(), 'follows', followId);
 		const followSnap = await getDoc(followRef);
-		
+
 		if (followSnap.exists()) {
 			await deleteDoc(followRef);
 			// Update counts
 			await runTransaction(db(), async (transaction) => {
 				const currentUserRef = doc(db(), 'users', currentUserId);
 				const blockedUserRef = doc(db(), 'users', blockedUserId);
-				
+
 				const currentUserDoc = await transaction.get(currentUserRef);
 				const blockedUserDoc = await transaction.get(blockedUserRef);
-				
+
 				if (currentUserDoc.exists()) {
 					const currentCount = currentUserDoc.data().followingCount || 0;
 					transaction.update(currentUserRef, {
@@ -1083,32 +1044,32 @@ export async function unfollowUser(currentUserId: string, targetUserId: string):
 	try {
 		const followId = `${currentUserId}_${targetUserId}`;
 		const followRef = doc(db(), 'follows', followId);
-		
+
 		// Check if follow relationship exists
 		const followSnap = await getDoc(followRef);
 		if (!followSnap.exists()) {
 			console.log('ℹ️ Follow relationship does not exist');
 			return;
 		}
-		
+
 		// Delete follow document
 		await deleteDoc(followRef);
-		
+
 		// Update counts in transaction
 		await runTransaction(db(), async (transaction) => {
 			const currentUserRef = doc(db(), 'users', currentUserId);
 			const targetUserRef = doc(db(), 'users', targetUserId);
-			
+
 			const currentUserDoc = await transaction.get(currentUserRef);
 			const targetUserDoc = await transaction.get(targetUserRef);
-			
+
 			if (currentUserDoc.exists()) {
 				const currentCount = currentUserDoc.data().followingCount || 0;
 				transaction.update(currentUserRef, {
 					followingCount: Math.max(0, currentCount - 1),
 				});
 			}
-			
+
 			if (targetUserDoc.exists()) {
 				const targetCount = targetUserDoc.data().followersCount || 0;
 				transaction.update(targetUserRef, {
@@ -1116,7 +1077,7 @@ export async function unfollowUser(currentUserId: string, targetUserId: string):
 				});
 			}
 		});
-		
+
 		console.log('✅ User unfollowed successfully');
 	} catch (error: any) {
 		console.error('❌ Error unfollowing user:', error);
@@ -1135,7 +1096,7 @@ export async function uploadProfilePhoto(finalImageUri: string, userId: string):
 		const fileName = `${userId}.jpg`;
 		const storagePath = `profilePhotos/${userId}/${fileName}`;
 		const reference = rnfbStorage().ref(storagePath);
-		
+
 		// Prepare upload URI (remove file:// prefix if present)
 		let uploadUri = finalImageUri;
 		if (Platform.OS === 'ios' && uploadUri.startsWith('file://')) {
@@ -1144,7 +1105,7 @@ export async function uploadProfilePhoto(finalImageUri: string, userId: string):
 		if (Platform.OS === 'android' && uploadUri.startsWith('file://')) {
 			uploadUri = uploadUri.replace('file://', '');
 		}
-		
+
 		console.log('📤 [uploadProfilePhoto] Uploading profile photo to:', storagePath);
 		await reference.putFile(uploadUri);
 		const downloadURL = await reference.getDownloadURL();
@@ -1165,13 +1126,13 @@ export async function deleteOldProfilePhoto(previousUrl: string | null | undefin
 		console.log('ℹ️ No previous profile photo to delete');
 		return;
 	}
-	
+
 	// Don't delete default/placeholder URLs
 	if (previousUrl.includes('default') || previousUrl.includes('placeholder') || !previousUrl.includes('firebasestorage')) {
 		console.log('ℹ️ Skipping deletion of default/placeholder URL');
 		return;
 	}
-	
+
 	try {
 		// Extract storage path from URL
 		// URL format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encodedPath}?alt=media&token=...
@@ -1180,7 +1141,7 @@ export async function deleteOldProfilePhoto(previousUrl: string | null | undefin
 		if (pathMatch && pathMatch[1]) {
 			const encodedPath = pathMatch[1];
 			const storagePath = decodeURIComponent(encodedPath);
-			
+
 			// Delete using React Native Firebase Storage
 			const storageRef = rnfbStorage().ref(storagePath);
 			await storageRef.delete();
@@ -1226,25 +1187,25 @@ export async function removeFollower(currentUserId: string, followerUserId: stri
 		// The follow relationship is: followerUserId follows currentUserId
 		const followId = `${followerUserId}_${currentUserId}`;
 		const followRef = doc(db(), 'follows', followId);
-		
+
 		// Check if follow relationship exists
 		const followSnap = await getDoc(followRef);
 		if (!followSnap.exists()) {
 			console.log('ℹ️ Follow relationship does not exist');
 			return;
 		}
-		
+
 		// Delete follow document
 		await deleteDoc(followRef);
-		
+
 		// Update counts in transaction
 		await runTransaction(db(), async (transaction) => {
 			const currentUserRef = doc(db(), 'users', currentUserId);
 			const followerUserRef = doc(db(), 'users', followerUserId);
-			
+
 			const currentUserDoc = await transaction.get(currentUserRef);
 			const followerUserDoc = await transaction.get(followerUserRef);
-			
+
 			// Decrement followersCount for current user (the one being unfollowed)
 			if (currentUserDoc.exists()) {
 				const currentCount = currentUserDoc.data().followersCount || 0;
@@ -1252,7 +1213,7 @@ export async function removeFollower(currentUserId: string, followerUserId: stri
 					followersCount: Math.max(0, currentCount - 1),
 				});
 			}
-			
+
 			// Decrement followingCount for follower user (the one who was following)
 			if (followerUserDoc.exists()) {
 				const followerCount = followerUserDoc.data().followingCount || 0;
@@ -1261,7 +1222,7 @@ export async function removeFollower(currentUserId: string, followerUserId: stri
 				});
 			}
 		});
-		
+
 		console.log('✅ Follower removed successfully');
 	} catch (error: any) {
 		console.error('❌ Error removing follower:', error);
@@ -1294,8 +1255,8 @@ export const firebaseApi = {
 	// Chat
 	sendMessage,
 	listenToDirectMessages,
-    // Diagnostics
-    checkFirebaseConnectivity,
+	// Diagnostics
+	checkFirebaseConnectivity,
 };
 
 export default firebaseApi;
@@ -1303,72 +1264,72 @@ export default firebaseApi;
 // ---------- Retry Helper ----------
 
 async function withRetry<T>(fn: () => Promise<T>, opts?: { retries?: number; initialDelayMs?: number }): Promise<T> {
-    const retries = opts?.retries ?? 3;
-    const initialDelayMs = opts?.initialDelayMs ?? 500;
-    let attempt = 0;
-    let lastError: any;
-    while (attempt <= retries) {
-        try {
-            return await fn();
-        } catch (e: any) {
-            lastError = e;
-            const msg = e?.message || '';
-            const code = e?.code || '';
-            const offlineHint = msg.toLowerCase().includes('offline') || code === 'unavailable';
-            if (attempt === 0 && offlineHint) {
-                // try to re-enable network once when we first detect offline state
-                try { await enableNetwork(dbInstance); } catch {}
-            }
-            if (attempt >= retries || !offlineHint) break;
-            const delay = initialDelayMs * Math.pow(2, attempt);
-            await new Promise((res) => setTimeout(res, delay));
-            attempt += 1;
-        }
-    }
-    console.log('Firestore operation failed after retries:', lastError?.message || lastError);
-    throw lastError;
+	const retries = opts?.retries ?? 3;
+	const initialDelayMs = opts?.initialDelayMs ?? 500;
+	let attempt = 0;
+	let lastError: any;
+	while (attempt <= retries) {
+		try {
+			return await fn();
+		} catch (e: any) {
+			lastError = e;
+			const msg = e?.message || '';
+			const code = e?.code || '';
+			const offlineHint = msg.toLowerCase().includes('offline') || code === 'unavailable';
+			if (attempt === 0 && offlineHint) {
+				// try to re-enable network once when we first detect offline state
+				try { await enableNetwork(db()); } catch { }
+			}
+			if (attempt >= retries || !offlineHint) break;
+			const delay = initialDelayMs * Math.pow(2, attempt);
+			await new Promise((res) => setTimeout(res, delay));
+			attempt += 1;
+		}
+	}
+	console.log('Firestore operation failed after retries:', lastError?.message || lastError);
+	throw lastError;
 }
 
 // ---------- Diagnostics ----------
 
 export async function checkFirebaseConnectivity(): Promise<{
-    appInitialized: boolean;
-    networkEnabled: boolean;
-    canWrite: boolean;
-    canRead: boolean;
-    timestampMs: number;
-    details?: string;
+	appInitialized: boolean;
+	networkEnabled: boolean;
+	canWrite: boolean;
+	canRead: boolean;
+	timestampMs: number;
+	details?: string;
 }> {
-    const timestampMs = Date.now();
-    let networkEnabled = false;
-    let canWrite = false;
-    let canRead = false;
-    try {
-        await enableNetwork(dbInstance);
-        networkEnabled = true;
-    } catch (e: any) {
-        networkEnabled = false;
-    }
-    const testRef = doc(collection(db(), 'healthcheck'));
-    try {
-        await withRetry(() => setDoc(testRef, { ok: true, timestampMs }));
-        canWrite = true;
-    } catch (e: any) {
-        canWrite = false;
-    }
-    try {
-        const snap = await withRetry(() => getDoc(testRef));
-        canRead = snap.exists();
-    } catch (e: any) {
-        canRead = false;
-    }
-    return {
-        appInitialized: !!app,
-        networkEnabled,
-        canWrite,
-        canRead,
-        timestampMs,
-    };
+	const timestampMs = Date.now();
+	let networkEnabled = false;
+	let canWrite = false;
+	let canRead = false;
+	try {
+		await enableNetwork(db());
+		networkEnabled = true;
+	} catch (e: any) {
+		networkEnabled = false;
+	}
+	const testRef = doc(collection(db(), 'healthcheck'));
+	try {
+		await withRetry(() => setDoc(testRef, { ok: true, timestampMs }));
+		canWrite = true;
+	} catch (e: any) {
+		canWrite = false;
+	}
+	try {
+		const snap = await withRetry(() => getDoc(testRef));
+		canRead = snap.exists();
+	} catch (e: any) {
+		canRead = false;
+	}
+	return {
+		appInitialized: !!app,
+		networkEnabled,
+		canWrite,
+		canRead,
+		timestampMs,
+	};
 }
 
 

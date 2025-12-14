@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../utils/colors';
-import { auth, firestore } from '../../services/api/firebaseConfig';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
 import { useDispatch } from 'react-redux';
 import { setUser } from '../../store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -69,7 +70,7 @@ export default function SignupScreen({ navigation }: any) {
           .collection('usernames')
           .doc(usernameLower)
           .get();
-        
+
         if (cancelled) return;
         const usernameData = usernameDoc.data();
         const isTaken = usernameData !== undefined && usernameData !== null;
@@ -150,13 +151,13 @@ export default function SignupScreen({ navigation }: any) {
 
       // Check username availability in /usernames/{username} collection
       console.log('🔍 Checking username availability...');
-      
+
       try {
         const usernameDoc = await firestore()
           .collection('usernames')
           .doc(username)
           .get();
-        
+
         const usernameData = usernameDoc.data();
         if (usernameData) {
           Alert.alert('Username already taken!', 'Please choose a different username.');
@@ -298,9 +299,9 @@ export default function SignupScreen({ navigation }: any) {
         message: error?.message,
         error: error,
       });
-      
+
       let errorMessage = 'Unable to create account. Please try again.';
-      
+
       if (error?.message) {
         errorMessage = error.message;
       } else if (error?.code === 'auth/email-already-in-use') {
@@ -408,7 +409,7 @@ export default function SignupScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   scroll: { paddingHorizontal: 24, paddingVertical: 24 },
-  welcometitle: { fontSize: 30, fontWeight: '600', fontFamily: FontFamily.poppinsExtraBold, color: colors.primary,marginBottom: 16  },
+  welcometitle: { fontSize: 30, fontWeight: '600', fontFamily: FontFamily.poppinsExtraBold, color: colors.primary, marginBottom: 16 },
   title: { fontSize: 24, fontFamily: FontFamily.poppinsBold, color: colors.primary, },
   input: {
     backgroundColor: colors.background,

@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../utils/colors';
-import { auth, firestore } from '../../services/api/firebaseConfig';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
 import { useDispatch } from 'react-redux';
 import { setUser } from '../../store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,10 +19,10 @@ export default function LoginScreen({ navigation }: any) {
   const onLogin = async () => {
     const u = username.trim();
     if (!u || !password) return;
-    
+
     try {
       setLoading(true);
-      
+
       // Get email from username lookup in /usernames/{username}
       let email: string;
       try {
@@ -29,7 +30,7 @@ export default function LoginScreen({ navigation }: any) {
           .collection('usernames')
           .doc(u.toLowerCase())
           .get();
-        
+
         const usernameData = usernameDoc.data();
         if (!usernameData || !usernameData.email) {
           // Try to sign in with username as email (for backward compatibility)
@@ -65,7 +66,7 @@ export default function LoginScreen({ navigation }: any) {
       const userDocRef = firestore().collection('users').doc(uid);
       let userDoc;
       let userData: any;
-      
+
       try {
         userDoc = await userDocRef.get();
         userData = userDoc.data();
@@ -79,7 +80,7 @@ export default function LoginScreen({ navigation }: any) {
       }
 
       let finalUserData: any = {};
-      
+
       if (!userData) {
         // Create missing user document with exact structure
         console.log('📝 Creating missing user document...');
@@ -112,7 +113,7 @@ export default function LoginScreen({ navigation }: any) {
         if (!userData.travelPlan) updates.travelPlan = [];
         if (!userData.createdAt) updates.createdAt = new Date().toISOString();
         if (!userData.updatedAt) updates.updatedAt = new Date().toISOString();
-        
+
         if (Object.keys(updates).length > 0) {
           try {
             await userDocRef.set(updates, { merge: true });
@@ -149,7 +150,7 @@ export default function LoginScreen({ navigation }: any) {
 
       // Check if travelPlan exists and route accordingly
       const hasTravelPlan = finalUserData.travelPlan && Array.isArray(finalUserData.travelPlan) && finalUserData.travelPlan.length > 0;
-      
+
       if (hasTravelPlan) {
         console.log('✅ User has travel plan, navigating to MainTabs');
         navigation.replace('MainTabs');
@@ -163,7 +164,7 @@ export default function LoginScreen({ navigation }: any) {
         message: error?.message,
         error: error,
       });
-      
+
       let errorMessage = 'Please check your credentials';
       if (error?.code === 'auth/user-not-found') {
         errorMessage = 'User not found. Please check your username.';
@@ -174,7 +175,7 @@ export default function LoginScreen({ navigation }: any) {
       } else if (error?.message) {
         errorMessage = error.message;
       }
-      
+
       Alert.alert('Login failed', errorMessage);
     } finally {
       setLoading(false);
@@ -230,7 +231,7 @@ export default function LoginScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  headerArea: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 8},
+  headerArea: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 8 },
   welcomeTop: { fontSize: 30, fontWeight: '600', fontFamily: FontFamily.poppinsBold, color: colors.primary, marginBottom: -4, lineHeight: 32, },
   welcomeBrand: { fontSize: 40, fontWeight: '600', fontFamily: FontFamily.poppinsExtraBold, color: colors.primary, },
   form: { paddingHorizontal: 24, paddingTop: 12 },
