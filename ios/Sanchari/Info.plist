@@ -59,6 +59,17 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- <key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.893206677174-ios-placeholder</string>
+			</array>
+		</dict>
+	</array> -->
 	<key>NSCameraUsageDescription</key>
 	<string>We use the camera to let you capture travel moments.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
@@ -69,6 +80,8 @@
 	<string>We need access to save your travel media.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>We need access to your photos to share posts.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>We need access to your contacts to help you find friends.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
