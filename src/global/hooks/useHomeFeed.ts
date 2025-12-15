@@ -255,7 +255,7 @@ export function useHomeFeed(
       // 3. Start fresh fetch
       fetchPosts(true, requestId);
     }
-  }, [loggedUid, actualFeedType, followingIds, followsLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loggedUid, actualFeedType, followsLoaded]); // removed followingIds to prevents auto-reload on follow
 
   // Refresh function
   const refresh = useCallback(async () => {

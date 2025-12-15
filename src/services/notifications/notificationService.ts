@@ -2,6 +2,13 @@
  * Notification Service
  * 
  * Handles tracking unread notifications and messages
+ * 
+ * SYSTEM CONTRACT:
+ * - Notifications are atomic events
+ * - Aggregation happens ONLY at read time
+ * - Likes & comments are grouped by post
+ * - Messages are excluded entirely
+ * - Undo actions must reverse counts
  */
 
 import {
@@ -14,7 +21,9 @@ import {
   query,
   where,
   getDocs,
-  Timestamp
+  Timestamp,
+  orderBy,
+  limit
 } from 'firebase/firestore';
 import { db } from '../auth/authService';
 
@@ -179,11 +188,11 @@ export async function calculateUnreadMessageCount(userId: string): Promise<numbe
  */
 export async function calculateUnreadNotificationCount(userId: string): Promise<number> {
   try {
-    // Check if notifications collection exists
-    const notificationsRef = collection(db, 'notifications');
+    // Check if notifications collection subcollection exists
+    // Path: notifications/{userId}/items
+    const notificationsRef = collection(db, 'notifications', userId, 'items');
     const q = query(
       notificationsRef,
-      where('userId', '==', userId),
       where('read', '==', false)
     );
 
@@ -230,10 +239,9 @@ export async function getUnreadMessageCount(userId: string): Promise<number> {
 export async function markNotificationsAsRead(userId: string): Promise<void> {
   try {
     // Mark all notifications as read
-    const notificationsRef = collection(db, 'notifications');
+    const notificationsRef = collection(db, 'notifications', userId, 'items');
     const q = query(
       notificationsRef,
-      where('userId', '==', userId),
       where('read', '==', false)
     );
 
@@ -313,14 +321,15 @@ export function listenToUnreadCounts(
 
   // Listen to notifications changes
   try {
-    const notificationsRef = collection(db, 'notifications');
-    const notificationsQuery = query(
-      notificationsRef,
-      where('userId', '==', userId)
-    );
+    const notificationsRef = collection(db, 'notifications', userId, 'items');
+    // No query needed for subcollection unless filtering
+    // Just listen to the whole subcollection changes or filtered by unread
+
+    // Simplest: just query unread to minimize bandwidth? 
+    // Wait, onSnapshot on collection(userId, items) is what we want.
 
     unsubscribeNotifications = onSnapshot(
-      notificationsQuery,
+      notificationsRef,
       () => updateCounts(),
       (error: any) => {
         if (error?.message?.includes('INTERNAL ASSERTION FAILED')) return;
@@ -460,3 +469,143 @@ export async function incrementMessageCount(userId: string): Promise<void> {
     console.error('Error incrementing message count:', error);
   }
 }
+
+/**
+ * AGGREGATED NOTIFICATIONS SYSTEM (Instagram-style)
+ */
+
+export interface AggregatedNotification {
+  id: string; // aggregated key (e.g. like_post123) or unique id
+  type: 'like' | 'comment' | 'follow' | 'other';
+  count: number;
+  actors: string[]; // List of actorIds
+  docIds: string[]; // List of all document IDs in this group (for marking read)
+  previewImage?: string;
+  timestamp: number;
+  read: boolean;
+  targetId?: string; // postId or userId
+  metadata?: any;
+  sourceUsername?: string; // For single actor display
+}
+
+/**
+ * Subscribe to aggregated notifications
+ * Listens to atomic events and aggregates them on READ
+ */
+export function subscribeToAggregatedNotifications(
+  userId: string,
+  callback: (notifications: AggregatedNotification[]) => void
+): () => void {
+  // Use the subcollection where valid notifications are stored
+  const notificationsRef = collection(db, 'notifications', userId, 'items');
+  // REMOVED orderBy('createdAt') to avoid filtering out docs missing this field
+  const q = query(
+    notificationsRef,
+    limit(100)
+  );
+
+  console.log(`🔔 Subscribing to notifications for user: ${userId}`);
+  return onSnapshot(q, (snapshot) => {
+    console.log(`🔔 Snapshot received. Docs: ${snapshot.docs.length}`);
+
+    if (snapshot.empty) {
+      console.log('🔔 Snapshot is empty.');
+      callback([]);
+      return;
+    }
+
+    const rawNotifications = snapshot.docs.map(doc => {
+      const data = doc.data();
+      // Debug first doc
+      if (doc.id === snapshot.docs[0].id) {
+        console.log('🔔 First Raw Notification:', JSON.stringify(data, null, 2));
+      }
+      return {
+        id: doc.id,
+        ...data,
+        // Ensure timestamp is number
+        timestamp: data.createdAt?.toMillis?.() || data.createdAt || data.timestamp?.toMillis?.() || data.timestamp || Date.now(),
+        // Ensure type exists
+        type: data.type || 'unknown'
+      };
+    });
+
+    const aggregated = aggregateNotifications(rawNotifications);
+    console.log(`🔔 Aggregated Count: ${aggregated.length}`);
+    callback(aggregated);
+  }, (error: any) => {
+    console.error('❌ Error in notification subscription:', error);
+  });
+}
+
+/**
+ * Pure aggregation logic
+ */
+function aggregateNotifications(rawList: any[]): AggregatedNotification[] {
+  console.log(`🔔 aggregating ${rawList.length} items...`);
+  const groups: { [key: string]: any[] } = {};
+  const result: AggregatedNotification[] = [];
+
+  // 1. Grouping
+  for (const notif of rawList) {
+    const type = (notif.type || '').toLowerCase();
+
+    // STRICT RULE: Messages NEVER appear in Notifications screen
+    if (type === 'message' || type === 'chat') {
+      // console.log('Skipping message:', notif.id);
+      continue;
+    }
+
+    let key = notif.id; // Default: no aggregation
+
+    // Aggregate LIKES and COMMENTS by postId
+    if (notif.postId && (type === 'like' || type === 'comment')) {
+      key = `${type}_${notif.postId}`;
+    }
+
+    // Follows are explicitly NOT aggregated per rules
+
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    groups[key].push(notif);
+  }
+
+  // 2. Formatting
+  for (const key in groups) {
+    const group = groups[key];
+    if (!group || group.length === 0) continue;
+    // Sort by time desc (within group)
+    group.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    const newest = group[0];
+    const uniqueActors = Array.from(new Set(group.map(n => n.actorId).filter(Boolean))) as string[];
+    const allDocIds = group.map(n => n.id);
+
+    // If any notification in the group is unread, the whole group is unread
+    const isUnread = group.some(n => !n.read);
+
+    // Extract preview image (try typical fields)
+    const previewImage = newest.data?.postImage || newest.postImage || newest.data?.imageUrl || newest.imageUrl;
+
+    result.push({
+      id: key,
+      type: newest.type,
+      count: group.length, // Total count of interactions
+      actors: uniqueActors,
+      docIds: allDocIds,
+      previewImage,
+      timestamp: newest.timestamp,
+      read: !isUnread, // read=true means ALL read (or displayed as read). If isUnread=true, read=false.
+      targetId: newest.postId || newest.actorId,
+      metadata: newest.data,
+      sourceUsername: newest.sourceUsername || newest.data?.sourceUsername
+    });
+  }
+
+  // 3. Sort final list by most recent activity
+  result.sort((a, b) => b.timestamp - a.timestamp);
+
+  return result;
+}
+

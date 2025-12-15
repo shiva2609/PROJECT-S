@@ -7,6 +7,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import * as FollowService from '../services/follow/follow.service';
+import { sendNotification } from '../../services/notifications/NotificationAPI';
+import { db } from '../../services/auth/authService';
+import { doc, getDoc } from 'firebase/firestore';
 
 interface UseFollowStatusReturn {
   isFollowing: boolean;
@@ -77,6 +80,32 @@ export function useFollowStatus(
         await FollowService.unfollowUser(loggedUid, targetUid);
       } else {
         await FollowService.followUser(loggedUid, targetUid);
+
+        // TRIGGER NOTIFICATION (Fixed: Added to correct hook)
+        console.log("🔥 [useFollowStatus] FOLLOW TRIGGERED");
+        try {
+          console.log("🔥 [useFollowStatus] Sending Notification...");
+
+          // Get source user data (current user)
+          // We can't use 'useUser' here because it might cause loop, so fetch directly or use passed prop?
+          // To be safe and quick: fetch source user profile
+          const sourceUserRef = doc(db, 'users', loggedUid);
+          const sourceUserSnap = await getDoc(sourceUserRef);
+          const sourceUserData = sourceUserSnap.exists() ? sourceUserSnap.data() : {};
+
+          await sendNotification(targetUid, {
+            type: 'follow',
+            actorId: loggedUid,
+            message: 'started following you',
+            data: {
+              sourceUsername: sourceUserData.username || 'Someone',
+              sourceAvatarUri: sourceUserData.photoURL || sourceUserData.profilePic || null
+            }
+          });
+          console.log("✅ [useFollowStatus] NOTIFICATION SUCCESS");
+        } catch (nErr) {
+          console.error("❌ [useFollowStatus] NOTIFICATION FAILED", nErr);
+        }
       }
     } catch (error: any) {
       // Rollback on error

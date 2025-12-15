@@ -56,17 +56,19 @@ const PostMedia = ({ media, ratio, aspectRatio, postId }: PostMediaProps) => {
         }
     }, [aspectRatio, ratio, media]);
 
-    const mediaWidth = screenWidth;
+    // Adjust width for inside-card look (marginHorizontal: 12 outer + 12 inner = 24 padding/side)
+    // total deduction: 24 (card margins) + 24 (internal spacing) = 48
+    const mediaWidth = screenWidth - 48;
     let mediaHeight: number;
 
     if (aspectRatio && aspectRatio > 0) {
-        mediaHeight = Math.round(screenWidth * (1 / aspectRatio));
+        mediaHeight = Math.round(mediaWidth * (1 / aspectRatio));
     } else if (ratio) {
-        mediaHeight = getAspectRatioHeight(screenWidth, undefined, ratio);
+        mediaHeight = getAspectRatioHeight(mediaWidth, undefined, ratio);
     } else if (calculatedAspectRatio && calculatedAspectRatio > 0) {
-        mediaHeight = Math.round(screenWidth * (1 / calculatedAspectRatio));
+        mediaHeight = Math.round(mediaWidth * (1 / calculatedAspectRatio));
     } else {
-        mediaHeight = screenWidth;
+        mediaHeight = mediaWidth;
         if (__DEV__) {
             console.warn('⚠️ [PostMedia] No aspectRatio, ratio, or image dimensions - defaulting to square', postId);
         }
@@ -84,15 +86,20 @@ const PostMedia = ({ media, ratio, aspectRatio, postId }: PostMediaProps) => {
         <View style={{
             width: mediaWidth,
             height: mediaHeight,
+            alignSelf: 'center', // Center the smaller image
             backgroundColor: 'black',
             overflow: 'hidden',
-            borderTopLeftRadius: 22,
-            borderTopRightRadius: 22,
+            borderRadius: 18,
             position: 'relative',
         }}>
+
+            {/* 
+              Apply borderRadius to match PostCard container. 
+              overflow: 'hidden' ensures images/videos clip correctly at the corners.
+            */}
             <PostCarousel
                 media={media}
-                ratio={ratio}
+                ratio={ratio as any}
                 aspectRatio={aspectRatio}
                 width={mediaWidth}
                 height={mediaHeight}

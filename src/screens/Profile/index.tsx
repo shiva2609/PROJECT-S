@@ -7,6 +7,7 @@
  * 3. listenToFollowState - follow state query
  */
 
+
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
@@ -195,13 +196,23 @@ export default function ProfileScreen({ navigation, route }: any) {
   }, [refresh]);
 
 
+  // Determine which posts to show
+  const displayedPosts = (activeTab === 'saved' ? savedPosts : posts) || [];
+
   // Render post thumbnail
-  const renderPostThumbnail = useCallback(({ item }: { item: Post }) => {
+  const renderPostThumbnail = useCallback(({ item, index }: { item: Post; index: number }) => {
     const imageUrl = item.imageURL || item.coverImage || (item.gallery && item.gallery[0]) || '';
     return (
       <TouchableOpacity
         style={styles.postThumbnail}
-        onPress={() => navigation?.navigate('PostDetail', { postId: item.id })}
+        onPress={() => {
+          navigation?.navigate('PostDetail', {
+            postId: item.id,
+            userId: profileUser?.id || targetUserId, // Context for feed fetch if needed
+            posts: displayedPosts, // Pass current list for immediate rendering
+            index: index // Pass index for fast scroll
+          });
+        }}
         activeOpacity={0.8}
       >
         {imageUrl ? (
@@ -217,7 +228,7 @@ export default function ProfileScreen({ navigation, route }: any) {
         )}
       </TouchableOpacity>
     );
-  }, [navigation]);
+  }, [navigation, profileUser?.id, targetUserId, displayedPosts]);
 
   if (loading) {
     return (
@@ -237,8 +248,7 @@ export default function ProfileScreen({ navigation, route }: any) {
     );
   }
 
-  // Determine which posts to show
-  const displayedPosts = (activeTab === 'saved' ? savedPosts : posts) || [];
+
 
   return (
     <SafeAreaView style={styles.container}>

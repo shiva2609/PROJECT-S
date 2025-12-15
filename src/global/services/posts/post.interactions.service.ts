@@ -31,6 +31,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../services/auth/authService';
 import { getUsersPublicInfo } from '../user/user.service';
+import { sendNotification } from '../../../services/notifications/NotificationAPI';
 
 /**
  * Toggle like on a post
@@ -42,12 +43,14 @@ export async function toggleLike(postId: string, userId: string, shouldLike?: bo
     throw new Error('Post ID and User ID are required');
   }
 
+  console.log("🔥 TOGGLE LIKE HIT", { postId, userId });
+
   const likeRef = doc(db, 'posts', postId, 'likes', userId);
   const legacyLikeRef = doc(db, 'likes', `${userId}_${postId}`);
   const postRef = doc(db, 'posts', postId);
 
   try {
-    await runTransaction(db, async (transaction) => {
+    const action = await runTransaction(db, async (transaction) => {
       // First, verify the post exists
       const postSnap = await transaction.get(postRef);
       if (!postSnap.exists()) {
@@ -89,7 +92,7 @@ export async function toggleLike(postId: string, userId: string, shouldLike?: bo
 
       } else {
         // Like: create the document and legacy doc
-        console.log('[toggleLike] Liking post:', postId, 'Current count:', currentLikeCount);
+        console.log("🔥 [toggleLike] Liking post:", postId, "Current count:", currentLikeCount);
         const timestamp = serverTimestamp();
 
         transaction.set(likeRef, {
@@ -108,11 +111,52 @@ export async function toggleLike(postId: string, userId: string, shouldLike?: bo
         transaction.update(postRef, {
           likeCount: newCount
         });
-        console.log('[toggleLike] New count after like:', newCount);
+        console.log("🔥 [toggleLike] New count after like:", newCount);
       }
+
+      return action;
     });
 
     console.log('[toggleLike] Transaction completed successfully for post:', postId);
+    console.log("🔥 [toggleLike] Transaction result:", action);
+
+    // NOTIFICATION TRIGGER
+    // action is returned from runTransaction
+    if (shouldLike !== false && action !== 'unlike' && action !== 'none') {
+      console.log("🔥 ABOUT TO TRIGGER LIKE NOTIFICATION");
+      try {
+        const postSnap = await getDoc(postRef);
+        if (postSnap.exists()) {
+          const postData = postSnap.data();
+          const authorId = postData.authorId || postData.userId || postData.createdBy;
+
+          if (authorId && authorId !== userId) {
+            console.log("🔥 SENDING LIKE NOTIFICATION TO:", authorId);
+            // Fetch liker details
+            const { getUserById } = await import('../../../services/users/usersService');
+            const liker = await getUserById(userId);
+
+            await sendNotification(authorId, {
+              type: 'like',
+              actorId: userId,
+              postId: postId,
+              message: 'liked your post',
+              data: {
+                postId,
+                postImage: postData.mediaUrl || postData.imageUrl || (postData.media && postData.media[0]),
+                sourceUsername: liker?.username || 'Someone',
+                sourceAvatarUri: liker?.photoUrl
+              }
+            });
+            console.log("✅ LIKE NOTIFICATION WRITE SUCCESS");
+          } else {
+            console.log("⚠️ SKIPPED: Self-like or missing authorId");
+          }
+        }
+      } catch (nErr) {
+        console.error("❌ LIKE NOTIFICATION FAILED", nErr);
+      }
+    }
   } catch (error) {
     console.error('[toggleLike] Transaction failed:', {
       postId,
@@ -223,6 +267,41 @@ export async function addComment(
   });
 
   await batch.commit();
+
+  // NOTIFICATION TRIGGER
+  console.log("🔥 ABOUT TO TRIGGER COMMENT NOTIFICATION");
+  try {
+    const postSnap = await getDoc(postRef);
+    if (postSnap.exists()) {
+      const postData = postSnap.data();
+      const authorId = postData.authorId || postData.userId || postData.createdBy;
+
+      if (authorId && authorId !== userId) {
+        console.log("🔥 SENDING COMMENT NOTIFICATION TO:", authorId);
+        // Fetch commenter details
+        const { getUserById } = await import('../../../services/users/usersService');
+        const commenter = await getUserById(userId);
+
+        await sendNotification(authorId, {
+          type: 'comment',
+          actorId: userId,
+          postId: postId,
+          message: `commented: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
+          data: {
+            postId,
+            commentId: commentRef.id,
+            text: text,
+            postImage: postData.mediaUrl || postData.imageUrl || (postData.media && postData.media[0]),
+            sourceUsername: commenter?.username || 'Someone',
+            sourceAvatarUri: commenter?.photoUrl
+          }
+        });
+        console.log("✅ COMMENT NOTIFICATION WRITE SUCCESS");
+      }
+    }
+  } catch (nErr) {
+    console.error("❌ COMMENT NOTIFICATION FAILED", nErr);
+  }
 
   return commentRef.id;
 }

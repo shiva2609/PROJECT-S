@@ -153,7 +153,7 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
         }}
         onShare={() => handleShare(item as any)}
         onBookmark={() => handleSave(item.id, isSaved)}
-        onProfilePress={() => onUserPress?.(authorId) || navigation?.push('ProfileScreen', { userId: authorId })}
+        onProfilePress={() => onUserPress?.(authorId) || navigation?.navigate('ProfileScreen', { userId: authorId })}
         onPostDetailPress={() => {
           const postIndex = posts.findIndex((p) => p.id === item.id);
           onPostPress?.(item) || navigation?.navigate('PostDetail', {
@@ -212,6 +212,8 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
         }
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 400 }}
         ListFooterComponent={
           <>
             {postsEnded && (

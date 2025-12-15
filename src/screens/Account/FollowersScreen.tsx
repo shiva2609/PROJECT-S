@@ -89,75 +89,122 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
 
   // Fetch user IDs and then full user data
   useEffect(() => {
+    let unsubscribeRelatime: (() => void) | undefined;
+
     const fetchUserList = async () => {
+      // Clear list only if active tab changes or userId changes
+      // setUserList([]); // Don't clear immediately to prevent flash? 
+      // Actually we should clear if the KEY changes (userId/tab)
+      setLoading(true);
+
       if (!profileUserId) {
         setLoading(false);
         return;
       }
 
-      setLoading(true);
-      try {
-        // Step 1: Get UIDs from follow service
-        console.log(`[FollowersScreen] Fetching ${activeTab} for userId:`, profileUserId);
-        const uids = activeTab === 'followers'
-          ? await FollowService.getFollowersIds(profileUserId)
-          : await FollowService.getFollowingIds(profileUserId);
+      // STRATEGY: 
+      // 1. If viewing own 'following', listen to real-time updates (so added users appear).
+      // 2. Otherwise (followers, or other's profile), fetch once.
 
-        console.log(`[FollowersScreen] Found ${uids.length} ${activeTab}:`, uids);
+      const shouldListen = isOwnProfile && activeTab === 'following';
 
-        if (uids.length === 0) {
-          console.log(`[FollowersScreen] No ${activeTab} found.`);
-          setUserList([]);
-          setLoading(false);
-          return;
-        }
+      if (shouldListen) {
+        console.log('[FollowersScreen] Listening to real-time following for own profile');
+        unsubscribeRelatime = FollowService.listenToFollowingIds(profileUserId, async (uids) => {
+          // This runs initially AND on updates
+          if (uids.length === 0) {
+            setUserList([]);
+            setLoading(false);
+            return;
+          }
 
-        // Step 2: Batch fetch full user data
-        const userInfos = await UserService.getUsersPublicInfo(uids);
+          // Optimization: we could diff, but for now just fetch all (with cache it's fast)
+          // Limit to recently added? No, we need full list. 
+          // Pagination? Screen doesn't support pagination yet.
+          try {
+            // For real-time sync, we unfortunately have to re-fetch users or rely on cache.
+            // UserService.getUsersPublicInfo handles caching.
+            const userInfos = await UserService.getUsersPublicInfo(uids);
 
-        // Step 3: Get current user's following IDs once for efficient follow-state check
-        let followingSet = new Set<string>();
-        if (currentUser?.uid) {
-          const followingIds = await FollowService.getFollowingIds(currentUser.uid);
-          followingSet = new Set(followingIds);
-        }
-
-        // Step 4: Build user list with follow state
-        const users: UserListItem[] = userInfos
-          .map((userInfo) => {
-            const isFollowing = currentUser?.uid && userInfo.uid !== currentUser.uid
-              ? followingSet.has(userInfo.uid)
-              : false;
-
-            return {
+            const users: UserListItem[] = userInfos.map(userInfo => ({
               uid: userInfo.uid,
               username: userInfo.username,
               displayName: userInfo.displayName,
               photoURL: userInfo.photoURL,
-              isFollowing,
+              isFollowing: true, // We are in 'following' list, so we follow them!
               verified: userInfo.verified || false,
-            } as UserListItem;
-          })
-          .filter((user): user is UserListItem => user !== null);
+            })).filter((u): u is UserListItem => u !== null);
 
-        setUserList(users);
+            setUserList(users);
 
-        // Build isFollowing map
-        const followingMap: Record<string, boolean> = {};
-        users.forEach((user) => {
-          followingMap[user.uid] = user.isFollowing;
+            // Also update map since we know we follow them
+            const newMap: Record<string, boolean> = {};
+            users.forEach(u => newMap[u.uid] = true);
+            setIsFollowingMap(prev => ({ ...prev, ...newMap }));
+
+          } catch (e) {
+            console.error('Error fetching real-time users:', e);
+          } finally {
+            setLoading(false);
+          }
         });
-        setIsFollowingMap(followingMap);
-      } catch (error) {
-        console.error('[FollowersScreen] Error fetching user list:', error);
-        setUserList([]);
-      } finally {
-        setLoading(false);
+      } else {
+        // One-time fetch (Original Logic)
+        try {
+          console.log(`[FollowersScreen] Fetching one-time ${activeTab} for userId:`, profileUserId);
+          const uids = activeTab === 'followers'
+            ? await FollowService.getFollowersIds(profileUserId)
+            : await FollowService.getFollowingIds(profileUserId);
+
+          if (uids.length === 0) {
+            setUserList([]);
+            setLoading(false);
+            return;
+          }
+
+          const userInfos = await UserService.getUsersPublicInfo(uids);
+
+          // Get following status for buttons
+          let followingSet = new Set<string>();
+          if (currentUser?.uid) {
+            const followingIds = await FollowService.getFollowingIds(currentUser.uid);
+            followingSet = new Set(followingIds);
+          }
+
+          const users: UserListItem[] = userInfos
+            .map((userInfo) => ({
+              uid: userInfo.uid,
+              username: userInfo.username,
+              displayName: userInfo.displayName,
+              photoURL: userInfo.photoURL,
+              isFollowing: currentUser?.uid && userInfo.uid !== currentUser.uid
+                ? followingSet.has(userInfo.uid)
+                : false,
+              verified: userInfo.verified || false,
+            }))
+            .filter((u): u is UserListItem => u !== null);
+
+          setUserList(users);
+
+          const followingMap: Record<string, boolean> = {};
+          users.forEach((user) => { followingMap[user.uid] = user.isFollowing; });
+          setIsFollowingMap(prev => ({ ...prev, ...followingMap }));
+
+        } catch (error) {
+          console.error('[FollowersScreen] Error fetching user list:', error);
+          setUserList([]);
+        } finally {
+          setLoading(false);
+        }
       }
     };
 
     fetchUserList();
-  }, [profileUserId, activeTab, currentUser?.uid]);
+
+    return () => {
+      if (unsubscribeRelatime) unsubscribeRelatime();
+    };
+  }, [profileUserId, activeTab, currentUser?.uid, isOwnProfile]);
 
   // Update active tab when initialTab changes
   useEffect(() => {
@@ -180,13 +227,52 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
     navigation?.navigate('Chats', { userId });
   };
 
+  // Real-time listener for MY following list (to update buttons)
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+
+    const unsubscribe = FollowService.listenToFollowingIds(currentUser.uid, (ids) => {
+      const newFollowingMap: Record<string, boolean> = {};
+      ids.forEach(id => { newFollowingMap[id] = true; });
+      setIsFollowingMap(newFollowingMap);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser?.uid]);
+
   const handleFollowToggle = async (userId: string) => {
     if (!currentUser?.uid || userId === currentUser.uid) return;
-
     const currentlyFollowing = isFollowingMap[userId] || false;
 
+    // Toggle immediately (Optimistic UI handled by map update? No, by listener)
+    // Actually, listener might be slow. We can do optimistic + listener validation.
+    // For now, let's trust the listener speed or do manual optim.
+
+    // We'll do optimistic update for instant feedback
+    setIsFollowingMap(prev => ({ ...prev, [userId]: !currentlyFollowing }));
+
+    try {
+      if (currentlyFollowing) {
+        // Confirm logic moved here for simplicity or keep modal?
+        // Reuse modal logic but call service directly
+        // The modal confirms, THEN calls this. So this is the ACTION.
+        // Wait, handleFollowToggle is called by the button directly?
+        // The original code had modal logic inside handleFollowToggle for Unfollow.
+        // We should keep that.
+      } else {
+        await FollowService.followUser(currentUser.uid, userId);
+      }
+    } catch (error) {
+      // Revert on error
+      setIsFollowingMap(prev => ({ ...prev, [userId]: currentlyFollowing }));
+      console.error('Error toggling follow:', error);
+    }
+  };
+
+  // Wrapper for button pres to handle Modal
+  const onFollowPress = (userId: string) => {
+    const currentlyFollowing = isFollowingMap[userId] || false;
     if (currentlyFollowing) {
-      // Show confirmation for unfollow
       setConfirmationModal({
         visible: true,
         title: 'Unfollow',
@@ -194,22 +280,17 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
         confirmLabel: 'Unfollow',
         onConfirm: async () => {
           setConfirmationModal(null);
+          // Optimistic
+          setIsFollowingMap(prev => ({ ...prev, [userId]: false }));
           try {
-            await FollowService.unfollowUser(currentUser.uid, userId);
-            setIsFollowingMap((prev) => ({ ...prev, [userId]: false }));
-          } catch (error: any) {
-            console.error('❌ Error unfollowing user:', error);
+            if (currentUser?.uid) await FollowService.unfollowUser(currentUser.uid, userId);
+          } catch (e) {
+            setIsFollowingMap(prev => ({ ...prev, [userId]: true }));
           }
         },
       });
     } else {
-      // Follow immediately
-      try {
-        await FollowService.followUser(currentUser.uid, userId);
-        setIsFollowingMap((prev) => ({ ...prev, [userId]: true }));
-      } catch (error: any) {
-        console.error('❌ Error following user:', error);
-      }
+      handleFollowToggle(userId);
     }
   };
 
@@ -288,7 +369,7 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
                 ]}
                 onPress={(e) => {
                   e.stopPropagation();
-                  handleFollowToggle(item.uid);
+                  onFollowPress(item.uid);
                 }}
               >
                 <Text
@@ -305,7 +386,7 @@ export default function FollowersScreen({ navigation, route }: FollowersScreenPr
         </View>
       </TouchableOpacity>
     );
-  }, [currentUser?.uid, isFollowingMap, isOwnProfile, usersFollowingBack, handleUserPress, handleMessagePress, handleFollowToggle]);
+  }, [currentUser?.uid, isFollowingMap, isOwnProfile, usersFollowingBack, handleUserPress, handleMessagePress]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

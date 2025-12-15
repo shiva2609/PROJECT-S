@@ -194,13 +194,13 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   const handleFollow = useCallback(async (targetUserId: string) => {
     try {
       await handleFollowUser(targetUserId);
-      // Refresh feeds after follow/unfollow
-      await refresh();
-      await refreshRelations(user?.uid || '');
+      // OPTIMISTIC UPDATE ONLY - DO NOT REFRESH FEED
+      // await refresh(); 
+      // await refreshRelations(user?.uid || '');
     } catch (error: any) {
       console.error('Error following user:', error);
     }
-  }, [handleFollowUser, refresh, refreshRelations, user?.uid]);
+  }, [handleFollowUser, user?.uid]);
 
   const renderPost = useCallback(({ item }: { item: PostWithAuthor }) => {
     const authorId = item.authorId || item.userId || item.createdBy || item.ownerId || '';
@@ -235,7 +235,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
         }}
         onShare={() => handleShare(item as any)}
         onBookmark={() => handleSave(item.id, isSaved)}
-        onProfilePress={() => navProp?.push('ProfileScreen', { userId: authorId })}
+        onProfilePress={() => navProp?.navigate('ProfileScreen', { userId: authorId })}
         onPostDetailPress={() => {
           const postIndex = displayedPosts.findIndex((p) => p.id === item.id);
           navProp?.navigate('PostDetail', {
@@ -322,6 +322,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
               maxToRenderPerBatch={10}
               updateCellsBatchingPeriod={50}
               removeClippedSubviews
+              contentContainerStyle={{ paddingBottom: 450 }}
               getItemLayout={(data, index) => ({
                 length: 600, // Approximate post height
                 offset: 600 * index,
@@ -355,7 +356,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
           ) : (
             <FollowingUsersScreen
               navigation={navProp}
-              onUserPress={(userId) => navProp?.push('ProfileScreen', { userId })}
+              onUserPress={(userId) => navProp?.navigate('ProfileScreen', { userId })}
               onPostPress={(post) => {
                 const postIndex = posts.findIndex((p) => p.id === post.id);
                 navProp?.navigate('PostDetail', {
