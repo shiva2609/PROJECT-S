@@ -1,8 +1,31 @@
 /**
- * Messages API
+ * SYSTEM INVARIANT - MESSAGING (V2)
+ * ---------------------------------
+ * 1. STORAGE PATHS:
+ *    - Conversations: collection('conversations')
+ *      - Doc ID: provided (e.g., 'uid1_uid2') or auto-generated
+ *      - Fields: participants: string[], lastMessage: string, lastMessageAt: Timestamp, updatedAt: Timestamp
+ *    - Messages: collection('conversations', {chatId}, 'messages')
+ *      - Doc ID: auto-generated
+ *      - Fields: text, mediaUrl, type, from, to, createdAt (Timestamp), read, delivered
+ *
+ * 2. LISTENER LOGIC:
+ *    - Inbox (ChatsScreen): filtered by `participants` array-contains userId.
+ *    - ChatRoom: ordered by `createdAt` desc.
+ *
+ * 3. TIMESTAMP HANDLING:
+ *    - Writes use `serverTimestamp()`.
+ *    - Reads MUST handle `null` (local pending write), `Timestamp` object, or `number`.
+ *    - UI must not crash on pending timestamps.
+ *
+ * 4. WRITE GUARANTEES:
+ *    - Sending a message MUST ensure the parent conversation document exists.
+ *    - Use setDoc(..., { merge: true }) for conversation metadata.
  * 
- * Handles messaging, conversations, and read receipts.
- * Messages stored in subcollections for scalability.
+ * 5. UNREAD TRUTH (CRITICAL):
+ *    - lastSenderId in conversation metadata is AUTHORITATIVE.
+ *    - IF lastSenderId === currentUser -> Conversation is READ (regardless of timestamps).
+ *    - Timestamps are ONLY checked if lastSenderId != currentUser.
  */
 
 import {
@@ -21,6 +44,7 @@ import {
   serverTimestamp,
   writeBatch,
   DocumentSnapshot,
+  onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../auth/authService';
 import { retryWithBackoff } from '../../utils/retry';
@@ -58,34 +82,39 @@ interface ConversationResult {
 // ---------- Helper Functions ----------
 
 function normalizeMessage(docSnap: DocumentSnapshot | any): Message {
-  // Use global normalizer for safe defaults
-  const normalized = normalizeMessageGlobal(docSnap);
-  if (!normalized) {
-    // Fallback to basic structure if normalization fails
-    const data = docSnap.data ? docSnap.data() : docSnap;
+  // 1. Unwrap Firestore Data correctly
+  const data = docSnap.data ? docSnap.data() : docSnap;
+  const id = docSnap.id || data.id || '';
+
+  // 2. Pass RAW DATA to global normalizer (not the snapshot object)
+  const normalized = normalizeMessageGlobal({ ...data, id });
+
+  if (normalized) {
     return {
-      id: docSnap.id || '',
-      from: data.from || '',
-      to: Array.isArray(data.to) ? data.to : [],
-      text: data.text || '',
-      mediaUrl: data.mediaUrl || '',
-      type: (data.type === 'image' || data.type === 'video') ? data.type : 'text',
-      createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
-      delivered: data.delivered === true,
-      read: data.read === true,
+      id: normalized.id,
+      from: normalized.from,
+      to: normalized.to,
+      text: normalized.text || '',
+      mediaUrl: normalized.mediaUrl || '',
+      type: normalized.type,
+      // Handle Timestamp / number / null (pending function)
+      createdAt: normalized.createdAt?.toMillis?.() || normalized.createdAt || Date.now(),
+      delivered: normalized.delivered || false,
+      read: normalized.read || false,
     };
   }
-  
+
+  // Fallback (Should be unreachable if global normalizer works)
   return {
-    id: normalized.id,
-    from: normalized.from,
-    to: normalized.to,
-    text: normalized.text || '',
-    mediaUrl: normalized.mediaUrl || '',
-    type: normalized.type,
-    createdAt: normalized.createdAt?.toMillis?.() || normalized.createdAt || Date.now(),
-    delivered: normalized.delivered || false,
-    read: normalized.read || false,
+    id,
+    from: data.from || '',
+    to: Array.isArray(data.to) ? data.to : [],
+    text: data.text || '',
+    mediaUrl: data.mediaUrl || '',
+    type: (data.type === 'image' || data.type === 'video') ? data.type : 'text',
+    createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
+    delivered: data.delivered === true,
+    read: data.read === true,
   };
 }
 
@@ -109,7 +138,7 @@ export async function createConversation(
       updatedAt: serverTimestamp(),
       ...meta,
     };
-    
+
     const docRef = await addDoc(conversationsRef, conversationData);
     return { conversationId: docRef.id };
   } catch (error: any) {
@@ -120,6 +149,7 @@ export async function createConversation(
 
 /**
  * Send a message to a conversation
+ * GUARANTEE: Updates parent conversation metadata (creates if missing)
  * @param conversationId - Conversation ID
  * @param message - Message data
  * @returns Message ID
@@ -129,6 +159,7 @@ export async function sendMessage(
   message: Partial<Message>
 ): Promise<{ messageId: string }> {
   try {
+    // 1. Write the Message
     const messagesRef = collection(db, 'conversations', conversationId, 'messages');
     const messageData = {
       ...message,
@@ -136,17 +167,43 @@ export async function sendMessage(
       delivered: false,
       read: false,
     };
-    
+
     const docRef = await addDoc(messagesRef, messageData);
-    
-    // Update conversation metadata
+
+    // 2. Update/Create Conversation Metadata (Self-Healing)
     const conversationRef = doc(db, 'conversations', conversationId);
-    await updateDoc(conversationRef, {
+
+    // Prepare update data
+    const updateData: any = {
       updatedAt: serverTimestamp(),
-      lastMessage: message.text || 'Media',
+      lastMessage: message.text || (message.type === 'image' ? 'Image' : 'Video'),
       lastMessageAt: serverTimestamp(),
-    });
-    
+      lastSenderId: message.from, // Critical for knowing if I sent the last message
+    };
+
+    // If participants are provided in the message, flush them to the conversation
+    // This repairs "missing conversation" bugs
+    if (message.to && message.from) {
+      // Construct participants array from 'from' and 'to'
+      // Ensure uniqueness
+      const participants = Array.from(new Set([message.from, ...message.to]));
+      updateData.participants = participants;
+    }
+
+    // Use setDoc with merge: true to handle both update and create scenarios
+    await setDoc(conversationRef, updateData, { merge: true });
+
+    // 3. Update Sender's Read Timestamp (PREVENT SELF-UNREAD)
+    // Ensures the sender doesn't see their own sent message as "unread" in the Inbox/Badge
+    const senderId = message.from;
+    if (senderId) {
+      const userLastReadRef = doc(db, 'users', senderId, 'lastRead', conversationId);
+      await setDoc(userLastReadRef, {
+        timestamp: serverTimestamp(),
+        lastReadAt: Date.now(),
+      }, { merge: true });
+    }
+
     return { messageId: docRef.id };
   } catch (error: any) {
     console.error('Error sending message:', error);
@@ -167,21 +224,21 @@ export async function fetchMessages(
   return retryWithBackoff(async () => {
     const limit = options?.limit || 50;
     const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-    
+
     let q = query(
       messagesRef,
       orderBy('createdAt', 'desc'),
       firestoreLimit(limit)
     );
-    
+
     if (options?.lastDoc) {
       q = query(q, startAfter(options.lastDoc));
     }
-    
+
     const querySnapshot = await getDocs(q);
     const messages = querySnapshot.docs.map(normalizeMessage).reverse(); // Reverse to show oldest first
     const lastDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
-    
+
     return {
       messages,
       nextCursor: querySnapshot.docs.length === limit ? lastDoc : undefined,
@@ -244,6 +301,67 @@ export async function setDeliveredReceipt(
 }
 
 /**
+ * Listen to conversations for a user
+ * @param userId - User ID
+ * @param callback - Function called with conversations array
+ * @returns Unsubscribe function
+ */
+export function listenToConversations(
+  userId: string,
+  callback: (conversations: any[]) => void
+): () => void {
+  const conversationsRef = collection(db, 'conversations');
+  const q = query(
+    conversationsRef,
+    where('participants', 'array-contains', userId),
+    orderBy('updatedAt', 'desc')
+  );
+
+  return onSnapshot(
+    q,
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      const conversations = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      callback(conversations);
+    },
+    (error) => {
+      console.error('Error listening to conversations:', error);
+      callback([]);
+    }
+  );
+}
+
+/**
+ * Listen to messages in a conversation
+ * @param conversationId - Conversation ID
+ * @param callback - Function called with messages array
+ * @returns Unsubscribe function
+ */
+export function listenToMessages(
+  conversationId: string,
+  callback: (messages: Message[]) => void
+): () => void {
+  const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+  const q = query(messagesRef, orderBy('createdAt', 'desc'));
+
+  return onSnapshot(
+    q,
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      const messages = snapshot.docs.map(normalizeMessage).reverse();
+      callback(messages);
+    },
+    (error) => {
+      console.error('Error listening to messages:', error);
+      callback([]);
+    }
+  );
+}
+
+/**
  * Get conversations for a user
  * @param userId - User ID
  * @param options - Pagination options
@@ -256,25 +374,25 @@ export async function getConversations(
   try {
     const limit = options?.limit || 20;
     const conversationsRef = collection(db, 'conversations');
-    
+
     let q = query(
       conversationsRef,
       where('participants', 'array-contains', userId),
       orderBy('updatedAt', 'desc'),
       firestoreLimit(limit)
     );
-    
+
     if (options?.lastDoc) {
       q = query(q, startAfter(options.lastDoc));
     }
-    
+
     const querySnapshot = await getDocs(q);
     const conversations = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
     }));
     const lastDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
-    
+
     return {
       conversations,
       nextCursor: querySnapshot.docs.length === limit ? lastDoc : undefined,
@@ -306,7 +424,7 @@ export async function sendTextMessage(conversationId: string, text: string, user
     from: userId || '',
     to: participants || [],
   });
-  
+
   // Fetch the created message to return full object
   const messageRef = doc(db, 'conversations', conversationId, 'messages', message.messageId);
   const messageSnap = await getDoc(messageRef);
@@ -320,7 +438,7 @@ export async function sendImageMessage(conversationId: string, uri: string, user
     from: userId || '',
     to: participants || [],
   });
-  
+
   const messageRef = doc(db, 'conversations', conversationId, 'messages', message.messageId);
   const messageSnap = await getDoc(messageRef);
   return normalizeMessage(messageSnap);
@@ -333,7 +451,7 @@ export async function sendVideoMessage(conversationId: string, uri: string, user
     from: userId || '',
     to: participants || [],
   });
-  
+
   const messageRef = doc(db, 'conversations', conversationId, 'messages', message.messageId);
   const messageSnap = await getDoc(messageRef);
   return normalizeMessage(messageSnap);

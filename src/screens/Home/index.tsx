@@ -26,7 +26,8 @@ import { useRewardOnboarding } from '../../hooks/useRewardOnboarding';
 import RewardPopCard from '../../components/common/RewardPopCard';
 import { useTopicClaimReminder } from '../../hooks/useTopicClaimReminder';
 import TopicClaimAlert from '../../components/common/TopicClaimAlert';
-import FollowingScreen from '../Account/FollowingScreen';
+import FollowingUsersScreen from '../Account/FollowingUsersScreen';
+import PostSkeleton from '../../components/post/PostSkeleton';
 
 /**
  * Home Feed Screen
@@ -39,77 +40,77 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   const navigation = useNavigation();
   const { following, refreshRelations } = useUserRelations();
   const { toggleFollow: handleFollowUser } = useUnifiedFollow();
-  
+
   // State must be defined before useHomeFeed hook
   const [selectedTab, setSelectedTab] = useState<'For You' | 'Following'>('For You');
-  
+
   // Use global home feed hook
-  const { 
-    feed: posts, 
-    loading, 
-    refreshing, 
-    hasMore, 
-    fetchMore, 
+  const {
+    feed: posts,
+    loading,
+    refreshing,
+    hasMore,
+    fetchMore,
     refresh,
     type: feedType
-  } = useHomeFeed(user?.uid, { 
+  } = useHomeFeed(user?.uid, {
     feedType: selectedTab === 'For You' ? 'foryou' : 'following',
     limit: 10
   });
-  
+
   // Local state for post updates
   const [postsState, setPostsState] = useState<PostWithAuthor[]>([]);
-  
+
   // Sync posts from hook
   useEffect(() => {
     setPostsState(posts);
   }, [posts]);
-  
+
   // Update post function
   const updatePost = useCallback((postId: string, updates: Partial<PostWithAuthor>) => {
     setPostsState((prev) =>
       prev.map((post) => (post.id === postId ? { ...post, ...updates } : post))
     );
   }, []);
-  
+
   // Remove post function
   const removePost = useCallback((postId: string) => {
     setPostsState((prev) => prev.filter((post) => post.id !== postId));
   }, []);
-  
+
   // Post actions with optimistic updates
   const postActions = usePostActions((postId: string, updates: any) => {
     // Apply optimistic updates to posts list
     const currentPost = posts.find(p => p.id === postId);
     if (currentPost) {
       const newUpdates: any = {};
-      
+
       // Handle function-based updates (for counts)
       if (typeof updates.likeCount === 'function') {
         newUpdates.likeCount = updates.likeCount(currentPost.likeCount);
       } else if (updates.likeCount !== undefined) {
         newUpdates.likeCount = updates.likeCount;
       }
-      
+
       if (typeof updates.commentCount === 'function') {
         newUpdates.commentCount = updates.commentCount(currentPost.commentCount);
       } else if (updates.commentCount !== undefined) {
         newUpdates.commentCount = updates.commentCount;
       }
-      
+
       if (updates.isLiked !== undefined) {
         newUpdates.isLiked = updates.isLiked;
       }
-      
+
       if (updates.isSaved !== undefined) {
         newUpdates.isSaved = updates.isSaved;
       }
-      
+
       updatePost(postId, newUpdates);
     }
   });
   const [unreadCounts, setUnreadCounts] = useState({ notifications: 0, messages: 0 });
-  
+
   const { visible: rewardVisible, claimed, points, claiming: rewardClaiming, error: rewardError, grantReward, dismiss: dismissReward, showReward } = useRewardOnboarding(user?.uid);
   const { showAlert: showTopicAlert, onClaimNow: handleTopicClaimNow, onRemindLater: handleTopicRemindLater } = useTopicClaimReminder(user?.uid, navigation);
 
@@ -145,9 +146,9 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   }, [postsState]);
 
   // Handle like with optimistic update
-  const handleLike = useCallback(async (postId: string) => {
+  const handleLike = useCallback(async (postId: string, currentIsLiked?: boolean) => {
     try {
-      await postActions.toggleLike(postId, (isLiked, countDelta) => {
+      await postActions.toggleLike(postId, currentIsLiked, (isLiked, countDelta) => {
         // Update is handled by postActions callback
       });
     } catch (error: any) {
@@ -156,9 +157,9 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   }, [postActions]);
 
   // Handle save with optimistic update
-  const handleSave = useCallback(async (postId: string) => {
+  const handleSave = useCallback(async (postId: string, currentIsSaved?: boolean) => {
     try {
-      await postActions.toggleSave(postId, (isSaved) => {
+      await postActions.toggleSave(postId, currentIsSaved, (isSaved) => {
         // Update is handled by postActions callback
       });
     } catch (error: any) {
@@ -167,7 +168,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   }, [postActions]);
 
   // Handle share
-  const handleShare = useCallback(async (post: Post) => {
+  const handleShare = useCallback(async (post: PostWithAuthor | any) => {
     try {
       await postActions.sharePost(post);
     } catch (error: any) {
@@ -203,11 +204,12 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
 
   const renderPost = useCallback(({ item }: { item: PostWithAuthor }) => {
     const authorId = item.authorId || item.userId || item.createdBy || item.ownerId || '';
-    const isLiked = postActions.isLiked(item.id);
-    const isSaved = postActions.isSaved(item.id);
+    // Use item properties as source of truth (populated by useHomeFeed and updated locally)
+    const isLiked = item.isLiked ?? false;
+    const isSaved = item.isSaved ?? false;
     const isOwnerFollowed = item.isFollowingAuthor ?? false;
     const showFollowButton = !isOwnerFollowed && selectedTab === 'For You' && authorId !== user?.uid;
-    
+
     // Create post object with author info for PostCard
     const postForCard = {
       ...item,
@@ -216,30 +218,30 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
       ownerAvatar: item.authorAvatar,
       avatarUri: item.authorAvatar,
     };
-    
+
     return (
       <PostCard
         post={postForCard as any}
         isLiked={isLiked}
         isSaved={isSaved}
-        onLike={() => handleLike(item.id)}
+        onLike={() => handleLike(item.id, isLiked)}
         onComment={() => {
           const postIndex = displayedPosts.findIndex((p) => p.id === item.id);
-          navProp?.navigate('PostDetail', { 
+          navProp?.navigate('PostDetail', {
             postId: item.id,
             posts: displayedPosts as any,
             index: postIndex >= 0 ? postIndex : 0,
           });
         }}
         onShare={() => handleShare(item as any)}
-        onBookmark={() => handleSave(item.id)}
+        onBookmark={() => handleSave(item.id, isSaved)}
         onProfilePress={() => navProp?.push('ProfileScreen', { userId: authorId })}
         onPostDetailPress={() => {
           const postIndex = displayedPosts.findIndex((p) => p.id === item.id);
-          navProp?.navigate('PostDetail', { 
-            posts: displayedPosts as any, 
+          navProp?.navigate('PostDetail', {
+            posts: displayedPosts as any,
             index: postIndex >= 0 ? postIndex : 0,
-            postId: item.id 
+            postId: item.id
           });
         }}
         currentUserId={user?.uid}
@@ -297,8 +299,9 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
       </View>
 
       {loading && posts.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.brand.primary} />
+        <View style={styles.skeletonContainer}>
+          <PostSkeleton />
+          <PostSkeleton />
         </View>
       ) : (
         <View style={{ flex: 1 }}>
@@ -350,15 +353,15 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
               }
             />
           ) : (
-            <FollowingScreen
+            <FollowingUsersScreen
               navigation={navProp}
               onUserPress={(userId) => navProp?.push('ProfileScreen', { userId })}
               onPostPress={(post) => {
                 const postIndex = posts.findIndex((p) => p.id === post.id);
-                navProp?.navigate('PostDetail', { 
-                  posts: posts, 
+                navProp?.navigate('PostDetail', {
+                  posts: posts,
                   index: postIndex >= 0 ? postIndex : 0,
-                  postId: post.id 
+                  postId: post.id
                 });
               }}
             />
@@ -435,6 +438,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  skeletonContainer: {
+    paddingTop: 10,
+  },
   emptyState: {
     alignItems: 'center',
     paddingVertical: 40,
@@ -464,4 +470,3 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.semibold,
   },
 });
-

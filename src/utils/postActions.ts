@@ -5,6 +5,24 @@
  * Handles optimistic updates and syncs with backend.
  */
 
+/**
+ * INVARIANT: SINGLE SOURCE OF TRUTH & STATE CORRECTNESS
+ * 
+ * 1. Post interactions (Like, Save) MUST be derived from the 'post' object passed from the feed.
+ *    - The feed (useHomeFeed) enriches posts with 'isLiked'/'isSaved' from Firestore.
+ *    - Local optimistic updates modify this 'post' object state via onPostUpdate callback.
+ *    - DO NOT rely on internal state of useLikesManager/useSaveManager for initial rendering,
+ *      as they are empty on mount and only track *changes* made efficiently.
+ * 
+ * 2. Optimistic Updates MUST be idempotent.
+ *    - toggleLike/toggleSave now accept 'currentIsLiked'/'currentIsSaved' to ensure we toggle
+ *      from the correct known state, even if the manager doesn't know it yet.
+ * 
+ * 3. Firestore is the ultimate source of truth.
+ *    - Writes go to Firestore. Real-time listeners or refresh logic ensures consistency.
+ * 
+ * CHANGE WITH CAUTION: Any changes to debounce or state logic must preserve this flow.
+ */
 import { useAuth } from '../providers/AuthProvider';
 import { useLikesManager } from '../hooks/useLikesManager';
 import { useSaveManager } from '../hooks/useSaveManager';
@@ -13,17 +31,17 @@ import * as PostsAPI from '../services/posts/postsService';
 
 export interface PostActions {
   // Like/Unlike
-  toggleLike: (postId: string, onUpdate?: (isLiked: boolean, newCount: number) => void) => Promise<void>;
+  toggleLike: (postId: string, currentIsLiked?: boolean, onUpdate?: (isLiked: boolean, newCount: number) => void) => Promise<void>;
   isLiked: (postId: string) => boolean;
-  
+
   // Save/Unsave
-  toggleSave: (postId: string, onUpdate?: (isSaved: boolean) => void) => Promise<void>;
+  toggleSave: (postId: string, currentIsSaved?: boolean, onUpdate?: (isSaved: boolean) => void) => Promise<void>;
   isSaved: (postId: string) => boolean;
-  
+
   // Comment
   addComment: (postId: string, text: string, onUpdate?: (newCount: number) => void) => Promise<void>;
   deleteComment: (postId: string, commentId: string, onUpdate?: (newCount: number) => void) => Promise<void>;
-  
+
   // Share
   sharePost: (post: any) => Promise<void>;
 }
@@ -33,9 +51,9 @@ export interface PostActions {
  * @param onPostUpdate - Callback to update post in local state (for optimistic updates)
  */
 export function usePostActions(
-  onPostUpdate?: (postId: string, updates: { 
-    isLiked?: boolean; 
-    isSaved?: boolean; 
+  onPostUpdate?: (postId: string, updates: {
+    isLiked?: boolean;
+    isSaved?: boolean;
     likeCount?: number | ((prev: number) => number);
     commentCount?: number | ((prev: number) => number);
   }) => void
@@ -50,13 +68,15 @@ export function usePostActions(
    */
   const toggleLike = async (
     postId: string,
+    currentIsLiked?: boolean,
     onUpdate?: (isLiked: boolean, newCount: number) => void
   ): Promise<void> => {
     if (!user?.uid) {
       throw new Error('User must be authenticated');
     }
 
-    const wasLiked = isLikedInternal(postId);
+    // Use explicit state if provided, otherwise fallback to internal manager state
+    const wasLiked = currentIsLiked ?? isLikedInternal(postId);
     const optimisticCount = wasLiked ? -1 : 1;
 
     // Optimistic UI update
@@ -68,8 +88,9 @@ export function usePostActions(
     }
 
     try {
-      await toggleLikeInternal(postId);
-      
+      // Pass explicit state to manager to ensure atomic toggle
+      await toggleLikeInternal(postId, wasLiked);
+
       // Final update after backend sync
       if (onUpdate) {
         onUpdate(!wasLiked, optimisticCount);
@@ -91,13 +112,14 @@ export function usePostActions(
    */
   const toggleSave = async (
     postId: string,
+    currentIsSaved?: boolean,
     onUpdate?: (isSaved: boolean) => void
   ): Promise<void> => {
     if (!user?.uid) {
       throw new Error('User must be authenticated');
     }
 
-    const wasSaved = isSavedInternal(postId);
+    const wasSaved = currentIsSaved ?? isSavedInternal(postId);
 
     // Optimistic UI update
     if (onPostUpdate) {
@@ -107,8 +129,8 @@ export function usePostActions(
     }
 
     try {
-      await toggleSaveInternal(postId);
-      
+      await toggleSaveInternal(postId, wasSaved);
+
       if (onUpdate) {
         onUpdate(!wasSaved);
       }
@@ -144,7 +166,7 @@ export function usePostActions(
 
     try {
       await addCommentInternal(postId, text);
-      
+
       const newCount = getCommentCount(postId);
       if (onUpdate) {
         onUpdate(newCount);
@@ -177,7 +199,7 @@ export function usePostActions(
 
     try {
       await deleteCommentInternal(postId, commentId);
-      
+
       const newCount = getCommentCount(postId);
       if (onUpdate) {
         onUpdate(newCount);
@@ -199,7 +221,7 @@ export function usePostActions(
   const sharePost = async (post: any): Promise<void> => {
     const { Share } = require('react-native');
     const mediaUrl = post.mediaUrls?.[0] || post.mediaUrl || post.imageUrl || '';
-    
+
     try {
       await Share.share({
         message: post.caption || 'Check out this post!',

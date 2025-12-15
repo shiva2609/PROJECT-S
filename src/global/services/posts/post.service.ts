@@ -52,17 +52,17 @@ export async function getPostsByIds(postIds: string[]): Promise<PostWithAuthor[]
       try {
         const postRef = doc(db, 'posts', postId);
         const postSnap = await getDoc(postRef);
-        
+
         if (postSnap.exists()) {
           const raw = { id: postSnap.id, ...postSnap.data() };
           const normalized = normalizePost(raw);
-          
+
           if (normalized && normalized.id && normalized.createdBy) {
-            const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage || 
-                                raw.finalCroppedUrl || null;
-            
+            const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage ||
+              raw.finalCroppedUrl || null;
+
             let imageURLs: string[] = [];
-            
+
             if (Array.isArray(raw.mediaUrls) && raw.mediaUrls.length > 0) {
               imageURLs = raw.mediaUrls.filter((url: any) => url && typeof url === 'string');
             } else if (Array.isArray(raw.gallery) && raw.gallery.length > 0) {
@@ -78,20 +78,20 @@ export async function getPostsByIds(postIds: string[]): Promise<PostWithAuthor[]
                 })
                 .filter((url: any): url is string => url !== null && typeof url === 'string');
             } else {
-              const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl || 
-                              normalized.mediaUrl || normalized.coverImage || null;
+              const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl ||
+                normalized.mediaUrl || normalized.coverImage || null;
               if (imageURL) {
                 imageURLs = [imageURL];
               }
             }
-            
+
             const post: PostWithAuthor = {
               ...normalized,
               authorId: normalized.createdBy || normalized.authorId || '',
               imageURL: rawImageURL,
               imageURLs: imageURLs.length > 0 ? imageURLs : (rawImageURL ? [rawImageURL] : []),
             };
-            
+
             return post;
           }
         }
@@ -101,7 +101,7 @@ export async function getPostsByIds(postIds: string[]): Promise<PostWithAuthor[]
         return null;
       }
     });
-    
+
     const posts = await Promise.all(postPromises);
     return posts.filter((p): p is PostWithAuthor => p !== null);
   } catch (error: any) {
@@ -121,6 +121,8 @@ export interface PostWithAuthor extends FirestorePost {
   isFollowingAuthor?: boolean;
   imageURL?: string | null;
   imageURLs?: string[];
+  isLiked?: boolean;
+  isSaved?: boolean;
 }
 
 /**
@@ -131,7 +133,8 @@ export interface PostWithAuthor extends FirestorePost {
  */
 export async function getPostsByUserIds(
   userIds: string[],
-  limitCount: number = 15
+  limitCount: number = 15,
+  lastVisiblePost: PostWithAuthor | null = null
 ): Promise<PostWithAuthor[]> {
   if (!userIds || userIds.length === 0) {
     return [];
@@ -141,16 +144,30 @@ export async function getPostsByUserIds(
     const chunks = chunkArray(userIds, 10); // Firestore 'in' limit is 10
     const allPosts: PostWithAuthor[] = [];
 
+    // Get timestamp for pagination if available
+    const lastTimestamp = lastVisiblePost?.createdAt;
+
     // Query each chunk
     for (const chunk of chunks) {
       try {
         const postsRef = collection(db, 'posts');
-        const q = query(
-          postsRef,
+        let constraints: any[] = [
           where('createdBy', 'in', chunk),
           orderBy('createdAt', 'desc'),
           limit(limitCount * 2) // Fetch more to account for merging across chunks
-        );
+        ];
+
+        // Apply pagination filter if we have a last post
+        if (lastTimestamp) {
+          constraints = [
+            where('createdBy', 'in', chunk),
+            where('createdAt', '<', lastTimestamp),
+            orderBy('createdAt', 'desc'),
+            limit(limitCount * 2)
+          ];
+        }
+
+        const q = query(postsRef, ...constraints);
 
         const snapshot = await getDocs(q);
 
@@ -161,11 +178,11 @@ export async function getPostsByUserIds(
 
             if (normalized && normalized.id && normalized.createdBy) {
               // Extract image URLs with comprehensive fallbacks
-              const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage || 
-                                  raw.finalCroppedUrl || null;
-              
+              const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage ||
+                raw.finalCroppedUrl || null;
+
               let imageURLs: string[] = [];
-              
+
               if (Array.isArray(raw.mediaUrls) && raw.mediaUrls.length > 0) {
                 imageURLs = raw.mediaUrls.filter((url: any) => url && typeof url === 'string');
               } else if (Array.isArray(raw.gallery) && raw.gallery.length > 0) {
@@ -185,15 +202,15 @@ export async function getPostsByUserIds(
               } else if (Array.isArray(normalized.gallery) && normalized.gallery.length > 0) {
                 imageURLs = normalized.gallery.filter((url: any) => url && typeof url === 'string');
               } else {
-                const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl || 
-                                normalized.mediaUrl || normalized.coverImage || null;
+                const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl ||
+                  normalized.mediaUrl || normalized.coverImage || null;
                 if (imageURL) {
                   imageURLs = [imageURL];
                 }
               }
 
               const finalImageURLs = imageURLs.length > 0 ? imageURLs : (rawImageURL ? [rawImageURL] : []);
-              
+
               const post: PostWithAuthor = {
                 ...normalized,
                 authorId: normalized.createdBy || normalized.authorId || '',
@@ -219,7 +236,7 @@ export async function getPostsByUserIds(
       return bTime - aTime;
     });
 
-    // Return ONLY first 'limitCount' posts (max 15 for Following feed)
+    // Return ONLY first 'limitCount' posts
     return allPosts.slice(0, limitCount);
   } catch (error: any) {
     console.error('[getPostsByUserIds] Error:', error);
@@ -264,11 +281,11 @@ export async function getNewerPostsByUserIds(
             const normalized = normalizePost(raw);
 
             if (normalized && normalized.id && normalized.createdBy) {
-              const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage || 
-                                  raw.finalCroppedUrl || null;
-              
+              const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage ||
+                raw.finalCroppedUrl || null;
+
               let imageURLs: string[] = [];
-              
+
               if (Array.isArray(raw.mediaUrls) && raw.mediaUrls.length > 0) {
                 imageURLs = raw.mediaUrls.filter((url: any) => url && typeof url === 'string');
               } else if (Array.isArray(raw.gallery) && raw.gallery.length > 0) {
@@ -284,8 +301,8 @@ export async function getNewerPostsByUserIds(
                   })
                   .filter((url: any): url is string => url !== null && typeof url === 'string');
               } else {
-                const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl || 
-                                normalized.mediaUrl || normalized.coverImage || null;
+                const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl ||
+                  normalized.mediaUrl || normalized.coverImage || null;
                 if (imageURL) {
                   imageURLs = [imageURL];
                 }
@@ -357,11 +374,11 @@ export async function getCandidatePostsForClassification(options?: {
         const normalized = normalizePost(raw);
 
         if (normalized && normalized.id && normalized.createdBy) {
-          const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage || 
-                              raw.finalCroppedUrl || null;
-          
+          const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage ||
+            raw.finalCroppedUrl || null;
+
           let imageURLs: string[] = [];
-          
+
           if (Array.isArray(raw.mediaUrls) && raw.mediaUrls.length > 0) {
             imageURLs = raw.mediaUrls.filter((url: any) => url && typeof url === 'string');
           } else if (Array.isArray(raw.gallery) && raw.gallery.length > 0) {
@@ -377,8 +394,8 @@ export async function getCandidatePostsForClassification(options?: {
               })
               .filter((url: any): url is string => url !== null && typeof url === 'string');
           } else {
-            const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl || 
-                            normalized.mediaUrl || normalized.coverImage || null;
+            const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl ||
+              normalized.mediaUrl || normalized.coverImage || null;
             if (imageURL) {
               imageURLs = [imageURL];
             }
@@ -445,11 +462,11 @@ export async function getSuggestedPosts(options?: {
         const normalized = normalizePost(raw);
 
         if (normalized && normalized.id && normalized.createdBy) {
-          const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage || 
-                              raw.finalCroppedUrl || null;
-          
+          const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage ||
+            raw.finalCroppedUrl || null;
+
           let imageURLs: string[] = [];
-          
+
           if (Array.isArray(raw.mediaUrls) && raw.mediaUrls.length > 0) {
             imageURLs = raw.mediaUrls.filter((url: any) => url && typeof url === 'string');
           } else if (Array.isArray(raw.gallery) && raw.gallery.length > 0) {
@@ -465,8 +482,8 @@ export async function getSuggestedPosts(options?: {
               })
               .filter((url: any): url is string => url !== null && typeof url === 'string');
           } else {
-            const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl || 
-                            normalized.mediaUrl || normalized.coverImage || null;
+            const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl ||
+              normalized.mediaUrl || normalized.coverImage || null;
             if (imageURL) {
               imageURLs = [imageURL];
             }
@@ -530,11 +547,11 @@ export async function getNewerSuggestedPosts(
         const normalized = normalizePost(raw);
 
         if (normalized && normalized.id && normalized.createdBy) {
-          const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage || 
-                              raw.finalCroppedUrl || null;
-          
+          const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage ||
+            raw.finalCroppedUrl || null;
+
           let imageURLs: string[] = [];
-          
+
           if (Array.isArray(raw.mediaUrls) && raw.mediaUrls.length > 0) {
             imageURLs = raw.mediaUrls.filter((url: any) => url && typeof url === 'string');
           } else if (Array.isArray(raw.gallery) && raw.gallery.length > 0) {
@@ -550,8 +567,8 @@ export async function getNewerSuggestedPosts(
               })
               .filter((url: any): url is string => url !== null && typeof url === 'string');
           } else {
-            const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl || 
-                            normalized.mediaUrl || normalized.coverImage || null;
+            const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl ||
+              normalized.mediaUrl || normalized.coverImage || null;
             if (imageURL) {
               imageURLs = [imageURL];
             }
@@ -590,7 +607,7 @@ export function listenToPostsByUserIds(
 ): Unsubscribe {
   if (!userIds || userIds.length === 0) {
     callback([]);
-    return () => {};
+    return () => { };
   }
 
   try {
@@ -628,11 +645,11 @@ export function listenToPostsByUserIds(
 
                 if (normalized && normalized.id && normalized.createdBy) {
                   // Extract image URLs with comprehensive fallbacks (same logic as getPostsByUserIds)
-                  const rawImageURL = rawData.imageURL || rawData.imageUrl || rawData.mediaUrl || rawData.coverImage || 
-                                      rawData.finalCroppedUrl || null;
-                  
+                  const rawImageURL = rawData.imageURL || rawData.imageUrl || rawData.mediaUrl || rawData.coverImage ||
+                    rawData.finalCroppedUrl || null;
+
                   let imageURLs: string[] = [];
-                  
+
                   if (Array.isArray(rawData.mediaUrls) && rawData.mediaUrls.length > 0) {
                     imageURLs = rawData.mediaUrls.filter((url: any) => url && typeof url === 'string');
                   } else if (Array.isArray(rawData.gallery) && rawData.gallery.length > 0) {
@@ -662,15 +679,15 @@ export function listenToPostsByUserIds(
                       })
                       .filter((url: any): url is string => url !== null && typeof url === 'string');
                   } else {
-                    const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl || 
-                                    normalized.mediaUrl || normalized.coverImage || null;
+                    const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl ||
+                      normalized.mediaUrl || normalized.coverImage || null;
                     if (imageURL) {
                       imageURLs = [imageURL];
                     }
                   }
 
-                  const finalImageURL = rawImageURL || normalized.imageURL || normalized.imageUrl || 
-                                       normalized.mediaUrl || normalized.coverImage || null;
+                  const finalImageURL = rawImageURL || normalized.imageURL || normalized.imageUrl ||
+                    normalized.mediaUrl || normalized.coverImage || null;
 
                   const post: PostWithAuthor = {
                     ...normalized,
@@ -714,7 +731,7 @@ export function listenToPostsByUserIds(
   } catch (error: any) {
     console.error('[listenToPostsByUserIds] Setup error:', error);
     callback([]);
-    return () => {};
+    return () => { };
   }
 }
 

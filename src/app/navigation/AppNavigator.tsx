@@ -8,10 +8,11 @@ import {
 } from '@react-navigation/native-stack';
 import { TransitionPresets } from '@react-navigation/stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { colors } from '../../utils/colors';
 import { useAuth } from '../../providers/AuthProvider';
+import { auth } from '../../core/firebase/auth';
 
 // Screens - TODO: Update paths after screen reorganization
 import SplashScreen from '../../screens/SplashScreen';
@@ -104,7 +105,42 @@ export default function AppNavigator() {
 
   // Wait for Firebase Auth to initialize before rendering routes
   // Wait for Firebase Auth to initialize AND user profile to load
-  if (!initialized || loading || (user && !userProfile)) {
+  // Determine if we are in a loading state
+  const isGlobalLoading = !initialized || loading || (user && !userProfile);
+  const [isSlowConnection, setIsSlowConnection] = React.useState(false);
+
+  // Safety Timeout: If loading takes too long (> 8s), warn the user and offer logout
+  React.useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    if (isGlobalLoading) {
+      timeout = setTimeout(() => {
+        setIsSlowConnection(true);
+      }, 8000); // 8 seconds timeout
+    } else {
+      setIsSlowConnection(false);
+    }
+    return () => clearTimeout(timeout);
+  }, [isGlobalLoading]);
+
+  // Wait for Firebase Auth to initialize AND user profile to load
+  if (isGlobalLoading) {
+    if (isSlowConnection) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background, padding: 20 }}>
+          <Icon name="alert-circle-outline" size={48} color={colors.danger || '#ff0000'} />
+          <Text style={{ marginTop: 16, fontSize: 16, textAlign: 'center', color: colors.text }}>
+            Taking longer than usual to load your profile...
+          </Text>
+          <TouchableOpacity
+            style={{ marginTop: 20, padding: 12, backgroundColor: colors.primary, borderRadius: 8 }}
+            onPress={() => auth.signOut()}
+          >
+            <Text style={{ color: 'white', fontWeight: 'bold' }}>Log Out & Retry</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -381,7 +417,7 @@ export default function AppNavigator() {
                 }}
               />
               <Stack.Screen
-                name="FollowingScreen"
+                name="FollowingList"
                 component={FollowersScreen}
                 options={{
                   headerShown: false,

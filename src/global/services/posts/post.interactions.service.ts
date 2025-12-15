@@ -37,7 +37,7 @@ import { getUsersPublicInfo } from '../user/user.service';
  * Creates or deletes posts/{postId}/likes/{userId}
  * AND syncs with legacy root 'likes' collection for backward compatibility
  */
-export async function toggleLike(postId: string, userId: string): Promise<void> {
+export async function toggleLike(postId: string, userId: string, shouldLike?: boolean): Promise<void> {
   if (!postId || !userId) {
     throw new Error('Post ID and User ID are required');
   }
@@ -59,7 +59,22 @@ export async function toggleLike(postId: string, userId: string): Promise<void> 
       const exists = likeSnap.exists();
       const currentLikeCount = postSnap.data().likeCount || 0;
 
-      if (exists) {
+      // Determine action based on intent or toggle
+      let action: 'like' | 'unlike' | 'none';
+
+      if (shouldLike !== undefined) {
+        if (shouldLike && !exists) action = 'like';
+        else if (!shouldLike && exists) action = 'unlike';
+        else action = 'none';
+      } else {
+        action = exists ? 'unlike' : 'like';
+      }
+
+      if (action === 'none') {
+        return;
+      }
+
+      if (action === 'unlike') {
         // Unlike: delete the document and legacy doc
         console.log('[toggleLike] Unliking post:', postId, 'Current count:', currentLikeCount);
         transaction.delete(likeRef);
@@ -313,7 +328,7 @@ export function listenToPostComments(
  * Save → users/{userId}/savedPosts/{postId}
  * Unsave → delete doc
  */
-export async function toggleSavePost(postId: string, userId: string): Promise<void> {
+export async function toggleSavePost(postId: string, userId: string, shouldSave?: boolean): Promise<void> {
   if (!postId || !userId) {
     throw new Error('Post ID and User ID are required');
   }
@@ -322,10 +337,26 @@ export async function toggleSavePost(postId: string, userId: string): Promise<vo
   const postRef = doc(db, 'posts', postId);
 
   const savedPostSnap = await getDoc(savedPostRef);
+  const exists = savedPostSnap.exists();
 
   const batch = writeBatch(db);
 
-  if (savedPostSnap.exists()) {
+  // Determine action based on intent or toggle
+  let action: 'save' | 'unsave' | 'none';
+
+  if (shouldSave !== undefined) {
+    if (shouldSave && !exists) action = 'save';
+    else if (!shouldSave && exists) action = 'unsave';
+    else action = 'none';
+  } else {
+    action = exists ? 'unsave' : 'save';
+  }
+
+  if (action === 'none') {
+    return;
+  }
+
+  if (action === 'unsave') {
     // Unsave: delete the document
     batch.delete(savedPostRef);
     // Optional: decrement savedCount on post if tracked
@@ -449,4 +480,59 @@ export function listenToSavedPosts(
       callback([]);
     }
   );
+}
+/**
+ * Get interaction states (liked, saved) for a batch of posts
+ * Efficiently fetches status for the current user
+ */
+export async function getPostInteractionStates(
+  userId: string,
+  postIds: string[]
+): Promise<Record<string, { isLiked: boolean; isSaved: boolean }>> {
+  if (!userId || !postIds || postIds.length === 0) {
+    return {};
+  }
+
+  const results: Record<string, { isLiked: boolean; isSaved: boolean }> = {};
+  const uniquePostIds = [...new Set(postIds)];
+
+  // Create promises for Likes and Saves
+  // 1. Check Likes: using legacy 'likes/{userId}_{postId}' collection for checking existence
+  const likePromises = uniquePostIds.map(async (postId) => {
+    try {
+      const docRef = doc(db, 'likes', `${userId}_${postId}`);
+      const snap = await getDoc(docRef);
+      return { postId, isLiked: snap.exists() };
+    } catch (e) {
+      console.warn(`Error checking like for ${postId}`, e);
+      return { postId, isLiked: false };
+    }
+  });
+
+  // 2. Check Saves: using 'users/{userId}/savedPosts/{postId}'
+  const savePromises = uniquePostIds.map(async (postId) => {
+    try {
+      const docRef = doc(db, 'users', userId, 'savedPosts', postId);
+      const snap = await getDoc(docRef);
+      return { postId, isSaved: snap.exists() };
+    } catch (e) {
+      console.warn(`Error checking save for ${postId}`, e);
+      return { postId, isSaved: false };
+    }
+  });
+
+  // Execute in parallel
+  const [likes, saves] = await Promise.all([
+    Promise.all(likePromises),
+    Promise.all(savePromises)
+  ]);
+
+  // Combine results
+  uniquePostIds.forEach(postId => {
+    const likeStatus = likes.find(l => l.postId === postId)?.isLiked || false;
+    const saveStatus = saves.find(s => s.postId === postId)?.isSaved || false;
+    results[postId] = { isLiked: likeStatus, isSaved: saveStatus };
+  });
+
+  return results;
 }

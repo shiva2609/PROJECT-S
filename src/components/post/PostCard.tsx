@@ -1,78 +1,45 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Image,
-  TouchableOpacity,
-  Animated,
   Dimensions,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/Ionicons';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../services/auth/authService';
 import { useProfilePhoto } from '../../hooks/useProfilePhoto';
-import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/users/userProfilePhotoService';
 import { Post } from '../../services/api/firebaseService';
 import { formatTimestamp, parseHashtags } from '../../utils/postHelpers';
 import { Fonts } from '../../theme/fonts';
 import { Colors } from '../../theme/colors';
-import PostCarousel, { MediaItem } from './PostCarousel';
 import { normalizePost } from '../../utils/postUtils';
-import VerifiedBadge from '../../components/user/VerifiedBadge';
 import PostDropdown from './PostDropdown';
 import { usePostInteractions } from '../../global/hooks/usePostInteractions';
 import { useFollowStatus } from '../../global/hooks/useFollowStatus';
-import ProfileAvatar from '../user/ProfileAvatar';
+import { MediaItem } from './PostCarousel';
 
-/**
- * Calculate image height using Instagram's exact formula
- * height = width * (1 / aspectRatio)
- * 
- * Uses numeric aspectRatio field first (primary), then falls back to ratio string
- */
-function getAspectRatioHeight(width: number, aspectRatio?: number, ratio?: string): number {
-  // PRIMARY: Use numeric aspectRatio field (stored in post document)
-  if (aspectRatio && aspectRatio > 0) {
-    // Instagram formula: height = width * (1 / aspectRatio)
-    return Math.round(width * (1 / aspectRatio));
-  }
-
-  // FALLBACK: Use ratio string if aspectRatio not available (legacy posts)
-  if (ratio) {
-    switch (ratio) {
-      case '1:1':
-        return width; // height = width * (1/1) = width
-      case '4:5':
-        return Math.round(width * 1.25); // height = width * (5/4) = width * 1.25
-      case '16:9':
-        return Math.round(width * 0.5625); // height = width * (9/16) = width * 0.5625
-      default:
-        return width; // default to square
-    }
-  }
-
-  // Default fallback
-  return width;
-}
+// Subcomponents
+import PostHeader from './PostHeader';
+import PostMedia from './PostMedia';
+import PostActions from './PostActions';
 
 interface PostCardProps {
   post: Post;
-  isLiked?: boolean; // Optional: will use real-time state if not provided
-  isSaved?: boolean; // Optional: will use real-time state if not provided
-  onLike?: () => void; // Optional: will use global service if not provided
+  isLiked?: boolean;
+  isSaved?: boolean;
+  onLike?: () => void;
   onComment: () => void;
   onShare: () => void;
-  onBookmark?: () => void; // Optional: will use global service if not provided
+  onBookmark?: () => void;
   onProfilePress: () => void;
   onPostDetailPress: () => void;
   onOptionsPress?: (post: Post) => void;
   currentUserId?: string;
-  isFollowing?: boolean; // Whether current user follows post creator
-  inForYou?: boolean; // Whether post appears in "For You" feed
-  showFollowButton?: boolean; // Whether to show Follow button (Instagram logic: only in For You feed)
-  onFollow?: (userId: string) => void; // Callback when user follows/unfollows
-  onPostRemoved?: (postId: string) => void; // Callback when post is removed from feed
+  isFollowing?: boolean;
+  inForYou?: boolean;
+  showFollowButton?: boolean;
+  onFollow?: (userId: string) => void;
+  onPostRemoved?: (postId: string) => void;
 }
 
 function PostCard({
@@ -94,28 +61,16 @@ function PostCard({
   onPostRemoved,
 }: PostCardProps) {
   // Safety check: return null if post is invalid
-  if (!post || !post.id) {
-    console.warn('[PostCard] Invalid post provided:', post);
-    return null;
-  }
-  // CRITICAL: Validate post exists before accessing properties
-  if (!post || !post.id) {
-    if (__DEV__) {
-      console.warn('[PostCard] Invalid post prop:', post);
-    }
-    return null;
-  }
+  // We cannot return early here because of hooks usage
+  // The hooks should deal gracefully with empty/invalid inputs
+
 
   const creatorId = post.createdBy || post.userId || post.ownerId || '';
 
-  // Use REAL-TIME follow status hook instead of static prop
-  // This ensures button updates instantly when Firestore changes
+  // Use REAL-TIME follow status hook
   const followStatus = useFollowStatus(currentUserId, creatorId);
-
-  // Use real-time state, fallback to prop for backward compatibility
   const isFollowing = followStatus.isFollowing || isFollowingProp || false;
 
-  // Instagram logic: showFollowButton = !isFollowing && inForYou && not own post
   const showFollowButton = showFollowButtonProp !== undefined
     ? showFollowButtonProp
     : (post.showFollowButton !== undefined
@@ -125,56 +80,45 @@ function PostCard({
   const [showDropdown, setShowDropdown] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
 
-  // Use global post interactions hook for real-time state with optimistic updates
+  // Use global post interactions hook
   const postInteractions = usePostInteractions(post.id, {
     initialIsLiked: isLiked,
     initialLikeCount: post.likeCount,
     initialIsSaved: isSaved
   });
 
-  // Use real-time state from hook directly (initialized with props)
   const actualIsLiked = postInteractions.isLiked;
   const actualIsSaved = postInteractions.isSaved;
   const actualLikeCount = postInteractions.likeCount;
   const actualCommentCount = postInteractions.commentCount || post.commentCount || 0;
 
-  // Handle like with global service
+  // Handle like
   const handleLike = useCallback(async () => {
     try {
       await postInteractions.toggleLike();
-      // Call optional callback for backward compatibility
-      if (onLike) {
-        onLike();
-      }
+      if (onLike) onLike();
     } catch (error: any) {
       console.error('[PostCard] Error toggling like:', error);
     }
   }, [postInteractions, onLike]);
 
-  // Handle save with global service
+  // Handle save
   const handleSave = useCallback(async () => {
     try {
       await postInteractions.toggleSave();
-      // Call optional callback for backward compatibility
-      if (onBookmark) {
-        onBookmark();
-      }
+      if (onBookmark) onBookmark();
     } catch (error: any) {
       console.error('[PostCard] Error toggling save:', error);
     }
   }, [postInteractions, onBookmark]);
 
-  // Handle follow with REAL-TIME hook (primary) or callback (fallback)
+  // Handle follow
   const handleFollow = useCallback(async () => {
     if (!creatorId) return;
-
     try {
-      // PRIMARY: Use real-time hook's toggleFollow for instant updates
       if (followStatus.toggleFollow) {
         await followStatus.toggleFollow();
       }
-
-      // FALLBACK: Call parent callback for backward compatibility
       if (onFollow) {
         await onFollow(creatorId);
       }
@@ -183,15 +127,12 @@ function PostCard({
     }
   }, [creatorId, followStatus, onFollow]);
 
-  // Check if verified is in post data, otherwise fetch from user document
+  // Check verification status
   useEffect(() => {
-    // First check if verified is stored in post
     if ((post as any).verified === true) {
       setIsVerified(true);
       return;
     }
-
-    // If not in post, fetch from user document
     if (creatorId) {
       const userRef = doc(db, 'users', creatorId);
       getDoc(userRef).then((snapshot) => {
@@ -200,37 +141,23 @@ function PostCard({
           const verified = userData.verificationStatus === 'verified' || userData.verified === true;
           setIsVerified(verified);
         }
-      }).catch(() => {
-        // Silently fail if user document not found
-      });
+      }).catch(() => { });
     }
   }, [post, creatorId]);
 
-
-
-  // Normalize post to get mediaUrls array (Instagram-like multi-image support)
+  // Normalize post to get mediaUrls array
   const normalizedPost = useMemo(() => {
     const normalized = normalizePost(post as any);
-
-    // Return normalized post with mediaUrls (final cropped bitmaps)
-    // mediaUrls contains the final rendered bitmaps from CropAdjustScreen
     return normalized;
   }, [post]);
 
-  // Get mediaUrls array - primary field for multi-image posts
-  // This contains the FINAL cropped bitmap URLs (exact adjusted frames)
-  // CRITICAL: Ensure mediaUrls is always an array, never undefined
-  // Priority: imageURLs (from enriched post) > mediaUrls > gallery > imageURL
   const imageURLs = (post as any).imageURLs || normalizedPost?.mediaUrls || [];
   const mediaUrls = Array.isArray(imageURLs) && imageURLs.length > 0
     ? imageURLs
     : (Array.isArray(normalizedPost?.mediaUrls) ? normalizedPost.mediaUrls : []);
 
-  // Convert mediaUrls to MediaItem[] with comprehensive fallbacks
-  // Priority: imageURLs (enriched) > mediaUrls > finalCroppedUrl > media array > mediaUrl > imageUrl > files[0].url
-  // CRITICAL: Always return an array, never undefined
+  // Convert mediaUrls to MediaItem[]
   const normalizedMedia: MediaItem[] = useMemo(() => {
-    // Priority 1: imageURLs from enriched post (from global service)
     const enrichedImageURLs = (post as any).imageURLs;
     if (Array.isArray(enrichedImageURLs) && enrichedImageURLs.length > 0) {
       return enrichedImageURLs
@@ -242,8 +169,6 @@ function PostCard({
         }));
     }
 
-    // Priority 2: mediaUrls array (contains final cropped bitmap URLs)
-    // CRITICAL: Ensure mediaUrls is an array before accessing .length
     if (Array.isArray(mediaUrls) && mediaUrls.length > 0) {
       return mediaUrls
         .filter((url: string) => url && typeof url === 'string' && url.length > 0)
@@ -254,7 +179,6 @@ function PostCard({
         }));
     }
 
-    // Priority 3: finalCroppedUrl (single image posts - final cropped bitmap)
     const finalCroppedUrl = (post as any).finalCroppedUrl;
     if (finalCroppedUrl && typeof finalCroppedUrl === 'string' && finalCroppedUrl.length > 0) {
       return [{
@@ -264,11 +188,9 @@ function PostCard({
       }];
     }
 
-    // Priority 4: Check media array (filter out undefined items)
-    // CRITICAL: Check if post.media exists and is an array before accessing .length
     if (post && post.media && Array.isArray(post.media) && post.media.length > 0) {
       const mediaItems = post.media
-        .filter((item: any) => item != null && typeof item === 'object') // Filter undefined/null
+        .filter((item: any) => item != null && typeof item === 'object')
         .map((item: any, index: number) => {
           const url = item?.url || item?.uri;
           if (url && typeof url === 'string' && url.length > 0) {
@@ -287,7 +209,6 @@ function PostCard({
       }
     }
 
-    // Priority 5: mediaUrl (single string field)
     const mediaUrl = (post as any).mediaUrl || post.mediaUrl;
     if (mediaUrl && typeof mediaUrl === 'string' && mediaUrl.length > 0) {
       return [{
@@ -297,7 +218,6 @@ function PostCard({
       }];
     }
 
-    // Priority 6: imageUrl (legacy field)
     const imageUrl = (post as any).imageUrl || post.imageUrl;
     if (imageUrl && typeof imageUrl === 'string' && imageUrl.length > 0) {
       return [{
@@ -307,7 +227,6 @@ function PostCard({
       }];
     }
 
-    // Priority 7: photoUrl (alternative field)
     const photoUrl = (post as any).photoUrl || post.photoUrl;
     if (photoUrl && typeof photoUrl === 'string' && photoUrl.length > 0) {
       return [{
@@ -317,7 +236,6 @@ function PostCard({
       }];
     }
 
-    // Priority 8: files[0]?.url (nested structure)
     const files = (post as any)?.files;
     if (Array.isArray(files) && files.length > 0 && files[0]) {
       const fileUrl = files[0]?.url || files[0]?.uri;
@@ -353,11 +271,8 @@ function PostCard({
     return [];
   }, [mediaUrls, (post as any)?.imageURLs, post?.media, (post as any)?.finalCroppedUrl, (post as any)?.mediaUrl, (post as any)?.imageUrl, (post as any)?.photoUrl, (post as any)?.files]);
 
-  // Get author info from post (enriched by global service) or use fallback
   const authorUsername = (post as any).authorUsername || post.username;
   const authorAvatar = (post as any).authorAvatar || (post as any).profilePhoto || (post as any).ownerAvatar || '';
-
-  // Use profile photo hook as fallback if authorAvatar not provided
   const profilePhotoFromHook = useProfilePhoto(creatorId || '');
   const profilePhoto = authorAvatar || profilePhotoFromHook;
 
@@ -365,84 +280,10 @@ function PostCard({
   const username = authorUsername;
   const timestamp = formatTimestamp(post.createdAt || Date.now());
 
-  // Use real-time counts from hook, fallback to post data
   const likeCount = actualLikeCount > 0 ? actualLikeCount : Math.max(0, post.likeCount || 0);
   const commentCount = actualCommentCount > 0 ? actualCommentCount : Math.max(0, post.commentCount || 0);
   const shareCount = Math.max(0, post.shareCount || 0);
-
-  const hasDetails = !!post.details || !!post.caption || normalizedMedia.length > 0; // Check if post has details
-
-  // Don't show follow button if viewing own post
   const isOwnPost = currentUserId === creatorId;
-
-  // INSTAGRAM LOGIC: Display the FINAL cropped bitmap at its native aspect ratio
-  // The final cropped bitmap already has the correct dimensions baked in:
-  // - 1:1 → 1080x1080 (aspectRatio = 1.0)
-  // - 4:5 → 1080x1350 (aspectRatio = 0.8)
-  // - 16:9 → 1920x1080 (aspectRatio = 1.777...)
-  // 
-  // We simply scale it to screen width and calculate height from aspectRatio
-  // NO frame recalculation - just use the stored aspectRatio from the final bitmap
-  // CRITICAL: aspectRatio is set by the user during upload and MUST NEVER be changed
-  const screenWidth = Dimensions.get('window').width;
-
-  // Use numeric aspectRatio field (stored from final cropped bitmap)
-  // aspectRatio = width/height of the final cropped bitmap
-  // This is set by the user during upload and MUST be preserved exactly
-  const aspectRatio = post.aspectRatio; // Numeric: 1, 0.8, 1.777, etc.
-  const ratio = post.ratio; // String: '1:1', '4:5', '16:9' (fallback)
-
-  // State for calculated aspect ratio from image dimensions (fallback)
-  const [calculatedAspectRatio, setCalculatedAspectRatio] = useState<number | null>(null);
-
-  // FALLBACK: Calculate aspect ratio from image dimensions if metadata is missing
-  // This matches Explore screen behavior - calculate from actual image when metadata unavailable
-  useEffect(() => {
-    // Only calculate if both aspectRatio and ratio are missing
-    if (!aspectRatio && !ratio && normalizedMedia.length > 0) {
-      const firstImageUri = normalizedMedia[0]?.uri;
-      if (firstImageUri) {
-        Image.getSize(
-          firstImageUri,
-          (width, height) => {
-            if (width > 0 && height > 0) {
-              const calculated = width / height;
-              setCalculatedAspectRatio(calculated);
-            }
-          },
-          () => {
-            // Silently fail - will use default square
-          }
-        );
-      }
-    } else {
-      setCalculatedAspectRatio(null);
-    }
-  }, [aspectRatio, ratio, normalizedMedia]);
-
-  // Instagram formula: width = screenWidth, height = screenWidth * (1 / aspectRatio)
-  // This displays the final cropped bitmap at full screen width, maintaining its native aspect ratio
-  // CRITICAL: Always use the stored aspectRatio - never override or default to a fixed value
-  // This ensures consistent aspect ratio rendering across all sections (For You, Following, Profile, etc.)
-  const mediaWidth = screenWidth;
-  let mediaHeight: number;
-
-  if (aspectRatio && aspectRatio > 0) {
-    // PRIMARY: Use stored aspectRatio from post (set by user during upload)
-    mediaHeight = Math.round(screenWidth * (1 / aspectRatio));
-  } else if (ratio) {
-    // FALLBACK 1: Use ratio string if aspectRatio not available (legacy posts)
-    mediaHeight = getAspectRatioHeight(screenWidth, undefined, ratio);
-  } else if (calculatedAspectRatio && calculatedAspectRatio > 0) {
-    // FALLBACK 2: Use calculated aspect ratio from image dimensions (Explore-style fallback)
-    mediaHeight = Math.round(screenWidth * (1 / calculatedAspectRatio));
-  } else {
-    // LAST RESORT: Default to square only if all methods fail
-    mediaHeight = screenWidth;
-    if (__DEV__) {
-      console.warn('⚠️ [PostCard] No aspectRatio, ratio, or image dimensions found for post', post.id, '- defaulting to square');
-    }
-  }
 
   const renderCaption = () => {
     if (!post.caption) return null;
@@ -465,149 +306,55 @@ function PostCard({
     );
   };
 
+  const handleMorePress = () => {
+    if (onOptionsPress) {
+      onOptionsPress(post);
+    } else if (currentUserId) {
+      setShowDropdown(true);
+    }
+  };
+
+  // Final Safety Check: If post is invalid, return null here (AFTER all hooks)
+  if (!post || !post.id) {
+    return null;
+  }
+
   return (
     <View style={styles.card}>
-      {/* Post Media - Use PostCarousel for multi-media support */}
-      {/* INSTAGRAM LOGIC: Display final cropped bitmap at full screen width, maintaining native aspect ratio */}
-      {/* CRITICAL: Check that normalizedMedia exists and is an array before accessing .length */}
-      {Array.isArray(normalizedMedia) && normalizedMedia.length > 0 ? (
-        <View style={{
-          width: mediaWidth,
-          height: mediaHeight,
-          backgroundColor: 'black', // prevent ash/white gaps during load
-          overflow: 'hidden', // Ensure counter stays within card bounds
-          borderTopLeftRadius: 22,
-          borderTopRightRadius: 22,
-          position: 'relative',
-        }}>
-          <PostCarousel
-            media={normalizedMedia}
-            ratio={post.ratio}
-            aspectRatio={post.aspectRatio}
-            width={mediaWidth}
-            height={mediaHeight}
-          />
-        </View>
-      ) : (
-        <View style={[styles.imageContainer, styles.postImagePlaceholder]}>
-          <Icon name="image-outline" size={48} color="#8E8E8E" />
-        </View>
-      )}
+      <PostHeader
+        username={username}
+        profilePhoto={profilePhoto}
+        userId={creatorId}
+        isVerified={isVerified}
+        location={location}
+        onProfilePress={onProfilePress}
+        showFollowButton={showFollowButton}
+        isFollowing={isFollowing}
+        isOwnPost={isOwnPost}
+        onFollow={handleFollow}
+        isFollowLoading={followStatus.loading}
+      />
 
-      {/* Creator Section */}
-      <View style={styles.creatorSection}>
-        <TouchableOpacity
-          style={styles.creatorLeft}
-          activeOpacity={0.8}
-          onPress={onProfilePress}
-        >
-          <ProfileAvatar
-            uri={profilePhoto}
-            size={38}
-            borderColor="#FFE3D6"
-            borderWidth={2}
-            backgroundColor="#F5F5F5"
-            iconColor="#8E8E8E"
-            userId={creatorId}
-          />
-          <View style={styles.creatorInfo}>
-            <View style={styles.usernameRow}>
-              <Text style={styles.username}>{username}</Text>
-              {/* Verified Badge */}
-              {isVerified && (
-                <View style={styles.verifiedBadge}>
-                  <VerifiedBadge size={14} />
-                </View>
-              )}
-            </View>
-            {location ? (
-              <View style={styles.locationRow}>
-                <Icon name="location-outline" size={12} color="#8E8E8E" />
-                <Text style={styles.location}>{location}</Text>
-              </View>
-            ) : null}
-          </View>
-        </TouchableOpacity>
+      <PostMedia
+        media={normalizedMedia}
+        ratio={post.ratio}
+        aspectRatio={post.aspectRatio}
+        postId={post.id}
+      />
 
-        {/* Right Section - Dynamic */}
-        {/* INSTAGRAM LOGIC: Show Follow button ONLY in For You feed when not following */}
-        <View style={styles.creatorRight}>
-          {!isOwnPost && showFollowButton ? (
-            <TouchableOpacity
-              style={[styles.followButton, followStatus.loading && styles.followButtonLoading]}
-              activeOpacity={0.8}
-              onPress={handleFollow}
-              disabled={followStatus.loading}
-            >
-              <Text style={styles.followButtonText}>
-                {isFollowing ? 'Following' : 'Follow'}
-              </Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      </View>
+      <PostActions
+        isLiked={actualIsLiked}
+        likeCount={likeCount}
+        onLike={handleLike}
+        commentCount={commentCount}
+        onComment={onComment}
+        shareCount={shareCount}
+        onShare={onShare}
+        isSaved={actualIsSaved}
+        onSave={handleSave}
+        onMorePress={handleMorePress}
+      />
 
-      {/* Icon Row */}
-      <View style={styles.iconRow}>
-        <TouchableOpacity
-          style={styles.actionPill}
-          activeOpacity={0.7}
-          onPress={handleLike}
-        >
-          <Icon
-            name={actualIsLiked ? 'heart' : 'heart-outline'}
-            size={18}
-            color={actualIsLiked ? Colors.brand.primary : Colors.brand.primary}
-          />
-          <Text style={styles.actionCount}>{likeCount}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.actionPill}
-          activeOpacity={0.7}
-          onPress={onComment}
-        >
-          <Icon name="chatbubble-outline" size={18} color={Colors.brand.primary} />
-          <Text style={styles.actionCount}>{commentCount}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.actionPill}
-          activeOpacity={0.7}
-          onPress={onShare}
-        >
-          <Icon name="paper-plane-outline" size={18} color={Colors.brand.primary} />
-          <Text style={styles.actionCount}>{shareCount}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.actionPill}
-          activeOpacity={0.7}
-          onPress={handleSave}
-        >
-          <Icon
-            name={actualIsSaved ? 'bookmark' : 'bookmark-outline'}
-            size={18}
-            color={actualIsSaved ? Colors.brand.primary : Colors.brand.primary}
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.actionPill}
-          activeOpacity={0.7}
-          onPress={() => {
-            if (onOptionsPress) {
-              onOptionsPress(post);
-            } else if (currentUserId) {
-              setShowDropdown(true);
-            }
-          }}
-        >
-          <Icon name="ellipsis-vertical" size={18} color={Colors.brand.primary} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Post Dropdown */}
       {currentUserId && creatorId && (
         <PostDropdown
           post={post}
@@ -621,10 +368,8 @@ function PostCard({
         />
       )}
 
-      {/* Caption */}
       {renderCaption()}
 
-      {/* Timestamp */}
       {timestamp ? <Text style={styles.timestamp}>{timestamp}</Text> : null}
     </View>
   );
@@ -642,132 +387,6 @@ const styles = StyleSheet.create({
     elevation: 6,
     marginHorizontal: 12,
     marginVertical: 10,
-  },
-  imageContainer: {
-    width: '100%',
-    // REMOVED fixed height: 340 - now calculated dynamically from aspectRatio
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#F5F5F5',
-  },
-  postImage: {
-    width: '100%',
-    height: '100%',
-  },
-  postImagePlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  creatorSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
-  },
-  creatorLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  profileImage: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 2,
-    borderColor: '#FFE3D6',
-    backgroundColor: '#F5F5F5',
-    marginRight: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  creatorInfo: {
-    flex: 1,
-  },
-  usernameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5, // 4-6px gap between username and badge
-    marginBottom: 2,
-  },
-  username: {
-    fontFamily: Fonts.bold,
-    fontSize: 14,
-    color: '#000000',
-  },
-  verifiedBadge: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  location: {
-    fontFamily: Fonts.regular,
-    fontSize: 12,
-    color: '#8E8E8E',
-  },
-  creatorRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  viewDetailsButton: {
-    backgroundColor: '#FFD4C3',
-    paddingHorizontal: 18,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  viewDetailsText: {
-    fontFamily: Fonts.semibold,
-    fontSize: 13,
-    color: '#FF7F4D',
-  },
-  followSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    position: 'relative',
-  },
-  followButton: {
-    backgroundColor: '#FF7F4D',
-    paddingHorizontal: 18,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  followButtonLoading: {
-    opacity: 0.6,
-  },
-  followButtonText: {
-    fontFamily: Fonts.semibold,
-    fontSize: 13,
-    color: '#FFFFFF',
-  },
-  iconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 12,
-    gap: 11, // 10-12px gap between pills
-  },
-  actionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 102, 0, 0.12)', // theme.orange with light opacity
-    borderRadius: 50, // Fully rounded
-    paddingHorizontal: 12, // 10-14px range
-    paddingVertical: 7, // 6-8px range
-    gap: 6, // Gap between icon and count
-  },
-  actionCount: {
-    fontFamily: Fonts.semibold, // Poppins-SemiBold
-    fontSize: 13.5, // 13-14px range
-    color: Colors.brand.primary, // theme.orange (solid)
   },
   captionContainer: {
     paddingHorizontal: 16,
@@ -793,17 +412,13 @@ const styles = StyleSheet.create({
   },
 });
 
-// Memoize PostCard to prevent unnecessary re-renders
 export default React.memo(PostCard, (prevProps, nextProps) => {
-  // Custom comparison function for better performance
   return (
     prevProps.post.id === nextProps.post.id &&
-    prevProps.post.likeCount === nextProps.post.likeCount &&
-    prevProps.post.commentCount === nextProps.post.commentCount &&
-    prevProps.post.shareCount === nextProps.post.shareCount &&
     prevProps.isLiked === nextProps.isLiked &&
     prevProps.isSaved === nextProps.isSaved &&
-    prevProps.currentUserId === nextProps.currentUserId
+    prevProps.isFollowing === nextProps.isFollowing &&
+    prevProps.post.likeCount === nextProps.post.likeCount &&
+    prevProps.post.commentCount === nextProps.post.commentCount
   );
 });
-

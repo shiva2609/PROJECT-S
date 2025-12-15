@@ -17,7 +17,7 @@ import { getLastReadTimestamp } from '../../services/notifications/notificationS
 import { useProfilePhoto } from '../../hooks/useProfilePhoto';
 import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/users/userProfilePhotoService';
 import { Colors } from '../../theme/colors';
-import { listenToUserChats, Chat } from '../../features/messages/services';
+import { listenToConversations } from '../../services/chat/MessagesAPI';
 import * as UsersAPI from '../../services/users/usersService';
 
 interface ChatListItem {
@@ -66,12 +66,15 @@ export default function ChatsScreen({ navigation }: any) {
       return;
     }
 
-    // Subscribe to V1 chats
-    const unsubscribe = listenToUserChats(user.uid, async (chats) => {
+    // Subscribe to V2 conversations (MessagesAPI)
+    const unsubscribe = listenToConversations(user.uid, async (conversations) => {
       try {
-        const chatItems = await Promise.all(chats.map(async (chat) => {
+        const chatItems = await Promise.all(conversations.map(async (chat) => {
           // Find other user ID
-          const otherUserId = chat.members.find(id => id !== user.uid);
+          // V2 uses 'participants' array
+          const participants = chat.participants || [];
+          const otherUserId = participants.find((id: string) => id !== user.uid);
+
           if (!otherUserId) return null;
 
           // Fetch other user profile
@@ -88,22 +91,36 @@ export default function ChatsScreen({ navigation }: any) {
             console.log('Error fetching user ' + otherUserId);
           }
 
-          const lastMessage = chat.lastMessage;
-          const lastMessageTime = lastMessage?.createdAt?.toMillis?.() || chat.updatedAt?.toMillis?.() || Date.now();
+          // Handle last message (V2 structure or V1 fallback)
+          const lastMessageText = typeof chat.lastMessage === 'string'
+            ? chat.lastMessage
+            : chat.lastMessage?.text || 'Start a conversation';
 
-          // Calculate unread status
-          // V1 Limitation: chat.lastMessage doesn't have seenBy yet. 
-          // Defaulting to false to safely render.
-          const isUnread = false;
+          const lastMessageTime = chat.lastMessageAt?.toMillis?.()
+            || chat.updatedAt?.toMillis?.()
+            || chat.lastMessage?.createdAt?.toMillis?.()
+            || Date.now();
+
+          // Unread status calculation (Client-side logic matched with notificationService)
+          const lastReadTime = await getLastReadTimestamp(user.uid, chat.id);
+          const isSender = chat.lastSenderId === user.uid;
+
+          if (chat.lastSenderId && isSender) {
+            // Explicitly logged to verify fix
+            // console.log(`[ChatsScreen] Chat ${chat.id} is sent by ME. Force READ.`);
+          }
+
+          // Force read if I am the sender, otherwise check timestamps
+          const isUnread = !isSender && (lastMessageTime > lastReadTime);
 
           const item: ChatListItem = {
-            id: chat.chatId,
+            id: chat.id,
             userId: otherUserId,
             username,
             profilePhoto,
-            lastMessage: lastMessage?.text || 'Start a conversation',
+            lastMessage: lastMessageText,
             lastMessageTime,
-            unreadCount: 0,
+            unreadCount: isUnread ? 1 : 0, // Simplified count
             isTyping: false,
             isUnread
           };

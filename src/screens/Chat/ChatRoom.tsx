@@ -21,7 +21,8 @@ import GlassHeader from '../../components/layout/GlassHeader';
 import UserAvatar from '../../components/user/UserAvatar';
 import { Colors } from '../../theme/colors';
 // Removed unused MessagesAPI import
-import { getOrCreateChat, sendMessage, listenToChat, markMessageSeen, Message } from '../../features/messages/services';
+// Replaced V1 imports with V2 MessagesAPI
+import { sendMessage, listenToMessages, setReadReceipt, Message } from '../../services/chat/MessagesAPI';
 
 interface ChatRoomScreenProps {
   navigation: any;
@@ -31,23 +32,14 @@ interface ChatRoomScreenProps {
 /**
  * Chat Room Screen
  * 
- * NAVIGATION CONTRACT:
- * - Requires: { chatId: string }
- * - No other params needed
- * 
- * Displays messages using V1 Message Service.
+ * Displays messages using V2 Messages API.
  */
 export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProps) {
   const { user } = useAuth();
-
-  // ENFORCE SINGLE NAVIGATION CONTRACT: Only chatId is required
   const chatId = route?.params?.chatId;
 
-  // Validate chatId exists
   if (!chatId) {
-    if (__DEV__) {
-      console.error('ChatRoomScreen missing chatId');
-    }
+    if (__DEV__) console.error('ChatRoomScreen missing chatId');
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.emptyState}>
@@ -61,18 +53,15 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
     );
   }
 
-  // Extract other user ID (format: "userId1_userId2")
   const [userId1, userId2] = chatId.split('_');
   const otherUserId = userId1 === user?.uid ? userId2 : userId1;
 
-  // State
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
   const [otherUserData, setOtherUserData] = useState<any>(null);
   const flatListRef = useRef<FlatList>(null);
 
-  // 1. Fetch other user data
   useEffect(() => {
     if (otherUserId) {
       import('../../services/users/usersService').then(async (UsersAPI) => {
@@ -86,22 +75,29 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
     }
   }, [otherUserId]);
 
-  // 2. Listen to Chat (V1 Service)
+  // Listen to Chat (V2 API)
   useEffect(() => {
     if (!chatId) return;
 
-    const unsubscribe = listenToChat(chatId, (newMessages) => {
-      // Reverse messages for Inverted FlatList (Newest at index 0)
-      setMessages(newMessages.reverse());
+    // Use V2 listener with metadata changes (pending writes)
+    const unsubscribe = listenToMessages(chatId, (newMessages) => {
+      // With includeMetadataChanges: true, this snapshot includes local pending writes.
+      // Firestore `orderBy('createdAt', 'desc')` handles pending timestamps by placing them at the top (newest).
+
+      // Inverted FlatList requires [Newest, ..., Oldest]
+      // MessagesAPI returns [Oldest, ..., Newest] (due to .reverse())
+      // So we reverse it BACK to [Newest, ..., Oldest]
+      const reversed = [...newMessages].reverse();
+
+      setMessages(reversed);
       setLoading(false);
 
-      // 3. Mark unseen messages as seen (V1 "Seen" Logic)
+      // Mark unseen messages as seen/read
       if (user?.uid) {
         newMessages.forEach(msg => {
-          // If message is from other user and I haven't seen it yet
-          if (msg.senderId !== user.uid && !msg.seenBy?.includes(user.uid)) {
-            markMessageSeen(chatId, msg.id, user.uid)
-              .catch(err => console.error('Failed to mark seen:', err));
+          if (msg.from !== user.uid && !msg.read) {
+            setReadReceipt(chatId, msg.id, user.uid)
+              .catch(err => console.error('Failed to set read receipt:', err));
           }
         });
       }
@@ -110,36 +106,42 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
     return () => unsubscribe();
   }, [chatId, user?.uid]);
 
-  // 4. Send Message (V1 Service)
   const handleSendText = useCallback(async () => {
     if (!messageText.trim() || !user?.uid || !chatId) return;
 
     const text = messageText.trim();
-    setMessageText(''); // Optimistic clear
+    setMessageText('');
 
     // Optimistic Update
     const tempId = `temp_${Date.now()}`;
-    const tempMessage: any = {
+    const tempMessage: Message = {
       id: tempId,
       text,
-      senderId: user.uid,
-      createdAt: { toMillis: () => Date.now() }, // Mock Timestamp
-      seenBy: [user.uid]
+      from: user.uid,
+      to: [otherUserId],
+      type: 'text',
+      createdAt: Date.now(),
+      read: false
     };
 
-    setMessages(prev => [tempMessage, ...prev]); // Add to start (Bottom of inverted list)
+    setMessages(prev => [tempMessage, ...prev]);
 
     try {
-      await sendMessage(chatId, user.uid, text);
-      // Listener will sync real data shortly
+      // V2 expects partial message object
+      // MUST include to/from for conversation auto-creation
+      await sendMessage(chatId, {
+        text,
+        type: 'text',
+        from: user.uid,
+        to: [otherUserId]
+      });
     } catch (error: any) {
       console.error('[ChatRoom] Send error:', error);
       Alert.alert('Error', 'Failed to send message');
-      setMessageText(text); // Restore on error
-      // Remove temp message
+      setMessageText(text);
       setMessages(prev => prev.filter(m => m.id !== tempId));
     }
-  }, [messageText, chatId, user?.uid]);
+  }, [messageText, chatId, user?.uid, otherUserId]);
 
   const handlePickImage = useCallback(async () => {
     // TODO: Integrate with useMediaManager
@@ -151,17 +153,26 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
     Alert.alert('Info', 'Video picker will be integrated with useMediaManager');
   }, []);
 
-  const renderMessage = useCallback(({ item }: { item: any }) => {
-    const isSent = item.senderId === user?.uid;
+  const renderMessage = useCallback(({ item }: { item: Message }) => {
+    // Robust check for current user
+    const currentUserId = user?.uid;
+    const isSent = currentUserId ? item.from === currentUserId : false;
     const type = isSent ? 'sent' : 'received';
-    const timestamp = item.createdAt?.toMillis ? item.createdAt.toMillis() : Date.now();
+
+    // Handle Timestamp or number
+    let timestamp = Date.now();
+    if (typeof item.createdAt === 'number') {
+      timestamp = item.createdAt;
+    } else if (item.createdAt?.toMillis) {
+      timestamp = item.createdAt.toMillis();
+    }
 
     return (
       <MessageBubble
         type={type}
         text={item.text}
-        imageUri={item.imageUri}
-        videoUri={item.videoUri}
+        imageUri={item.mediaUrl}
+        videoUri={item.type === 'video' ? item.mediaUrl : undefined}
         timestamp={timestamp}
       />
     );
@@ -228,22 +239,24 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
           <TextInput
             style={styles.textInput}
             placeholder="Type your message here"
-            placeholderTextColor={Colors.black.qua}
+            placeholderTextColor="#999"
             value={messageText}
-            onChangeText={setMessageText}
+            onChangeText={(text) => setMessageText(text)}
             multiline
             maxLength={1000}
           />
 
+          {/* Send Button Logic: If text is present, show Send. Else Mic. */}
           <TouchableOpacity
             style={styles.sendButton}
-            onPress={messageText.trim() ? handleSendText : undefined}
-            disabled={!messageText.trim()}
+            onPress={messageText.trim().length > 0 ? handleSendText : undefined}
+            disabled={messageText.trim().length === 0}
+            activeOpacity={0.7}
           >
             <Icon
-              name={messageText.trim() ? "send" : "mic-outline"}
+              name={messageText.trim().length > 0 ? "send" : "mic-outline"}
               size={22}
-              color={messageText.trim() ? Colors.brand.primary : Colors.black.qua}
+              color={messageText.trim().length > 0 ? Colors.brand.primary : Colors.black.qua}
             />
           </TouchableOpacity>
         </View>
@@ -255,7 +268,7 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.white.secondary,
+    backgroundColor: '#F5F5F7', // Explicit light gray background for contrast
   },
   keyboardView: {
     flex: 1,
@@ -317,18 +330,18 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.white.primary,
+    backgroundColor: '#FFFFFF', // Explicit white input background
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 20 : 12,
     paddingHorizontal: 16,
     borderTopWidth: 1,
-    borderTopColor: Colors.white.tertiary,
+    borderTopColor: '#EAEAEA',
   },
   attachButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: Colors.white.secondary,
+    backgroundColor: '#F5F5F5',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,
@@ -336,18 +349,18 @@ const styles = StyleSheet.create({
   textInput: {
     flex: 1,
     fontSize: 15,
-    color: Colors.black.primary,
+    color: '#000000', // Explicit black text
     maxHeight: 100,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: Colors.white.secondary,
+    backgroundColor: '#F5F5F5', // Light gray input field
     borderRadius: 20,
   },
   sendButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: Colors.white.secondary,
+    backgroundColor: '#F5F5F5',
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,

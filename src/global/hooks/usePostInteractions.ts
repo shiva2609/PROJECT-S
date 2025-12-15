@@ -138,7 +138,7 @@ export function usePostInteractions(
     setLikeCount(prev => previousLiked ? Math.max(0, prev - 1) : prev + 1);
 
     try {
-      await PostInteractions.toggleLike(postId, userId);
+      await PostInteractions.toggleLike(postId, userId, !previousLiked);
     } catch (error) {
       console.error('[usePostInteractions] Error toggling like:', error);
       // Revert on error
@@ -160,7 +160,7 @@ export function usePostInteractions(
     setIsSaved(!previousSaved);
 
     try {
-      await PostInteractions.toggleSavePost(postId, userId);
+      await PostInteractions.toggleSavePost(postId, userId, !previousSaved);
     } catch (error) {
       console.error('[usePostInteractions] Error toggling save:', error);
       // Revert on error
