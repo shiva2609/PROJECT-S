@@ -80,7 +80,7 @@ function normalizeUser(docSnap: QueryDocumentSnapshot<DocumentData>): User {
       verified: false,
     };
   }
-  
+
   return {
     id: normalized.id,
     username: normalized.username,
@@ -109,11 +109,11 @@ export async function getUserById(userId: string): Promise<User | null> {
       async () => {
         const userRef = doc(db, 'users', userId);
         const userSnap = await getDoc(userRef);
-        
+
         if (!userSnap.exists()) {
           return null;
         }
-        
+
         return normalizeUser(userSnap as QueryDocumentSnapshot<DocumentData>);
       },
       null
@@ -134,11 +134,11 @@ export async function getUserByUsername(username: string): Promise<User | null> 
     const usersRef = collection(db, 'users');
     const q = query(usersRef, where('username', '==', username.toLowerCase()), firestoreLimit(1));
     const querySnapshot = await getDocs(q);
-    
+
     if (querySnapshot.empty) {
       return null;
     }
-    
+
     return normalizeUser(querySnapshot.docs[0]);
   } catch (error: any) {
     console.error('Error getting user by username:', error);
@@ -155,15 +155,15 @@ export async function updateProfile(userId: string, data: Partial<User>): Promis
   try {
     const userRef = doc(db, 'users', userId);
     const updateData: any = { ...data };
-    
+
     // Remove id from update data if present
     delete updateData.id;
-    
+
     // Lowercase username for search
     if (updateData.username) {
       updateData.usernameLower = updateData.username.toLowerCase();
     }
-    
+
     await updateDoc(userRef, updateData);
   } catch (error: any) {
     console.error('Error updating profile:', error);
@@ -181,7 +181,7 @@ export async function checkUsernameAvailable(username: string): Promise<boolean>
     const usersRef = collection(db, 'users');
     const q = query(usersRef, where('username', '==', username.toLowerCase()), firestoreLimit(1));
     const querySnapshot = await getDocs(q);
-    
+
     return querySnapshot.empty;
   } catch (error: any) {
     console.error('Error checking username:', error);
@@ -191,31 +191,58 @@ export async function checkUsernameAvailable(username: string): Promise<boolean>
 
 /**
  * Search users by username or name
- * @param query - Search query string
+ * V1: Client-side filtering since usernameLower field may not exist in all user documents
+ * @param searchQuery - Search query string
  * @param limit - Maximum number of results (default: 20)
  * @returns Array of matching users
  */
-export async function searchUsers(query: string, limit: number = 20): Promise<User[]> {
+export async function searchUsers(searchQuery: string, limit: number = 20): Promise<User[]> {
   try {
-    const usersRef = collection(db, 'users');
-    const searchQuery = query.toLowerCase().trim();
-    
-    if (!searchQuery) {
+    const searchTerm = searchQuery.toLowerCase().trim();
+
+    if (!searchTerm) {
       return [];
     }
-    
-    // Search by username (exact match or starts with)
-    const usernameQuery = query(
+
+    const usersRef = collection(db, 'users');
+
+    // V1: Try indexed search first (if usernameLower exists)
+    try {
+      const indexedQuery = query(
+        usersRef,
+        where('usernameLower', '>=', searchTerm),
+        where('usernameLower', '<=', searchTerm + '\uf8ff'),
+        firestoreLimit(limit)
+      );
+
+      const indexedResults = await getDocs(indexedQuery);
+      if (indexedResults.docs.length > 0) {
+        return indexedResults.docs.map(normalizeUser);
+      }
+    } catch (indexError) {
+      // Index doesn't exist or usernameLower field missing, fall through to client-side search
+      console.log('Indexed search failed, using client-side filtering');
+    }
+
+    // V1: Fallback to client-side filtering
+    // Fetch recent users (up to 100) and filter client-side
+    const fallbackQuery = query(
       usersRef,
-      where('usernameLower', '>=', searchQuery),
-      where('usernameLower', '<=', searchQuery + '\uf8ff'),
-      firestoreLimit(limit)
+      orderBy('createdAt', 'desc'),
+      firestoreLimit(100)
     );
-    
-    const usernameResults = await getDocs(usernameQuery);
-    const users = usernameResults.docs.map(normalizeUser);
-    
-    return users;
+
+    const snapshot = await getDocs(fallbackQuery);
+    const allUsers = snapshot.docs.map(normalizeUser);
+
+    // Client-side case-insensitive search
+    const filtered = allUsers.filter(user => {
+      const username = (user.username || '').toLowerCase();
+      const displayName = (user.name || '').toLowerCase();
+      return username.includes(searchTerm) || displayName.includes(searchTerm);
+    });
+
+    return filtered.slice(0, limit);
   } catch (error: any) {
     console.error('Error searching users:', error);
     throw { code: 'search-users-failed', message: 'Failed to search users' };
@@ -245,82 +272,82 @@ export async function getFollowers(
     console.warn('[getFollowers] Invalid userId, returning empty list');
     return { users: [], nextCursor: undefined };
   }
-  
-    try {
-      const limit = options?.limit || 20;
-      const followersRef = collection(db, 'follows');
-      
-      // Build safe query with orderBy fallback
-      const baseQuery = query(followersRef, where('followingId', '==', userId));
-      
-      let q = buildSafeQuery(
-        baseQuery,
-        (base) => {
-          let ordered = query(base, orderBy('createdAt', 'desc'), firestoreLimit(limit));
-          if (options?.lastDoc) {
-            ordered = query(ordered, startAfter(options.lastDoc));
-          }
-          return ordered;
-        },
-        (base) => {
-          let simple = query(base, firestoreLimit(limit * 2)); // Fetch more for sorting
-          if (options?.lastDoc) {
-            simple = query(simple, startAfter(options.lastDoc));
-          }
-          return simple;
-        }
-      );
-      
-      // Try to execute query, fallback if index error
-      let docs = await safeGetDocs(q);
-      
-      // If we got empty and the query had orderBy, try without orderBy
-      if (docs.length === 0 && q.toString().includes('orderBy')) {
-        const fallbackQuery = query(
-          followersRef,
-          where('followingId', '==', userId),
-          firestoreLimit(limit * 2)
-        );
+
+  try {
+    const limit = options?.limit || 20;
+    const followersRef = collection(db, 'follows');
+
+    // Build safe query with orderBy fallback
+    const baseQuery = query(followersRef, where('followingId', '==', userId));
+
+    let q = buildSafeQuery(
+      baseQuery,
+      (base) => {
+        let ordered = query(base, orderBy('createdAt', 'desc'), firestoreLimit(limit));
         if (options?.lastDoc) {
-          const fallbackWithCursor = query(fallbackQuery, startAfter(options.lastDoc));
-          docs = await safeGetDocs(fallbackWithCursor);
-        } else {
-          docs = await safeGetDocs(fallbackQuery);
+          ordered = query(ordered, startAfter(options.lastDoc));
         }
-      }
-      
-      // Normalize and sort relations
-      const relations = docs
-        .map(normalizeRelationDocument)
-        .filter((rel): rel is NonNullable<typeof rel> => rel !== null);
-      
-      const sorted = sortByCreatedAtDesc(relations);
-      const limited = sorted.slice(0, limit);
-      
-      // Extract followerIds from normalized relations
-      const followerIds = limited
-        .map(rel => rel.followerId || rel.followedId)
-        .filter((id): id is string => id !== null && typeof id === 'string' && id.trim().length > 0);
-      
-      // Fetch user documents for followers
-      const users: User[] = [];
-      for (const followerId of followerIds) {
-        try {
-          const user = await getUserById(followerId);
-          if (user) {
-            users.push(user);
-          }
-        } catch (err) {
-          console.warn(`[getFollowers] Error fetching user ${followerId}:`, err);
+        return ordered;
+      },
+      (base) => {
+        let simple = query(base, firestoreLimit(limit * 2)); // Fetch more for sorting
+        if (options?.lastDoc) {
+          simple = query(simple, startAfter(options.lastDoc));
         }
+        return simple;
       }
-      
-      const lastDoc = docs[limited.length - 1];
-      
-      return {
-        users,
-        nextCursor: limited.length === limit ? lastDoc : undefined,
-      };
+    );
+
+    // Try to execute query, fallback if index error
+    let docs = await safeGetDocs(q);
+
+    // If we got empty and the query had orderBy, try without orderBy
+    if (docs.length === 0 && q.toString().includes('orderBy')) {
+      const fallbackQuery = query(
+        followersRef,
+        where('followingId', '==', userId),
+        firestoreLimit(limit * 2)
+      );
+      if (options?.lastDoc) {
+        const fallbackWithCursor = query(fallbackQuery, startAfter(options.lastDoc));
+        docs = await safeGetDocs(fallbackWithCursor);
+      } else {
+        docs = await safeGetDocs(fallbackQuery);
+      }
+    }
+
+    // Normalize and sort relations
+    const relations = docs
+      .map(normalizeRelationDocument)
+      .filter((rel): rel is NonNullable<typeof rel> => rel !== null);
+
+    const sorted = sortByCreatedAtDesc(relations);
+    const limited = sorted.slice(0, limit);
+
+    // Extract followerIds from normalized relations
+    const followerIds = limited
+      .map(rel => rel.followerId || rel.followedId)
+      .filter((id): id is string => id !== null && typeof id === 'string' && id.trim().length > 0);
+
+    // Fetch user documents for followers
+    const users: User[] = [];
+    for (const followerId of followerIds) {
+      try {
+        const user = await getUserById(followerId);
+        if (user) {
+          users.push(user);
+        }
+      } catch (err) {
+        console.warn(`[getFollowers] Error fetching user ${followerId}:`, err);
+      }
+    }
+
+    const lastDoc = docs[limited.length - 1];
+
+    return {
+      users,
+      nextCursor: limited.length === limit ? lastDoc : undefined,
+    };
   } catch (error: any) {
     console.error('Error getting followers:', error);
     // Return empty instead of throwing to prevent crashes
@@ -343,87 +370,87 @@ export async function getFollowing(
     console.warn('[getFollowing] Invalid userId, returning empty list');
     return { users: [], nextCursor: undefined };
   }
-  
-    try {
-      const limit = options?.limit || 20;
-      const followsRef = collection(db, 'follows');
-      
-      // Build safe query with orderBy fallback
-      const baseQuery = query(followsRef, where('followerId', '==', userId));
-      
-      let q = buildSafeQuery(
-        baseQuery,
-        (base) => {
-          let ordered = query(base, orderBy('createdAt', 'desc'), firestoreLimit(limit));
-          if (options?.lastDoc) {
-            ordered = query(ordered, startAfter(options.lastDoc));
-          }
-          return ordered;
-        },
-        (base) => {
-          let simple = query(base, firestoreLimit(limit * 2)); // Fetch more for sorting
-          if (options?.lastDoc) {
-            simple = query(simple, startAfter(options.lastDoc));
-          }
-          return simple;
-        }
-      );
-      
-      // Try to execute query, fallback if index error
-      let docs = await safeGetDocs(q);
-      
-      // If we got empty and the query had orderBy, try without orderBy
-      if (docs.length === 0 && q.toString().includes('orderBy')) {
-        const fallbackQuery = query(
-          followsRef,
-          where('followerId', '==', userId),
-          firestoreLimit(limit * 2)
-        );
+
+  try {
+    const limit = options?.limit || 20;
+    const followsRef = collection(db, 'follows');
+
+    // Build safe query with orderBy fallback
+    const baseQuery = query(followsRef, where('followerId', '==', userId));
+
+    let q = buildSafeQuery(
+      baseQuery,
+      (base) => {
+        let ordered = query(base, orderBy('createdAt', 'desc'), firestoreLimit(limit));
         if (options?.lastDoc) {
-          const fallbackWithCursor = query(fallbackQuery, startAfter(options.lastDoc));
-          docs = await safeGetDocs(fallbackWithCursor);
-        } else {
-          docs = await safeGetDocs(fallbackQuery);
+          ordered = query(ordered, startAfter(options.lastDoc));
         }
-      }
-      
-      // Normalize and sort relations
-      const relations = docs
-        .map(normalizeRelationDocument)
-        .filter((rel): rel is NonNullable<typeof rel> => rel !== null);
-      
-      const sorted = sortByCreatedAtDesc(relations);
-      const limited = sorted.slice(0, limit);
-      
-      // Extract followingIds from normalized relations
-      const followingIds = limited
-        .map(rel => rel.followingId || rel.followedId)
-        .filter((id): id is string => id !== null && typeof id === 'string' && id.trim().length > 0);
-      
-      // Fetch user documents for following
-      const users: User[] = [];
-      for (const followingId of followingIds) {
-        try {
-          const user = await getUserById(followingId);
-          if (user) {
-            users.push(user);
-          }
-        } catch (err) {
-          console.warn(`[getFollowing] Error fetching user ${followingId}:`, err);
+        return ordered;
+      },
+      (base) => {
+        let simple = query(base, firestoreLimit(limit * 2)); // Fetch more for sorting
+        if (options?.lastDoc) {
+          simple = query(simple, startAfter(options.lastDoc));
         }
+        return simple;
       }
-      
-      const lastDoc = docs[limited.length - 1];
-      
-      return {
-        users,
-        nextCursor: limited.length === limit ? lastDoc : undefined,
-      };
-    } catch (error: any) {
-      console.error('Error getting following:', error);
-      // Return empty instead of throwing to prevent crashes
-      return { users: [], nextCursor: undefined };
+    );
+
+    // Try to execute query, fallback if index error
+    let docs = await safeGetDocs(q);
+
+    // If we got empty and the query had orderBy, try without orderBy
+    if (docs.length === 0 && q.toString().includes('orderBy')) {
+      const fallbackQuery = query(
+        followsRef,
+        where('followerId', '==', userId),
+        firestoreLimit(limit * 2)
+      );
+      if (options?.lastDoc) {
+        const fallbackWithCursor = query(fallbackQuery, startAfter(options.lastDoc));
+        docs = await safeGetDocs(fallbackWithCursor);
+      } else {
+        docs = await safeGetDocs(fallbackQuery);
+      }
     }
+
+    // Normalize and sort relations
+    const relations = docs
+      .map(normalizeRelationDocument)
+      .filter((rel): rel is NonNullable<typeof rel> => rel !== null);
+
+    const sorted = sortByCreatedAtDesc(relations);
+    const limited = sorted.slice(0, limit);
+
+    // Extract followingIds from normalized relations
+    const followingIds = limited
+      .map(rel => rel.followingId || rel.followedId)
+      .filter((id): id is string => id !== null && typeof id === 'string' && id.trim().length > 0);
+
+    // Fetch user documents for following
+    const users: User[] = [];
+    for (const followingId of followingIds) {
+      try {
+        const user = await getUserById(followingId);
+        if (user) {
+          users.push(user);
+        }
+      } catch (err) {
+        console.warn(`[getFollowing] Error fetching user ${followingId}:`, err);
+      }
+    }
+
+    const lastDoc = docs[limited.length - 1];
+
+    return {
+      users,
+      nextCursor: limited.length === limit ? lastDoc : undefined,
+    };
+  } catch (error: any) {
+    console.error('Error getting following:', error);
+    // Return empty instead of throwing to prevent crashes
+    return { users: [], nextCursor: undefined };
+  }
 }
 
 /**
@@ -525,7 +552,7 @@ export async function getSuggested(
     const limit = options?.limit || 20;
     const excludeSet = new Set(options?.excludeFollowing || []);
     excludeSet.add(userId); // Exclude self
-    
+
     // Strategy 1: Get popular accounts (high follower count)
     const usersRef = collection(db, 'users');
     const popularQuery = query(
@@ -533,11 +560,11 @@ export async function getSuggested(
       orderBy('followersCount', 'desc'),
       firestoreLimit(limit * 2)
     );
-    
+
     const popularSnapshot = await getDocs(popularQuery);
     const suggestions: User[] = [];
     const seenIds = new Set<string>();
-    
+
     // Add popular users
     for (const docSnap of popularSnapshot.docs) {
       const user = normalizeUser(docSnap);
@@ -546,17 +573,17 @@ export async function getSuggested(
         seenIds.add(user.id);
       }
     }
-    
+
     // Strategy 2: Get users followed by my following (2nd degree)
     // This would require additional queries - simplified for now
-    
+
     // Strategy 3: Get new accounts (recently created)
     const newQuery = query(
       usersRef,
       orderBy('createdAt', 'desc'),
       firestoreLimit(limit)
     );
-    
+
     const newSnapshot = await getDocs(newQuery);
     for (const docSnap of newSnapshot.docs) {
       const user = normalizeUser(docSnap);
@@ -565,7 +592,7 @@ export async function getSuggested(
         seenIds.add(user.id);
       }
     }
-    
+
     return suggestions.slice(0, limit);
   } catch (error: any) {
     console.error('Error getting suggestions:', error);

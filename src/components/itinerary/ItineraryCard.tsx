@@ -18,7 +18,7 @@ interface ItineraryCardProps {
 
 export default function ItineraryCard({ itinerary, onSave }: ItineraryCardProps) {
   const days = Object.keys(itinerary.itinerary).sort();
-  
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -61,7 +61,7 @@ export default function ItineraryCard({ itinerary, onSave }: ItineraryCardProps)
             <View key={dayKey} style={[styles.dayCard, isLastDay && styles.lastDayCard]}>
               <Text style={styles.dayTitle}>{day.title}</Text>
               <View style={styles.divider} />
-              
+
               <View style={styles.timeSlot}>
                 <View style={styles.timeHeader}>
                   <Icon name="sunny-outline" size={20} color="#FF8C42" />
@@ -103,112 +103,120 @@ export default function ItineraryCard({ itinerary, onSave }: ItineraryCardProps)
 const styles = StyleSheet.create({
   container: {
     backgroundColor: Colors.white.primary,
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: 24,
+    padding: 24, // Increased padding
     maxWidth: '100%',
-    elevation: 3,
+    elevation: 2,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.02)',
   },
   header: {
-    marginBottom: 16,
+    marginBottom: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    paddingBottom: 20,
   },
   titleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
+    alignItems: 'flex-start',
+    marginBottom: 12,
   },
   title: {
+    flex: 1,
     fontFamily: Fonts.bold,
-    fontSize: 20,
+    fontSize: 22,
     color: Colors.black.primary,
-    marginLeft: 8,
+    marginLeft: 10,
+    lineHeight: 28,
   },
   summary: {
     fontFamily: Fonts.regular,
-    fontSize: 14,
-    color: Colors.black.qua,
-    lineHeight: 20,
-    marginBottom: 12,
+    fontSize: 15,
+    color: Colors.black.secondary,
+    lineHeight: 24, // Increased line height
+    marginBottom: 16,
   },
   metaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    marginTop: 4,
   },
   metaItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
-    marginBottom: 4,
+    marginRight: 16,
+    marginBottom: 8,
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
   metaText: {
     fontFamily: Fonts.medium,
-    fontSize: 12,
-    color: Colors.brand.primary,
+    fontSize: 13,
+    color: Colors.black.tertiary, // Softer meta text
   },
   daysContainer: {
-    // Removed maxHeight to show full itinerary
+    // Removed maxHeight
   },
   dayCard: {
-    marginBottom: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.white.qua,
+    marginBottom: 24,
+    // Removed border from individual days for cleaner flow
   },
   lastDayCard: {
-    borderBottomWidth: 0,
     marginBottom: 0,
-    paddingBottom: 0,
   },
   dayTitle: {
-    fontFamily: Fonts.semibold,
-    fontSize: 16,
-    color: Colors.black.secondary,
-    marginBottom: 12,
+    fontFamily: Fonts.bold,
+    fontSize: 18,
+    color: Colors.black.primary,
+    marginBottom: 16,
   },
   divider: {
     height: 1,
-    backgroundColor: Colors.white.qua,
-    marginBottom: 12,
+    backgroundColor: '#F0F0F0',
+    marginBottom: 16,
+    display: 'none', // Hide divider
   },
   timeSlot: {
-    marginBottom: 16,
+    marginBottom: 20,
+    flexDirection: 'row',
   },
   timeHeader: {
-    flexDirection: 'row',
+    width: 24,
     alignItems: 'center',
-    marginBottom: 8,
+    marginRight: 12,
+    marginTop: 2,
   },
   timeLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 14,
-    color: '#FF7A00',
-    marginLeft: 8,
+    // Hidden in favor of icon-only time indication or adjust
+    display: 'none',
   },
   activityText: {
+    flex: 1,
     fontFamily: Fonts.regular,
-    fontSize: 14,
-    color: Colors.black.tertiary,
-    lineHeight: 20,
-    marginLeft: 28,
-    paddingRight: 8,
+    fontSize: 15,
+    color: Colors.black.secondary,
+    lineHeight: 24,
   },
   saveButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.brand.primary,
-    borderRadius: 12,
-    paddingVertical: 12,
+    borderRadius: 16,
+    paddingVertical: 14,
     paddingHorizontal: 20,
-    marginTop: 12,
+    marginTop: 16,
   },
   saveButtonText: {
     fontFamily: Fonts.semibold,
-    fontSize: 15,
+    fontSize: 16,
     color: Colors.white.primary,
   },
 });

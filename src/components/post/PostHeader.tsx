@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     followButton: {
-        backgroundColor: '#FF7F4D',
+        backgroundColor: '#FF6600', // Brand primary color - official brand palette
         paddingHorizontal: 18,
         paddingVertical: 6,
         borderRadius: 20,

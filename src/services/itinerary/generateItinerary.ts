@@ -8,7 +8,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Gemini API Key
-const GEMINI_API_KEY = 'AIzaSyB1MvjBL9wCvJ1bplAOoxV2T3gEQMdgr4Q';
+const GEMINI_API_KEY = 'AIzaSyDqdG8bdhVuJqPnVjmlme9GbBqaxDg7RaM';
 
 export interface ItineraryDay {
   title: string;
@@ -64,7 +64,7 @@ export async function generateItinerary(prompt: string): Promise<ItineraryRespon
 
     // Initialize Gemini AI
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    
+
     // Try to use an available model, or fallback to gemini-pro
     let modelName = 'gemini-pro';
     if (availableModels.length > 0) {
@@ -73,7 +73,7 @@ export async function generateItinerary(prompt: string): Promise<ItineraryRespon
       const modelPro = availableModels.find(m => m.includes('pro'));
       modelName = model1_5 || modelPro || availableModels[0] || 'gemini-pro';
     }
-    
+
     const model = genAI.getGenerativeModel({ model: modelName });
     console.log(`📡 Using model: ${modelName}`);
 
@@ -211,9 +211,9 @@ function generateMockItinerary(prompt: string): { [key: string]: ItineraryDay } 
   const duration = extractDuration(prompt) || "3-day";
   const days = parseInt(duration) || 3;
   const destination = extractDestination(prompt) || "destination";
-  
+
   const itinerary: { [key: string]: ItineraryDay } = {};
-  
+
   for (let i = 1; i <= days; i++) {
     itinerary[`day${i}`] = {
       title: `Day ${i}: ${getDayTheme(i, destination)}`,
@@ -222,7 +222,7 @@ function generateMockItinerary(prompt: string): { [key: string]: ItineraryDay } 
       evening: getEveningActivity(i, destination),
     };
   }
-  
+
   return itinerary;
 }
 

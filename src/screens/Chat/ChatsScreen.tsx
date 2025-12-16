@@ -54,20 +54,52 @@ function ChatListItemAvatar({ userId, username }: { userId: string; username: st
   );
 }
 
+/**
+ * ============================================================================
+ * INBOX & READ SYNC ARCHITECTURE (FINAL V1)
+ * ============================================================================
+ * 
+ * 1. FIRESTORE PERSISTENCE (MANDATORY)
+ *    - Inbox MUST load instantly from local cache (IndexedDB).
+ *    - No spinners allowed after first install.
+ *    - We use `persistentLocalCache` in `core/firebase/firestore.ts`.
+ * 
+ * 2. CACHE-FIRST STRATEGY
+ *    - `ChatsScreen` initializes `loading=false` (or handles empty state gracefully).
+ *    - `onSnapshot` delivers cached data immediately.
+ *    - "Spinner" is only valid if cache is empty AND we are waiting for first fetch.
+ * 
+ * 3. REAL-TIME READ / UNREAD SYNC
+ *    - Read status is STATE-BASED: (lastMessageAt > lastReadAt)
+ *    - `ChatRoom` updates `users/{uid}/lastRead/{chatId}` on open/update.
+ *    - `ChatsScreen` listens to `users/{uid}/lastRead` collection.
+ *    - This ensures Inbox updates instantly when ChatRoom is opened.
+ * 
+ * 4. BADGE LOGIC
+ *    - Badges are derived purely from calculated unread counts.
+ *    - We do NOT store "unreadCount" in the user document to avoid de-sync.
+ *    - `notificationService` and `ChatsScreen` share the same derivation logic.
+ */
+
+// MODULE-LEVEL CACHE (Persists as long as app is alive)
+// This prevents spinner on re-navigation to ChatsScreen
+const globalCachedChats: { [chatId: string]: ChatListItem } = {};
+
 export default function ChatsScreen({ navigation }: any) {
   const { user } = useAuth();
   const [chats, setChats] = useState<ChatListItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Raw data from listeners
   const [rawConversations, setRawConversations] = useState<any[]>([]);
   const [lastReads, setLastReads] = useState<{ [chatId: string]: number }>({});
 
-  // 1. Listen to Conversations (V2)
+
   useEffect(() => {
+    // 1. Listen to Conversations (V2)
     if (!user?.uid) {
-      setLoading(false);
+      setInitialized(true);
       return;
     }
 
@@ -88,7 +120,6 @@ export default function ChatsScreen({ navigation }: any) {
         const reads: { [key: string]: number } = {};
         snapshot.docs.forEach((doc) => {
           const data = doc.data();
-          // Prioritize lastReadAt (number) -> timestamp (Firestore) -> 0
           reads[doc.id] = data.lastReadAt || data.timestamp?.toMillis?.() || 0;
         });
         setLastReads(reads);
@@ -106,6 +137,16 @@ export default function ChatsScreen({ navigation }: any) {
     let isMounted = true;
 
     const deriveChats = async () => {
+      // OPTIMIZATION: If we have cached chats, show them immediately while updating
+      // This prevents "spinner flicker" on updates
+      if (Object.keys(globalCachedChats).length > 0 && chats.length === 0) {
+        // Hydrate from cache immediately if state is empty
+        const cachedList = Object.values(globalCachedChats)
+          .sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+        setChats(cachedList);
+        setInitialized(true);
+      }
+
       try {
         const chatItems = await Promise.all(rawConversations.map(async (chat) => {
           // Find other user ID
@@ -114,18 +155,30 @@ export default function ChatsScreen({ navigation }: any) {
 
           if (!otherUserId) return null;
 
-          // Fetch other user profile
-          // Note: Ideally cache this, but for V1 we fetch to ensure freshness
+          // Check memory cache first for user profile
+          // But we always want to fetch fresh data eventually
+          // For now, simple fetch
           let otherUser = undefined;
           let username = 'User';
           let profilePhoto = undefined;
 
+          // Optimization: If we have this chat in cache, use its username/photo as placeholder
+          // while fetching fresh data
+          const cachedItem = globalCachedChats[chat.id];
+          if (cachedItem) {
+            username = cachedItem.username;
+            profilePhoto = cachedItem.profilePhoto;
+          }
+
           try {
+            // This is the bottleneck. Ideally UsersAPI should dedupe requests.
             otherUser = await UsersAPI.getUserById(otherUserId);
-            username = otherUser?.name || otherUser?.username || 'User';
-            profilePhoto = otherUser?.photoUrl;
+            if (otherUser) {
+              username = otherUser.name || otherUser.username || 'User';
+              profilePhoto = otherUser.photoUrl;
+            }
           } catch (e) {
-            // console.log('Error fetching user ' + otherUserId);
+            // Keep cached values if fetch fails
           }
 
           // Handle last message
@@ -139,11 +192,8 @@ export default function ChatsScreen({ navigation }: any) {
             || Date.now();
 
           // Unread Logic
-          // A. If I am the sender -> Read
-          // B. If I am NOT the sender -> Check timestamps
           const isSender = chat.lastSenderId === user.uid;
           const lastReadTime = lastReads[chat.id] || 0;
-
           const isUnread = !isSender && (lastMessageTime > lastReadTime);
 
           const item: ChatListItem = {
@@ -157,16 +207,22 @@ export default function ChatsScreen({ navigation }: any) {
             isTyping: false,
             isUnread
           };
+
+          // Update Cache
+          globalCachedChats[chat.id] = item;
           return item;
         }));
 
         const validChats = chatItems.filter((i): i is ChatListItem => i !== null);
 
         // --- Copilot Logic (Preserved) ---
-        // We can check copilot unread using the same lastReads map if it's stored there with 'sanchari-copilot' key
+        // ... (Copilot logic remains same) ...
         try {
           const hasCopilot = await hasCopilotChat(user.uid);
           if (hasCopilot) {
+            // ... logic same as before ...
+            // We can just re-use the existing loop or minimal fetch
+            // For brevity, keeping it simple:
             const copilotMessages = await getCopilotChatMessages(user.uid);
             if (copilotMessages.length > 0) {
               const lastCopilotMessage: any = copilotMessages[0];
@@ -174,7 +230,7 @@ export default function ChatsScreen({ navigation }: any) {
               const copilotReadTime = lastReads['sanchari-copilot'] || 0;
               const isUnread = lastMessageTime > copilotReadTime;
 
-              validChats.push({
+              const copilotItem: ChatListItem = {
                 id: 'sanchari-copilot',
                 userId: 'sanchari-copilot',
                 username: 'Sanchari Copilot',
@@ -184,7 +240,9 @@ export default function ChatsScreen({ navigation }: any) {
                 unreadCount: isUnread ? 1 : 0,
                 isTyping: false,
                 isUnread,
-              });
+              };
+              validChats.push(copilotItem);
+              globalCachedChats['sanchari-copilot'] = copilotItem;
             }
           }
         } catch (e) {
@@ -196,11 +254,11 @@ export default function ChatsScreen({ navigation }: any) {
 
         if (isMounted) {
           setChats(validChats);
-          setLoading(false);
+          setInitialized(true);
         }
       } catch (error) {
         console.error('Error processing chats:', error);
-        if (isMounted) setLoading(false);
+        if (isMounted) setInitialized(true);
       }
     };
 
@@ -297,7 +355,7 @@ export default function ChatsScreen({ navigation }: any) {
       </View>
 
       {/* Chat List */}
-      {loading ? (
+      {!initialized && chats.length === 0 ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#E87A5D" />
         </View>

@@ -56,7 +56,18 @@ export function useSearchManager(): UseSearchManagerReturn {
     setLoading(true);
     try {
       const results = await UsersAPI.searchUsers(query);
-      setUsersResults(results);
+
+      // Map User type to UserResult type (photoUrl -> avatarUri)
+      const mappedResults: UserResult[] = results.map(user => ({
+        id: user.id,
+        username: user.username,
+        displayName: user.name,
+        avatarUri: user.photoUrl, // Map photoUrl to avatarUri
+        isVerified: user.verified,
+        followerCount: user.followersCount,
+      }));
+
+      setUsersResults(mappedResults);
     } catch (error) {
       console.error('Error searching users:', error);
       setUsersResults([]);
@@ -96,13 +107,13 @@ export function useSearchManager(): UseSearchManagerReturn {
       const filtered = prev.filter(
         search => !(search.type === item.type && search.query === item.query)
       );
-      
+
       // Add new item at the beginning
       const newItem: RecentSearch = {
         ...item,
         timestamp: Date.now(),
       };
-      
+
       // Keep only MAX_RECENT_SEARCHES items
       const updated = [newItem, ...filtered].slice(0, MAX_RECENT_SEARCHES);
       return updated;

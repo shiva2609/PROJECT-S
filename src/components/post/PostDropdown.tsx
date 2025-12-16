@@ -18,7 +18,8 @@ import { Colors } from '../../theme/colors';
 import { Post } from '../../services/api/firebaseService';
 import { getPostDropdownOptions, DropdownOption } from '../../utils/postDropdownHelpers';
 import ConfirmationModal from '../common/ConfirmationModal';
-import { deletePost, blockUser, hidePost, muteUser } from '../../services/api/firebaseService';
+// V1: hidePost removed - Hide Post option no longer available
+import { deletePost, blockUser, muteUser } from '../../services/api/firebaseService';
 import * as PostInteractions from '../../global/services/posts/post.interactions.service';
 import { useFollow } from '../../hooks/useFollow';
 import { showSuccessToast } from '../../utils/toast';
@@ -51,7 +52,7 @@ export default function PostDropdown({
     confirmLabel: string;
     onConfirm: () => void;
   } | null>(null);
-  
+
   const dropdownOpacity = useRef(new Animated.Value(0)).current;
   const { unfollow } = useFollow(postUserId);
 
@@ -73,7 +74,7 @@ export default function PostDropdown({
 
   const handleOptionPress = (option: DropdownOption) => {
     onClose();
-    
+
     switch (option) {
       case 'Delete':
         setConfirmationModal({
@@ -84,7 +85,7 @@ export default function PostDropdown({
           onConfirm: handleDelete,
         });
         break;
-      
+
       case 'Unfollow':
         setConfirmationModal({
           visible: true,
@@ -94,7 +95,7 @@ export default function PostDropdown({
           onConfirm: handleUnfollow,
         });
         break;
-      
+
       case 'Mute':
         setConfirmationModal({
           visible: true,
@@ -104,7 +105,7 @@ export default function PostDropdown({
           onConfirm: handleMute,
         });
         break;
-      
+
       case 'Block':
         setConfirmationModal({
           visible: true,
@@ -114,7 +115,7 @@ export default function PostDropdown({
           onConfirm: handleBlock,
         });
         break;
-      
+
       case 'Report':
         setConfirmationModal({
           visible: true,
@@ -124,23 +125,18 @@ export default function PostDropdown({
           onConfirm: handleReport,
         });
         break;
-      
-      case 'Hide Post':
-        // No confirmation needed for hide
-        handleHidePost();
-        break;
     }
   };
 
   // Optimistic update: Remove post from UI immediately
   const handleDelete = async () => {
     setConfirmationModal(null);
-    
+
     // Optimistic: Remove from UI immediately
     if (onPostRemoved) {
       onPostRemoved(post.id);
     }
-    
+
     try {
       await deletePost(post.id, postUserId);
       console.log('✅ Post deleted successfully');
@@ -149,20 +145,20 @@ export default function PostDropdown({
       // Note: Post already removed from UI optimistically
       // In a real app, you might want to show an error and re-add it
     }
-    
+
     if (onClose) onClose();
   };
 
   const handleUnfollow = async () => {
     setConfirmationModal(null);
-    
+
     // Optimistic: Remove post from Following feed immediately
     // If in For You, the button state will update via useFollow hook
     if (onPostRemoved && !inForYou) {
       // Only remove from Following tab, not For You
       onPostRemoved(post.id);
     }
-    
+
     try {
       await unfollow();
       console.log('✅ User unfollowed successfully');
@@ -170,16 +166,16 @@ export default function PostDropdown({
     } catch (error: any) {
       console.error('❌ Error unfollowing user:', error);
     }
-    
+
     onClose();
   };
 
   const handleMute = async () => {
     setConfirmationModal(null);
-    
+
     // Note: Keep post visible (as per requirements)
     // Only hide future posts from this user
-    
+
     try {
       await muteUser(currentUserId, postUserId);
       console.log('✅ User muted successfully');
@@ -189,34 +185,34 @@ export default function PostDropdown({
       // Still show success to user (optimistic)
       showSuccessToast('Muted');
     }
-    
+
     onClose();
   };
 
   const handleBlock = async () => {
     setConfirmationModal(null);
-    
+
     // Optimistic: Remove all posts from this user immediately
     if (onPostRemoved) {
       onPostRemoved(post.id);
     }
-    
+
     try {
       await blockUser(currentUserId, postUserId);
       console.log('✅ User blocked successfully');
     } catch (error: any) {
       console.error('❌ Error blocking user:', error);
     }
-    
+
     if (onClose) onClose();
   };
 
   const handleReport = async () => {
     setConfirmationModal(null);
-    
+
     try {
-      // Use global service with reason
-      await PostInteractions.reportPost(post.id, currentUserId, 'Inappropriate content');
+      // V1 MODERATION: Pass post owner ID as reportedUserId for admin tracking
+      await PostInteractions.reportPost(post.id, currentUserId, 'Inappropriate content', postUserId);
       console.log('✅ Post reported successfully');
       showSuccessToast('Reported to admin');
     } catch (error: any) {
@@ -224,25 +220,11 @@ export default function PostDropdown({
       // Still show success to user (optimistic)
       showSuccessToast('Reported to admin');
     }
-    
+
     onClose();
   };
 
-  const handleHidePost = async () => {
-    // Optimistic: Remove post from feed immediately
-    if (onPostRemoved) {
-      onPostRemoved(post.id);
-    }
-    
-    try {
-      await hidePost(currentUserId, post.id);
-      console.log('✅ Post hidden successfully');
-    } catch (error: any) {
-      console.error('❌ Error hiding post:', error);
-    }
-    
-    if (onClose) onClose();
-  };
+  // V1: handleHidePost removed - Hide Post option no longer available
 
   if (options.length === 0) {
     return null;
@@ -291,7 +273,7 @@ export default function PostDropdown({
                     style={[
                       styles.dropdownItemText,
                       (option === 'Delete' || option === 'Report' || option === 'Block') &&
-                        styles.destructiveText,
+                      styles.destructiveText,
                     ]}
                   >
                     {option}

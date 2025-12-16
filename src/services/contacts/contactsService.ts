@@ -23,32 +23,44 @@ try {
   Contacts = require('expo-contacts');
 } catch {
   try {
-    Contacts = require('react-native-contacts');
+    const RNContacts = require('react-native-contacts');
+    // Handle both CommonJS and ES Module (default) exports
+    Contacts = RNContacts.default || RNContacts;
   } catch {
     console.warn('No contacts library found. Install expo-contacts or react-native-contacts for contacts features.');
   }
 }
 
 /**
+ * Check if contacts API is supported on this device
+ */
+export function isContactsSupported(): boolean {
+  if (!Contacts) return false;
+  // Check for required methods
+  return !!(Contacts.getContactsAsync || Contacts.getAll);
+}
+
+/**
  * Normalize phone number to E.164 format
  */
 function normalizePhoneNumber(phone: string): string | null {
+  if (!phone) return null;
   // Remove all non-digit characters
   let cleaned = phone.replace(/\D/g, '');
-  
+
   // Handle different formats
   if (cleaned.startsWith('0')) {
     // Remove leading 0 (common in some countries)
     cleaned = cleaned.substring(1);
   }
-  
+
   // If it starts with country code (e.g., 91 for India), keep it
   // Otherwise, assume it's a local number and might need country code
   // For now, return as-is if it has at least 10 digits
   if (cleaned.length >= 10) {
     return cleaned;
   }
-  
+
   return null;
 }
 
@@ -75,8 +87,8 @@ function hashPhoneNumber(phone: string): string {
  */
 export async function requestContactsPermission(): Promise<boolean> {
   try {
-    if (!Contacts) {
-      Alert.alert('Contacts Not Available', 'Please install expo-contacts or react-native-contacts to use this feature.');
+    if (!isContactsSupported()) {
+      console.warn('Contacts API not supported on this device');
       return false;
     }
 
@@ -114,7 +126,7 @@ export async function requestContactsPermission(): Promise<boolean> {
  */
 export async function checkContactsPermission(): Promise<boolean> {
   try {
-    if (!Contacts) return false;
+    if (!isContactsSupported()) return false;
 
     if (Platform.OS === 'android') {
       const granted = await PermissionsAndroid.check(
@@ -144,8 +156,8 @@ export async function checkContactsPermission(): Promise<boolean> {
  */
 export async function readAndHashContacts(): Promise<string[]> {
   try {
-    if (!Contacts) {
-      throw new Error('Contacts library not available');
+    if (!isContactsSupported()) {
+      throw new Error('Contacts API not supported on this device');
     }
 
     const hasPermission = await checkContactsPermission();
@@ -236,7 +248,7 @@ export async function hasUploadedContacts(userId: string): Promise<boolean> {
     const userRef = doc(db, 'users', userId);
     const userDoc = await getDoc(userRef);
     if (!userDoc.exists()) return false;
-    
+
     const data = userDoc.data();
     return Array.isArray(data.contactsHash) && data.contactsHash.length > 0;
   } catch (error) {

@@ -127,6 +127,15 @@ function PostCard({
     }
   }, [creatorId, followStatus, onFollow]);
 
+  // V1 FEATURE FREEZE: Post sharing intentionally disabled for V1 stability.
+  // Re-enable in V2 with finalized chat share UX.
+  // Original implementation preserved in onShare prop, but handler is no-op.
+  const handleShare = useCallback(() => {
+    // No-op: Share functionality disabled for V1
+    // TODO V2: Restore share functionality with proper chat integration
+    // Original handler: onShare()
+  }, []);
+
   // Check verification status
   useEffect(() => {
     if ((post as any).verified === true) {
@@ -349,7 +358,7 @@ function PostCard({
         commentCount={commentCount}
         onComment={onComment}
         shareCount={shareCount}
-        onShare={onShare}
+        onShare={handleShare}
         isSaved={actualIsSaved}
         onSave={handleSave}
         onMorePress={handleMorePress}

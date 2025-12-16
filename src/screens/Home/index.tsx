@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,11 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
@@ -28,6 +30,10 @@ import { useTopicClaimReminder } from '../../hooks/useTopicClaimReminder';
 import TopicClaimAlert from '../../components/common/TopicClaimAlert';
 import FollowingUsersScreen from '../Account/FollowingUsersScreen';
 import PostSkeleton from '../../components/post/PostSkeleton';
+import { useBlockedUsers } from '../../hooks/useBlockedUsers'; // V1 MODERATION
+
+// Create animated FlatList for native driver support
+const AnimatedFlatList = Animated.createAnimatedComponent(FlatList as any);
 
 /**
  * Home Feed Screen
@@ -40,6 +46,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   const navigation = useNavigation();
   const { following, refreshRelations } = useUserRelations();
   const { toggleFollow: handleFollowUser } = useUnifiedFollow();
+  const insets = useSafeAreaInsets();
 
   // State must be defined before useHomeFeed hook
   const [selectedTab, setSelectedTab] = useState<'For You' | 'Following'>('For You');
@@ -58,13 +65,18 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     limit: 10
   });
 
+  // V1 MODERATION: Filter blocked users from feed
+  const { filterPosts } = useBlockedUsers(user?.uid);
+
   // Local state for post updates
   const [postsState, setPostsState] = useState<PostWithAuthor[]>([]);
 
-  // Sync posts from hook
+  // Sync posts from hook and apply blocked users filter
   useEffect(() => {
-    setPostsState(posts);
-  }, [posts]);
+    // V1 MODERATION: Filter out posts from blocked users
+    const filteredPosts = filterPosts(posts);
+    setPostsState(filteredPosts);
+  }, [posts, filterPosts]);
 
   // Update post function
   const updatePost = useCallback((postId: string, updates: Partial<PostWithAuthor>) => {
@@ -110,6 +122,65 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     }
   });
   const [unreadCounts, setUnreadCounts] = useState({ notifications: 0, messages: 0 });
+
+  /**
+   * INSTAGRAM-STYLE COLLAPSING HEADER
+   * 
+   * Why scroll-driven animation:
+   * - Provides fluid, responsive UX that feels native
+   * - Maximizes content visibility on scroll
+   * - No layout jumps or re-renders
+   * 
+   * Why translateY instead of hide/show:
+   * - Smooth interpolation vs abrupt toggle
+   * - GPU-accelerated transform
+   * - Maintains layout stability (no height changes)
+   * - Works seamlessly with native scroll events
+   */
+  const HEADER_HEIGHT = 110 + insets.top; // topBar (48) + sharedHeader (62) + safe area top
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const lastScrollY = useRef(0);
+  const headerTranslateY = useRef(new Animated.Value(0)).current;
+
+  // Track scroll direction and animate header
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    {
+      useNativeDriver: true,
+      listener: (event: any) => {
+        const currentScrollY = event.nativeEvent.contentOffset.y;
+        const delta = currentScrollY - lastScrollY.current;
+
+        // Only animate if scrolled past threshold (avoid jitter at top)
+        if (currentScrollY > 5) {
+          if (delta > 0 && currentScrollY > 20) {
+            // Scrolling down (content moving up) -> hide header smoothly
+            Animated.timing(headerTranslateY, {
+              toValue: -HEADER_HEIGHT,
+              duration: 200,
+              useNativeDriver: true,
+            }).start();
+          } else if (delta < -3) {
+            // Scrolling up (content moving down) -> show header smoothly
+            Animated.timing(headerTranslateY, {
+              toValue: 0,
+              duration: 200,
+              useNativeDriver: true,
+            }).start();
+          }
+        } else {
+          // At top of feed -> always show header
+          Animated.timing(headerTranslateY, {
+            toValue: 0,
+            duration: 150,
+            useNativeDriver: true,
+          }).start();
+        }
+
+        lastScrollY.current = currentScrollY;
+      },
+    }
+  );
 
   const { visible: rewardVisible, claimed, points, claiming: rewardClaiming, error: rewardError, grantReward, dismiss: dismissReward, showReward } = useRewardOnboarding(user?.uid);
   const { showAlert: showTopicAlert, onClaimNow: handleTopicClaimNow, onRemindLater: handleTopicRemindLater } = useTopicClaimReminder(user?.uid, navigation);
@@ -226,11 +297,10 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
         isSaved={isSaved}
         onLike={() => handleLike(item.id, isLiked)}
         onComment={() => {
-          const postIndex = displayedPosts.findIndex((p) => p.id === item.id);
-          navProp?.navigate('PostDetail', {
+          // CRITICAL: Navigate to Comments screen, NOT PostDetail
+          // Comment icon must open comments view, not post feed
+          navProp?.navigate('Comments', {
             postId: item.id,
-            posts: displayedPosts as any,
-            index: postIndex >= 0 ? postIndex : 0,
           });
         }}
         onShare={() => handleShare(item as any)}
@@ -262,42 +332,62 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.topBar}>
-        <TouchableOpacity activeOpacity={0.8} onPress={openDrawer}>
-          <Icon name="menu" size={28} color={Colors.black.primary} />
-        </TouchableOpacity>
-        <View style={styles.topIcons}>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => navProp?.navigate('Notifications')}
-            style={styles.topIconWrap}
-          >
-            <Icon name="notifications-outline" size={28} color={Colors.black.primary} />
-            {unreadCounts.notifications > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>
-                  {unreadCounts.notifications > 99 ? '99+' : String(unreadCounts.notifications)}
-                </Text>
-              </View>
-            )}
+      {/* Animated Header Container */}
+      <Animated.View
+        style={[
+          styles.headerContainer,
+          {
+            paddingTop: insets.top,
+            transform: [{ translateY: headerTranslateY }],
+          },
+        ]}
+      >
+        <View style={styles.topBar}>
+          <TouchableOpacity activeOpacity={0.8} onPress={openDrawer}>
+            <Icon name="menu" size={28} color={Colors.black.primary} />
           </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => navProp?.navigate('Chats')}
-            style={styles.topIconWrap}
-          >
-            <Icon name="paper-plane-outline" size={28} color={Colors.black.primary} />
-            {unreadCounts.messages > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>
-                  {unreadCounts.messages > 99 ? '99+' : String(unreadCounts.messages)}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          <View style={styles.topIcons}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => navProp?.navigate('Notifications')}
+              style={styles.topIconWrap}
+            >
+              <Icon name="notifications-outline" size={28} color={Colors.black.primary} />
+              {unreadCounts.notifications > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>
+                    {unreadCounts.notifications > 99 ? '99+' : String(unreadCounts.notifications)}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => navProp?.navigate('Chats')}
+              style={styles.topIconWrap}
+            >
+              <Icon name="paper-plane-outline" size={28} color={Colors.black.primary} />
+              {unreadCounts.messages > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>
+                    {unreadCounts.messages > 99 ? '99+' : String(unreadCounts.messages)}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
 
+
+        <View style={styles.sharedHeader}>
+          <SegmentedControl
+            selectedTab={selectedTab}
+            onChange={(tab) => setSelectedTab(tab as 'For You' | 'Following')}
+          />
+        </View>
+      </Animated.View>
+
+      {/* Feed Content */}
       {loading && posts.length === 0 ? (
         <View style={styles.skeletonContainer}>
           <PostSkeleton />
@@ -305,29 +395,24 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
         </View>
       ) : (
         <View style={{ flex: 1 }}>
-          <View style={styles.sharedHeader}>
-            <SegmentedControl
-              selectedTab={selectedTab}
-              onChange={(tab) => setSelectedTab(tab as 'For You' | 'Following')}
-            />
-          </View>
-
           {selectedTab === 'For You' ? (
-            <FlatList
+            <AnimatedFlatList
               data={displayedPosts}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item: PostWithAuthor) => item.id}
               renderItem={renderPost}
               windowSize={8}
               initialNumToRender={5}
               maxToRenderPerBatch={10}
               updateCellsBatchingPeriod={50}
               removeClippedSubviews
-              contentContainerStyle={{ paddingBottom: 450 }}
-              getItemLayout={(data, index) => ({
+              contentContainerStyle={{ paddingTop: HEADER_HEIGHT, paddingBottom: 400 }}
+              getItemLayout={(data: any, index: number) => ({
                 length: 600, // Approximate post height
                 offset: 600 * index,
                 index,
               })}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
               refreshControl={
                 <RefreshControl
                   refreshing={refreshing}
@@ -365,6 +450,8 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
                   postId: post.id
                 });
               }}
+              onScroll={handleScroll}
+              headerHeight={HEADER_HEIGHT}
             />
           )}
         </View>
@@ -391,12 +478,25 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
         onClaimNow={handleTopicClaimNow}
         onRemindLater={handleTopicRemindLater}
       />
-    </SafeAreaView>
+    </SafeAreaView >
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.white.secondary },
+  headerContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: Colors.white.secondary,
+    zIndex: 1000,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
