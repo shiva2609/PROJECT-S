@@ -85,65 +85,95 @@ const PostActions = ({
     }, [isLikeProcessing, onLike]);
 
     return (
-        <View style={styles.iconRow}>
-            <TouchableOpacity
-                style={styles.actionPill}
-                activeOpacity={0.7}
-                onPress={handleLikePress}
-                disabled={isLikeProcessing}
-            >
-                <AnimatedIcon
-                    name={isLiked ? 'heart' : 'heart-outline'}
-                    size={18}
-                    color={isLiked ? Colors.brand.primary : Colors.brand.primary}
-                    scale={likeScale}
-                />
-                <Text style={styles.actionCount}>{likeCount}</Text>
-            </TouchableOpacity>
+        <View style={styles.container}>
+            {/* Left: Main Actions (Like, Comment, Save) */}
+            <View style={styles.mainActions}>
+                <TouchableOpacity
+                    style={styles.actionPill}
+                    activeOpacity={0.7}
+                    onPress={handleLikePress}
+                    disabled={isLikeProcessing}
+                >
+                    <AnimatedIcon
+                        name={isLiked ? 'heart' : 'heart-outline'}
+                        size={18}
+                        color={isLiked ? Colors.brand.primary : Colors.brand.primary}
+                        scale={likeScale}
+                    />
+                    <Text style={styles.actionCount}>{likeCount}</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-                style={styles.actionPill}
-                activeOpacity={0.7}
-                onPress={onComment}
-            >
-                <Icon name="chatbubble-outline" size={18} color={Colors.brand.primary} />
-                <Text style={styles.actionCount}>{commentCount}</Text>
-            </TouchableOpacity>
+                <TouchableOpacity
+                    style={styles.actionPill}
+                    activeOpacity={0.7}
+                    onPress={onComment}
+                >
+                    <Icon name="chatbubble-outline" size={18} color={Colors.brand.primary} />
+                    <Text style={styles.actionCount}>{commentCount}</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-                style={styles.actionPill}
-                activeOpacity={0.7}
-                onPress={onShare}
-            >
-                <Icon name="paper-plane-outline" size={18} color={Colors.brand.primary} />
-                <Text style={styles.actionCount}>{shareCount}</Text>
-            </TouchableOpacity>
+                {/* V1 FEATURE FREEZE: Post sharing intentionally disabled for V1 stability.
+                    Re-enable in V2 with finalized chat share UX.
+                    Implementation code preserved below for future use.
+                */}
+                {/* <TouchableOpacity
+                    style={styles.actionPill}
+                    activeOpacity={0.7}
+                    onPress={onShare}
+                >
+                    <Icon name="paper-plane-outline" size={18} color={Colors.brand.primary} />
+                    <Text style={styles.actionCount}>{shareCount}</Text>
+                </TouchableOpacity> */}
 
-            <TouchableOpacity
-                style={styles.actionPill}
-                activeOpacity={0.7}
-                onPress={onSave}
-            >
-                <AnimatedIcon
-                    name={isSaved ? 'bookmark' : 'bookmark-outline'}
-                    size={18}
-                    color={isSaved ? Colors.brand.primary : Colors.brand.primary}
-                    scale={saveScale}
-                />
-            </TouchableOpacity>
+                <TouchableOpacity
+                    style={styles.actionPill}
+                    activeOpacity={0.7}
+                    onPress={onSave}
+                >
+                    <AnimatedIcon
+                        name={isSaved ? 'bookmark' : 'bookmark-outline'}
+                        size={18}
+                        color={isSaved ? Colors.brand.primary : Colors.brand.primary}
+                        scale={saveScale}
+                    />
+                </TouchableOpacity>
+            </View>
 
-            <TouchableOpacity
-                style={styles.actionPill}
-                activeOpacity={0.7}
-                onPress={onMorePress}
-            >
-                <Icon name="ellipsis-vertical" size={18} color={Colors.brand.primary} />
-            </TouchableOpacity>
+            {/* Right: More Button (Isolated) */}
+            <View style={styles.moreButtonContainer}>
+                <TouchableOpacity
+                    style={styles.actionPill}
+                    activeOpacity={0.7}
+                    onPress={onMorePress}
+                >
+                    <Icon name="ellipsis-vertical" size={18} color={Colors.brand.primary} />
+                </TouchableOpacity>
+            </View>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
+    // Container: Holds main actions on left, more button on right
+    container: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingTop: 10,
+        paddingBottom: 12,
+    },
+    // Main actions grouped on the left
+    mainActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 11,
+        flex: 1,
+    },
+    // More button isolated on the right with proper spacing
+    moreButtonContainer: {
+        marginLeft: 8,
+    },
     iconRow: {
         flexDirection: 'row',
         alignItems: 'center',

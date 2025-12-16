@@ -12,17 +12,20 @@ import {
     getFirestore,
     enableNetwork,
     Firestore,
+    persistentLocalCache,
+    persistentSingleTabManager
 } from 'firebase/firestore';
 import { firebaseApp } from './app';
 
 let db: Firestore;
 
-// Initialize Firestore with long polling for React Native
+// Initialize Firestore with long polling AND persistent local cache (IndexedDB)
 try {
     db = initializeFirestore(firebaseApp, {
         experimentalForceLongPolling: true,
+        localCache: persistentLocalCache({ tabManager: persistentSingleTabManager({}) })
     });
-    console.log('✅ Firestore initialized with long polling');
+    console.log('✅ Firestore initialized with persistence & long polling');
 } catch (e: any) {
     // If already initialized, get existing instance
     console.log('⚠️ Firestore already initialized, getting existing instance:', e?.message);

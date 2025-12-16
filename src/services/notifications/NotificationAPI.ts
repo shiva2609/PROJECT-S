@@ -11,7 +11,9 @@ import {
   orderBy,
   limit as firestoreLimit,
   startAfter,
-  Timestamp
+  Timestamp,
+  setDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { db } from '../auth/authService';
 import { normalizeNotification as normalizeNotificationGlobal } from '../../utils/normalize/normalizeNotification';
@@ -178,5 +180,80 @@ export async function fetchNotifications(
 export async function getNotifications(userId: string): Promise<Notification[]> {
   const result = await fetchNotifications(userId);
   return result.notifications;
+}
+
+/**
+ * ============================================================================
+ * FOLLOW NOTIFICATION CONTRACT
+ * ============================================================================
+ * 
+ * PROBLEM:
+ * standard sendNotification() uses addDoc(), which creates a new document every time.
+ * For Follow/Unfollow/Re-follow actions, this leads to duplicate notifications
+ * and spammy behavior (e.g. User A follows -> unfollows -> follows = 2 notifications).
+ * 
+ * SOLUTION:
+ * Follow notifications must be STATE-BASED and UNIQUE per (actor -> receiver) pair.
+ * We use a deterministic document ID: {actorId}_follow
+ * 
+ * BEHAVIOR:
+ * - FOLLOW: Create OR Update existing doc. Update timestamp. Mark unread.
+ * - UNFOLLOW: Delete the notification.
+ * - RE-FOLLOW: Re-create the document (or update if we chose soft-delete).
+ * 
+ * This ensures there is AT MOST ONE follow notification per user pair.
+ */
+
+/**
+ * Send a deterministic follow notification.
+ * Ensures uniqueness by using actorId in the document ID.
+ */
+export async function sendFollowNotification(
+  receiverId: string,
+  actorId: string,
+  data?: any
+): Promise<void> {
+  console.log("🔥 [NotificationAPI] sendFollowNotification (Deterministic) CALLED", { receiverId, actorId });
+  try {
+    const notificationId = `${actorId}_follow`;
+    const notificationRef = doc(db, 'notifications', receiverId, 'items', notificationId);
+
+    // Create or Overwrite
+    // We want to bring it to top, so update createdAt
+    await setDoc(notificationRef, {
+      id: notificationId,
+      type: 'follow',
+      actorId: actorId,
+      message: 'started following you',
+      read: false,
+      createdAt: serverTimestamp(),
+      data: data || {}
+    });
+
+    console.log("✅ [NotificationAPI] Follow Notification SET successfully:", notificationId);
+  } catch (error) {
+    console.error("❌ [NotificationAPI] Failed to set follow notification:", error);
+    // Don't throw, just log. Notification failure shouldn't block the UI action.
+  }
+}
+
+/**
+ * Remove a follow notification.
+ * Called when a user unfollows.
+ */
+export async function removeFollowNotification(
+  receiverId: string,
+  actorId: string
+): Promise<void> {
+  console.log("🔥 [NotificationAPI] removeFollowNotification CALLED", { receiverId, actorId });
+  try {
+    const notificationId = `${actorId}_follow`;
+    const notificationRef = doc(db, 'notifications', receiverId, 'items', notificationId);
+
+    await deleteDoc(notificationRef);
+    console.log("✅ [NotificationAPI] Follow Notification DELETED successfully:", notificationId);
+  } catch (error) {
+    console.error("❌ [NotificationAPI] Failed to delete follow notification:", error);
+  }
 }
 

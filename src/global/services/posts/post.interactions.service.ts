@@ -483,27 +483,43 @@ export function listenToSavedState(
 
 /**
  * Report a post
- * Stores report under posts/{postId}/reports/{reportId}
+ * V1 MODERATION: Stores report in two locations:
+ * 1. posts/{postId}/reports/{reportId} - for post-specific reports
+ * 2. reports/{reportId} - global collection for admin dashboard
  */
 export async function reportPost(
   postId: string,
   reporterId: string,
-  reason: string
+  reason: string,
+  reportedUserId?: string // V1: Added to track reported user
 ): Promise<string> {
   if (!postId || !reporterId || !reason.trim()) {
     throw new Error('Post ID, Reporter ID, and reason are required');
   }
 
+  // Write to post subcollection (existing behavior)
   const reportsRef = collection(db, 'posts', postId, 'reports');
   const reportRef = doc(reportsRef);
 
-  await setDoc(reportRef, {
+  const reportData = {
     reporterId,
+    reportedUserId: reportedUserId || null, // V1: Track who is being reported
     reason: reason.trim(),
     createdAt: serverTimestamp(),
     status: 'pending',
+  };
+
+  await setDoc(reportRef, reportData);
+
+  // V1: Also write to global reports collection for admin dashboard
+  const globalReportRef = doc(collection(db, 'reports'));
+  await setDoc(globalReportRef, {
+    ...reportData,
+    postId, // Include postId in global collection
+    reportId: reportRef.id,
   });
 
+  console.log('✅ Report created in both post subcollection and global reports');
   return reportRef.id;
 }
 

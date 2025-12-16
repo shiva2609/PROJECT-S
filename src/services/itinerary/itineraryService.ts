@@ -7,7 +7,7 @@
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../auth/authService';
 import { ItineraryResponse } from './generateItinerary';
-import { sendItineraryToChat } from './chatService';
+import { sendItineraryToChat } from '../chat/chatService';
 
 /**
  * Saves an itinerary to Firestore
@@ -65,7 +65,7 @@ export async function getUserItineraries(userId: string) {
     const { getDocs } = await import('firebase/firestore');
     const itinerariesRef = collection(db, 'users', userId, 'itineraries');
     const snapshot = await getDocs(itinerariesRef);
-    
+
     return snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),

@@ -5,7 +5,10 @@
  */
 
 import React, { useCallback, useMemo, useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Text, FlatList, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ScrollView, Text, FlatList, RefreshControl, ActivityIndicator, TouchableOpacity, Animated } from 'react-native';
+
+// Create animated FlatList for native driver support
+const AnimatedFlatList = Animated.createAnimatedComponent(FlatList as any);
 import { usePostActions } from '../../utils/postActions';
 import { useUnifiedFollow } from '../../hooks/useUnifiedFollow';
 import { useAuth } from '../../providers/AuthProvider';
@@ -17,14 +20,17 @@ import FollowingSuggestions from '../../components/suggestions/FollowingSuggesti
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import PostSkeleton from '../../components/post/PostSkeleton';
+import { useBlockedUsers } from '../../hooks/useBlockedUsers'; // V1 MODERATION
 
 interface FollowingScreenProps {
   navigation?: any;
   onUserPress?: (userId: string) => void;
   onPostPress?: (post: any) => void;
+  onScroll?: (...args: any[]) => void;
+  headerHeight?: number;
 }
 
-export default function FollowingUsersScreen({ navigation, onUserPress, onPostPress }: FollowingScreenProps) {
+export default function FollowingUsersScreen({ navigation, onUserPress, onPostPress, onScroll, headerHeight = 110 }: FollowingScreenProps) {
   const { user } = useAuth();
   const { following, refreshRelations } = useUserRelations();
   const { toggleFollow: handleFollowUser } = useUnifiedFollow();
@@ -39,13 +45,18 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
     refresh,
   } = useHomeFeed(user?.uid, { feedType: 'following', limit: 10 });
 
+  // V1 MODERATION: Filter blocked users from feed
+  const { filterPosts } = useBlockedUsers(user?.uid);
+
   // Local state for post updates
   const [posts, setPosts] = useState<PostWithAuthor[]>([]);
 
-  // Sync posts from hook
+  // Sync posts from hook and apply blocked users filter
   useEffect(() => {
-    setPosts(postsFromHook);
-  }, [postsFromHook]);
+    // V1 MODERATION: Filter out posts from blocked users
+    const filteredPosts = filterPosts(postsFromHook);
+    setPosts(filteredPosts);
+  }, [postsFromHook, filterPosts]);
 
   // Update post function
   const updatePost = useCallback((postId: string, updates: Partial<PostWithAuthor>) => {
@@ -144,11 +155,10 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
         isSaved={isSaved}
         onLike={() => handleLike(item.id, isLiked)}
         onComment={() => {
-          const postIndex = posts.findIndex((p) => p.id === item.id);
-          navigation?.navigate('PostDetail', {
+          // CRITICAL: Navigate to Comments screen, NOT PostDetail
+          // Comment icon must open comments view, not post feed
+          navigation?.navigate('Comments', {
             postId: item.id,
-            posts: posts as any,
-            index: postIndex >= 0 ? postIndex : 0,
           });
         }}
         onShare={() => handleShare(item as any)}
@@ -194,15 +204,17 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
 
   return (
     <View style={styles.container}>
-      <FlatList
+      <AnimatedFlatList
         data={posts}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item: PostWithAuthor) => item.id}
         renderItem={renderPost}
         windowSize={8}
         initialNumToRender={5}
         maxToRenderPerBatch={10}
         updateCellsBatchingPeriod={50}
         removeClippedSubviews
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -213,7 +225,7 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 400 }}
+        contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: 400 }}
         ListFooterComponent={
           <>
             {postsEnded && (

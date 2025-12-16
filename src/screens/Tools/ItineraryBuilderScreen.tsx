@@ -2,6 +2,7 @@
  * Sanchari Copilot - Itinerary Builder Screen
  * 
  * Complete AI-powered itinerary planning interface with chat UI
+ * UI/UX polish only. No logic modified.
  */
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -12,7 +13,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Text,
 } from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../../providers/AuthProvider';
 import { generateItinerary, ItineraryResponse } from '../../services/itinerary/generateItinerary';
 import { saveItineraryToFirestore } from '../../services/itinerary/itineraryService';
@@ -21,6 +24,7 @@ import ChatBubble from '../../components/itinerary/ChatBubble';
 import SuggestedChips from '../../components/itinerary/SuggestedChips';
 import ChatInput from '../../components/itinerary/ChatInput';
 import { Colors } from '../../theme/colors';
+import { Fonts } from '../../theme/fonts';
 
 interface Message {
   id: string;
@@ -65,22 +69,22 @@ export default function ItineraryBuilderScreen() {
       // Add AI response
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: 'Here\'s your personalized itinerary!',
+        text: 'I\'ve crafted a custom itinerary just for you. Take a look!',
         isUser: false,
         itinerary,
       };
       setMessages((prev) => [...prev, aiMessage]);
     } catch (error: any) {
       console.error('Error generating itinerary:', error);
-      
+
       // Add error message
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: 'Sorry, I couldn\'t generate an itinerary right now. Please try again.',
+        text: 'I hit a small bump while planning. Could we try that again?',
         isUser: false,
       };
       setMessages((prev) => [...prev, errorMessage]);
-      
+
       Alert.alert('Error', 'Failed to generate itinerary. Please try again.');
     } finally {
       setIsLoading(false);
@@ -100,8 +104,8 @@ export default function ItineraryBuilderScreen() {
     try {
       await saveItineraryToFirestore(user.uid, itinerary);
       Alert.alert(
-        '✅ Saved!', 
-        'Your itinerary has been saved and added to your chat with Sanchari Copilot.',
+        '✅ Saved!',
+        'Your itinerary has been saved to your collections.',
         [{ text: 'OK' }]
       );
     } catch (error: any) {
@@ -113,12 +117,12 @@ export default function ItineraryBuilderScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <View style={styles.content}>
         <Header />
-        
+
         <ScrollView
           ref={scrollViewRef}
           style={styles.chatContainer}
@@ -129,11 +133,17 @@ export default function ItineraryBuilderScreen() {
           {messages.length === 0 && (
             <View style={styles.emptyState}>
               <View style={styles.emptyContent}>
-                {/* Empty state - user can start typing or use chips */}
+                <View style={styles.emptyIconContainer}>
+                  <Icon name="map" size={32} color={Colors.brand.primary} />
+                </View>
+                <Text style={styles.emptyTitle}>Where to next?</Text>
+                <Text style={styles.emptyText}>
+                  Tell me your dream destination, travel style, or budget — I'll help plan the perfect trip.
+                </Text>
               </View>
             </View>
           )}
-          
+
           {messages.map((message) => (
             <ChatBubble
               key={message.id}
@@ -147,7 +157,7 @@ export default function ItineraryBuilderScreen() {
               }
             />
           ))}
-          
+
           {isLoading && (
             <ChatBubble
               message=""
@@ -157,11 +167,13 @@ export default function ItineraryBuilderScreen() {
           )}
         </ScrollView>
 
-        <SuggestedChips onChipPress={handleChipPress} />
-        <ChatInput
-          onSend={handleSendMessage}
-          disabled={isLoading}
-        />
+        <View style={styles.bottomContainer}>
+          <SuggestedChips onChipPress={handleChipPress} />
+          <ChatInput
+            onSend={handleSendMessage}
+            disabled={isLoading}
+          />
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -174,20 +186,52 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    flexDirection: 'column',
   },
   chatContainer: {
     flex: 1,
   },
   chatContent: {
-    paddingVertical: 16,
+    paddingVertical: 24,
+    paddingHorizontal: 0, // Let bubbles handle padding
   },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingVertical: 40,
+    marginTop: 40,
   },
   emptyContent: {
-    // Empty state content can be added here if needed
+    alignItems: 'center',
+    paddingHorizontal: 48,
+    maxWidth: 400,
+  },
+  emptyIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FFF0E6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  emptyTitle: {
+    fontFamily: Fonts.bold,
+    fontSize: 22,
+    color: Colors.black.primary,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  emptyText: {
+    fontFamily: Fonts.regular,
+    fontSize: 15,
+    color: Colors.black.tertiary, // Softer text
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  bottomContainer: {
+    backgroundColor: Colors.white.primary,
+    // Ensure this stays anchored
   },
 });

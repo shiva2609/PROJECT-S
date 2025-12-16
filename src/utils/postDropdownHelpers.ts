@@ -3,7 +3,8 @@
  * Centralizes all dropdown option logic based on post ownership, follow status, and feed type
  */
 
-export type DropdownOption = 'Delete' | 'Report' | 'Block' | 'Hide Post' | 'Unfollow' | 'Mute';
+// V1 MODERATION: 'Hide Post' removed - V1 focuses on Report and Block only
+export type DropdownOption = 'Delete' | 'Report' | 'Block' | 'Unfollow' | 'Mute';
 
 export interface DropdownOptionsParams {
   postUserId: string;
@@ -17,7 +18,7 @@ export interface DropdownOptionsParams {
  * 
  * Rules:
  * - OWN POST: ["Delete"]
- * - NON-FOLLOWED (For You): ["Report", "Block", "Hide Post"]
+ * - NON-FOLLOWED (For You): ["Report", "Block"] (V1: Hide Post removed)
  * - FOLLOWED (Following OR For You but followed): ["Unfollow", "Mute", "Report", "Block"]
  */
 export function getPostDropdownOptions({
@@ -32,8 +33,9 @@ export function getPostDropdownOptions({
   }
 
   // NON-FOLLOWED USERS (For You section)
+  // V1: Hide Post removed - only Report and Block
   if (!isFollowing && inForYou) {
-    return ['Report', 'Block', 'Hide Post'];
+    return ['Report', 'Block'];
   }
 
   // FOLLOWED USERS (Following section OR For You but followed)
@@ -43,11 +45,12 @@ export function getPostDropdownOptions({
 
   // Fallback: If in Following feed but not following (edge case)
   // Treat as non-followed
+  // V1: Hide Post removed - only Report and Block
   if (!inForYou && !isFollowing) {
-    return ['Report', 'Block', 'Hide Post'];
+    return ['Report', 'Block'];
   }
 
   // Default fallback
-  return ['Report', 'Block', 'Hide Post'];
+  return ['Report', 'Block'];
 }
 

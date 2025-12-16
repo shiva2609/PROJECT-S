@@ -133,6 +133,45 @@ export default function ProfileScreen({ navigation, route }: any) {
     }
   }, [targetUserId, currentUserId, isOwnProfile, followStatus]);
 
+  // V1 MODERATION: Handle block user
+  const handleBlock = useCallback(async () => {
+    if (!targetUserId || !currentUserId || isOwnProfile) {
+      return;
+    }
+
+    // Import Alert
+    const { Alert } = await import('react-native');
+
+    Alert.alert(
+      'Block User',
+      `Are you sure you want to block this user? They won't be able to see your posts and you won't see theirs.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Import block service
+              const { blockUser } = await import('../../services/api/firebaseService');
+              await blockUser(currentUserId, targetUserId);
+              console.log('✅ User blocked successfully');
+
+              // Navigate back after blocking
+              navigation?.goBack();
+            } catch (error: any) {
+              console.error('[ProfileScreen] Error blocking user:', error);
+              Alert.alert('Error', 'Failed to block user. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  }, [targetUserId, currentUserId, isOwnProfile, navigation]);
+
   // Handle edit profile
   const handleEditProfile = useCallback(() => {
     navigation?.navigate('EditProfile', { userId: targetUserId });
@@ -268,13 +307,8 @@ export default function ProfileScreen({ navigation, route }: any) {
             <Icon name="arrow-back" size={24} color={Colors.black.primary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{profileUser.username}</Text>
-          <View style={styles.headerRight}>
-            {isOwnProfile && (
-              <TouchableOpacity onPress={handleEditProfile}>
-                <Icon name="settings-outline" size={24} color={Colors.black.primary} />
-              </TouchableOpacity>
-            )}
-          </View>
+          {/* V1: Settings icon removed - functionality deferred to V2 */}
+          <View style={styles.headerRight} />
         </View>
 
         {/* Profile Info */}
@@ -343,6 +377,7 @@ export default function ProfileScreen({ navigation, route }: any) {
                       isFollowedBack={followStatus.isFollowedBy}
                       isLoading={followStatus.loading}
                       onToggleFollow={handleFollowToggle}
+                      onBlock={handleBlock}
                       followersCount={profileUser.followersCount}
                     />
                   </View>

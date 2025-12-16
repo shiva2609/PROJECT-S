@@ -14,49 +14,60 @@ export default function Header() {
   return (
     <View style={styles.container}>
       <View style={styles.content}>
-        <Icon name="compass-outline" size={24} color={Colors.brand.primary} style={styles.icon} />
+        <View style={styles.iconContainer}>
+          <Icon name="compass" size={28} color={Colors.brand.primary} />
+        </View>
         <View style={styles.textContainer}>
-          <Text style={styles.title}>Sanchari Copilot</Text>
-          <Text style={styles.subtitle}>Plan smarter, travel better.</Text>
+          <Text style={styles.title}>Ask Sanchari</Text>
+          <Text style={styles.subtitle}>Your personal travel guide</Text>
         </View>
       </View>
-      <View style={styles.divider} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 24,
     backgroundColor: Colors.white.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.03)',
   },
   content: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
-  icon: {
-    marginRight: 12,
+  iconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFF5F0', // Even softer brand accent
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
   },
   textContainer: {
-    alignItems: 'center',
+    flex: 1,
+    marginVertical:12,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   title: {
     fontFamily: Fonts.bold,
-    fontSize: 24,
-    color: Colors.brand.primary,
-    marginBottom: 4,
+    fontSize: 20,
+    color: Colors.black.primary,
+    letterSpacing: -0.3,
+    marginBottom: 2,
+    lineHeight: 24,
   },
   subtitle: {
     fontFamily: Fonts.regular,
-    fontSize: 14,
-    color: Colors.black.qua,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: Colors.white.qua,
-    marginTop: 16,
+    fontSize: 13,
+    color: Colors.black.tertiary, // Lighter, less visual weight
+    letterSpacing: 0,
   },
 });
 

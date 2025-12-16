@@ -18,7 +18,9 @@ import {
   requestContactsPermission,
   readAndHashContacts,
   uploadContactsHashes,
-} from '../../utils/contactsService';
+  checkContactsPermission,
+  isContactsSupported,
+} from '../../services/contacts/contactsService';
 import { useAuth } from '../../providers/AuthProvider';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
@@ -46,9 +48,20 @@ export default function ContactsPermissionModal({
     setLoading(true);
 
     try {
+      // V1 FIX: Check platform/API support first (Part 1 Guard)
+      if (!isContactsSupported()) {
+        Alert.alert(
+          'Feature Not Available',
+          'Contacts access isn\'t available on this device.\nYou can still find friends by searching usernames.',
+          [{ text: 'OK', onPress: () => onClose() }]
+        );
+        setLoading(false);
+        return;
+      }
+
       // Request permission
       const granted = await requestContactsPermission();
-      
+
       if (!granted) {
         Alert.alert(
           'Permission Denied',
@@ -58,9 +71,22 @@ export default function ContactsPermissionModal({
         return;
       }
 
+      // V1 FIX: Re-check permission status after grant to ensure it was actually granted
+      // This handles cases where permission dialog was dismissed or denied
+      const isActuallyGranted = await checkContactsPermission();
+
+      if (!isActuallyGranted) {
+        Alert.alert(
+          'Permission Not Granted',
+          'Contacts permission was not granted. Please try again or enable it in settings.'
+        );
+        setLoading(false);
+        return;
+      }
+
       // Read and hash contacts
       const hashedPhones = await readAndHashContacts();
-      
+
       if (hashedPhones.length === 0) {
         Alert.alert('No Contacts', 'No phone numbers found in your contacts.');
         setLoading(false);

@@ -23,6 +23,7 @@ import { Colors } from '../../theme/colors';
 // Removed unused MessagesAPI import
 // Replaced V1 imports with V2 MessagesAPI
 import { sendMessage, listenToMessages, setReadReceipt, Message } from '../../services/chat/MessagesAPI';
+import { markChatAsRead } from '../../services/notifications/notificationService';
 
 interface ChatRoomScreenProps {
   navigation: any;
@@ -91,6 +92,11 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
 
       setMessages(reversed);
       setLoading(false);
+
+      // Updates Inbox unread state
+      if (user?.uid) {
+        markChatAsRead(user.uid, chatId).catch(e => console.error('Failed to mark chat read', e));
+      }
 
       // Mark unseen messages as seen/read
       if (user?.uid) {

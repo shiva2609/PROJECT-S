@@ -17,8 +17,6 @@ import { useSuggestions } from '../../hooks/useSuggestions';
 import SuggestionCarousel from './SuggestionCarousel';
 import ContactsPermissionModal from './ContactsPermissionModal';
 import ContactsPermissionCard from './ContactsPermissionCard';
-import PlaceholderSuggestionCarousel from './PlaceholderSuggestionCarousel';
-import StackCardPlaceholder from './StackCardPlaceholder';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { SuggestionCandidate } from '../../utils/suggestionUtils';
@@ -38,7 +36,14 @@ export default function FollowingSuggestions({
   compact = false,
   showContactsCard = false,
 }: FollowingSuggestionsProps) {
-  const { categories, loading, refresh, updateSuggestionFollowState } = useSuggestions();
+  const {
+    categories,
+    loading,
+    refresh,
+    updateSuggestionFollowState,
+    contactsPermissionGranted,
+    contactsProcessed
+  } = useSuggestions();
   const [contactsModalVisible, setContactsModalVisible] = useState(false);
 
   // Safety check: Ensure categories is always an array
@@ -68,15 +73,19 @@ export default function FollowingSuggestions({
     category => category.title === 'People Who Follow You' && category.users && category.users.length > 0
   );
   const peopleWhoFollowYouCategory = peopleWhoFollowYouIndex >= 0 ? safeCategories[peopleWhoFollowYouIndex] : null;
-  
+
   // Filter other categories that have users, excluding "People Who Follow You" and any duplicates
   const seenTitles = new Set<string>();
   const otherCategoriesWithUsers = safeCategories.filter(
     category => {
       // Skip "People Who Follow You" (handled separately)
       if (category.title === 'People Who Follow You') return false;
+      // Skip using "People you may know" here to ensure we handle it if needed, or let it flow. 
+      // Actually, since useSuggestions puts it in categories, we just need to ensure unique titles.
+
       // Skip if no users
       if (!category.users || category.users.length === 0) return false;
+
       // Skip duplicates (same title already seen)
       if (seenTitles.has(category.title)) {
         console.log('[FollowingSuggestions] Skipping duplicate category:', category.title);
@@ -86,27 +95,31 @@ export default function FollowingSuggestions({
       return true;
     }
   );
-  
+
   // Build list of categories to render
   const categoriesToRender: typeof safeCategories = [];
   if (peopleWhoFollowYouCategory) {
     categoriesToRender.push(peopleWhoFollowYouCategory);
   }
   categoriesToRender.push(...otherCategoriesWithUsers);
-  
+
   if (categoriesToRender.length > 0) {
     console.log('[FollowingSuggestions] Categories to render:', categoriesToRender.length, categoriesToRender.map(c => ({ title: c.title, count: c.users?.length || 0 })));
   }
-  
+
   // Show loading state only if loading and no categories yet
   if (loading && safeCategories.length === 0) {
     return null; // Don't show loading placeholders - wait for actual suggestions
   }
 
-  // CRITICAL: If no suggestions and showContactsCard is true, show contacts card
+  // Determine if we should show the persistent permission card
+  // Rule: Show ONLY if permission NOT granted AND NOT processed
+  const shouldShowContactsCard = showContactsCard && !contactsPermissionGranted && !contactsProcessed;
+
+  // CRITICAL: If no suggestions and allowed to show permission card
   if (categoriesToRender.length === 0) {
-    if (showContactsCard) {
-      console.log('[FollowingSuggestions] No suggestions available - showing contacts card');
+    if (shouldShowContactsCard) {
+      console.log('[FollowingSuggestions] No suggestions - showing contacts card');
       return (
         <View style={[styles.container, compact && styles.compactContainer]}>
           <ContactsPermissionCard onSuccess={refresh} />
@@ -114,7 +127,15 @@ export default function FollowingSuggestions({
       );
     } else {
       console.log('[FollowingSuggestions] No suggestions available - not rendering component');
-      return null; // Don't render anything if no suggestions and contacts card not requested
+      // If we have contact suggestions, they would be in categoriesToRender.
+      // If categoriesToRender is empty, and we shouldn't show permission card -> Empty state or null.
+      if (contactsPermissionGranted && contactsProcessed) {
+        // Optional: Render specific empty state "No contacts found"
+        // But for now, returning null is standard behavior for empty suggestions
+        // A placeholder could be added here if desired.
+        return null;
+      }
+      return null;
     }
   }
 
@@ -135,10 +156,10 @@ export default function FollowingSuggestions({
         </View>
       )}
 
-      {/* Render ALL suggestion categories - "People Who Follow You" first (highest priority) */}
+      {/* Render ALL suggestion categories */}
       {categoriesToRender.map((category, index) => {
         console.log('[FollowingSuggestions] Rendering category:', category.title, 'with', category.users.length, 'users');
-        
+
         // Convert SuggestionUser to SuggestionCandidate
         const candidateUsers: SuggestionCandidate[] = category.users.map((user) => ({
           id: user.id,
@@ -150,7 +171,7 @@ export default function FollowingSuggestions({
           followingCount: 0,
           postsCount: 0,
         }));
-        
+
         return (
           <View key={`${category.title}-${index}`} style={styles.categoryWrapper}>
             <SuggestionCarousel
@@ -164,11 +185,11 @@ export default function FollowingSuggestions({
           </View>
         );
       })}
-      
-      {/* CRITICAL: Always show contacts card below suggestions when showContactsCard is true (when posts have ended) */}
-      {showContactsCard && (
+
+      {/* CRITICAL: Show contacts card below suggestions ONLY if eligible */}
+      {shouldShowContactsCard && (
         <View style={styles.contactsCardWrapper}>
-          <ContactsPermissionCard onSuccess={refresh || (() => {})} />
+          <ContactsPermissionCard onSuccess={refresh || (() => { })} />
         </View>
       )}
 

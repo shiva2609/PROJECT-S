@@ -16,9 +16,9 @@ interface ChatInputProps {
   disabled?: boolean;
 }
 
-export default function ChatInput({ 
-  onSend, 
-  placeholder = "Ask your Copilot...",
+export default function ChatInput({
+  onSend,
+  placeholder = "Tell me about your dream trip...",
   disabled = false,
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
@@ -51,14 +51,14 @@ export default function ChatInput({
           onSubmitEditing={handleSend}
         />
         <TouchableOpacity
-          style={styles.micButton}
+          style={styles.actionButton}
           activeOpacity={0.7}
           disabled={disabled}
         >
-          <Icon 
-            name="mic-outline" 
-            size={20} 
-            color={Colors.black.qua} 
+          <Icon
+            name="mic"
+            size={22}
+            color={Colors.black.tertiary}
           />
         </TouchableOpacity>
         {message.trim().length > 0 && (
@@ -66,12 +66,12 @@ export default function ChatInput({
             onPress={handleSend}
             disabled={disabled}
             style={styles.sendButton}
-            activeOpacity={0.7}
+            activeOpacity={0.8}
           >
-            <Icon 
-              name="send" 
-              size={20} 
-              color={Colors.white.primary} 
+            <Icon
+              name="arrow-up"
+              size={20}
+              color={Colors.white.primary}
             />
           </TouchableOpacity>
         )}
@@ -83,50 +83,55 @@ export default function ChatInput({
 const styles = StyleSheet.create({
   container: {
     backgroundColor: Colors.white.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.white.qua,
-    elevation: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 0,
+    // Soft shadow for floating feel
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 8,
   },
   containerFocused: {
-    borderTopColor: Colors.brand.primary,
+    // subtle state change if needed
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.white.secondary,
-    borderRadius: 24,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    minHeight: 48,
+    backgroundColor: '#F8F9FA', // Lighter neutral background
+    borderRadius: 32, // Fully rounded pill shape
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    minHeight: 56,
     maxHeight: 120,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   input: {
     flex: 1,
     fontFamily: Fonts.regular,
-    fontSize: 15,
-    color: Colors.black.secondary,
+    fontSize: 16,
+    color: Colors.black.primary,
     maxHeight: 100,
     paddingVertical: 0,
     paddingHorizontal: 8,
+    lineHeight: 22,
   },
-  micButton: {
-    padding: 4,
+  actionButton: {
+    padding: 8,
     marginRight: 4,
+    opacity: 0.6,
   },
   sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: Colors.brand.primary,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 4,
+    transform: [{ scale: 0.9 }],
   },
 });
 

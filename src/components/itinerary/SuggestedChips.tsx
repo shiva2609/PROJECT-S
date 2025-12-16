@@ -62,14 +62,14 @@ export default function SuggestedChips({ onChipPress }: SuggestedChipsProps) {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {SUGGESTED_CHIPS.map((chip) => (
+        {SUGGESTED_CHIPS.slice(0, 3).map((chip) => (
           <TouchableOpacity
             key={chip.id}
             style={styles.chip}
             onPress={() => onChipPress(chip.prompt)}
             activeOpacity={0.7}
           >
-            <Icon name={chip.icon} size={16} color={Colors.brand.primary} style={{ marginRight: 6 }} />
+            <Icon name={chip.icon} size={18} color={Colors.black.tertiary} />
             <Text style={styles.chipText}>{chip.label}</Text>
           </TouchableOpacity>
         ))}
@@ -80,29 +80,31 @@ export default function SuggestedChips({ onChipPress }: SuggestedChipsProps) {
 
 const styles = StyleSheet.create({
   container: {
-    paddingVertical: 8,
-    paddingBottom: 12,
+    paddingVertical: 12,
+    paddingBottom: 16,
     backgroundColor: Colors.white.primary,
-    borderTopWidth: 1,
-    borderTopColor: Colors.white.qua,
+    // borderTopWidth: 1, // Remove divider for cleaner look
+    // borderTopColor: Colors.white.qua,
   },
   scrollContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
   },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#F8F9FA', // Almost white/transparent feel
     borderWidth: 1,
-    borderColor: Colors.brand.primary,
+    borderColor: '#EEEEEE',
     borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginRight: 12,
   },
   chipText: {
     fontFamily: Fonts.medium,
-    fontSize: 14,
-    color: Colors.brand.primary,
+    fontSize: 13,
+    color: Colors.black.secondary,
+    marginLeft: 6,
   },
 });
 

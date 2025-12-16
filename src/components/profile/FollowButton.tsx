@@ -27,6 +27,7 @@ interface FollowButtonProps {
   isFollowedBack: boolean;
   isLoading?: boolean;
   onToggleFollow: () => void;
+  onBlock?: () => void; // V1 MODERATION: Block user callback
   followersCount?: number; // Optional purely for display if needed
 }
 
@@ -35,6 +36,7 @@ export default function FollowButton({
   isFollowedBack,
   isLoading = false,
   onToggleFollow,
+  onBlock, // V1 MODERATION
 }: FollowButtonProps) {
   const [bottomSheetVisible, setBottomSheetVisible] = useState(false);
   const [slideAnim] = useState(new Animated.Value(0));
@@ -85,6 +87,14 @@ export default function FollowButton({
   const handleUnfollowConfirm = () => {
     hideBottomSheet();
     onToggleFollow();
+  };
+
+  // V1 MODERATION: Handle block action
+  const handleBlock = () => {
+    hideBottomSheet();
+    if (onBlock) {
+      onBlock();
+    }
   };
 
   const showBottomSheet = () => {
@@ -171,6 +181,17 @@ export default function FollowButton({
                 >
                   <Text style={styles.bottomSheetItemTextDestructive}>Unfollow</Text>
                 </TouchableOpacity>
+
+                {/* V1 MODERATION: Block option */}
+                {onBlock && (
+                  <TouchableOpacity
+                    style={styles.bottomSheetItem}
+                    onPress={handleBlock}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.bottomSheetItemTextDestructive}>Block</Text>
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
                   style={styles.bottomSheetItem}

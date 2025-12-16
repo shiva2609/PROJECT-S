@@ -91,13 +91,14 @@ export default function SignupScreen({ navigation }: any) {
     }));
   }, [form.email]);
 
-  // Password validation
+  // Password validation - MINIMUM 8 characters (not exactly 8)
   React.useEffect(() => {
     if (!form.password) {
       setValidation(prev => ({ ...prev, password: 'idle' }));
       return;
     }
-    const isValid = /^[A-Za-z0-9]{8}$/.test(form.password);
+    // V1 FIX: Changed {8} to {8,} to allow passwords >= 8 characters
+    const isValid = /^[A-Za-z0-9]{8,}$/.test(form.password);
     setValidation(prev => ({
       ...prev,
       password: isValid ? 'valid' : 'invalid',
@@ -199,7 +200,7 @@ export default function SignupScreen({ navigation }: any) {
           onChangeText={(text) => setForm(prev => ({ ...prev, password: text }))}
         />
         {validation.password === 'invalid' ? (
-          <Text style={styles.errorText}> Password must be 8 alphanumeric characters</Text>
+          <Text style={styles.errorText}> Password must be at least 8 alphanumeric characters</Text>
         ) : validation.password === 'valid' ? (
           <Text style={styles.validText}> Strong password</Text>
         ) : null}

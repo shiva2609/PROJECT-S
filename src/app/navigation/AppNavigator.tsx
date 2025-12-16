@@ -52,12 +52,14 @@ import CommentsScreen from '../../screens/Post/CommentsScreen';
 import CropAdjustScreen from '../../screens/Create/CropAdjustScreen';
 import ProfilePhotoCropScreen from '../../screens/Account/ProfilePhotoCropScreen';
 import FollowersScreen from '../../screens/Account/FollowersScreen';
+import BlockedUsersScreen from '../../screens/Account/BlockedUsersScreen'; // V1 MODERATION
 import AddPostDetailsScreen from '../../screens/Create/AddPostDetailsScreen';
 import PostPreviewScreen from '../../screens/Create/PostPreviewScreen';
 import CreatePostScreen from '../../screens/Create/CreatePostScreen';
 import CreateReelScreen from '../../screens/Create/CreateReelScreen';
 import UnifiedEditScreen from '../../screens/Create/UnifiedEditScreen';
 import AddDetailsScreen from '../../screens/Create/AddDetailsScreen';
+import FeedbackScreen from '../../screens/Support/FeedbackScreen'; // V1 SUPPORT
 import DrawerNavigator from './DrawerNavigator';
 import { CreateFlowProvider } from '../../store/stores/useCreateFlowStore';
 
@@ -419,6 +421,22 @@ export default function AppNavigator() {
               <Stack.Screen
                 name="FollowingList"
                 component={FollowersScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="BlockedUsers"
+                component={BlockedUsersScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="Feedback"
+                component={FeedbackScreen}
                 options={{
                   headerShown: false,
                   gestureEnabled: true,

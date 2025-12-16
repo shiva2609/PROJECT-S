@@ -4,7 +4,7 @@ import * as FollowAPI from '../services/follow/followAPI';
 import * as UsersAPI from '../services/users/usersService';
 
 import { useAuth } from '../providers/AuthProvider';
-import { sendNotification } from '../services/notifications/NotificationAPI';
+import { sendNotification, sendFollowNotification, removeFollowNotification } from '../services/notifications/NotificationAPI';
 
 interface UseFollowManagerReturn {
   toggleFollow: (targetUserId: string) => Promise<void>;
@@ -63,6 +63,10 @@ export function useFollowManager(): UseFollowManagerReturn {
         const { decrementFollowerCount, incrementFollowingCount } = await import('../services/users/usersService');
         await decrementFollowerCount(targetUserId);
         await incrementFollowingCount(user.uid, -1);
+
+        // REMOVE NOTIFICATION
+        console.log("🔥 REMOVING FOLLOW NOTIFICATION FOR:", targetUserId);
+        await removeFollowNotification(targetUserId, user.uid);
       } else {
         console.log("🔥 FOLLOWING USER", targetUserId);
         // Follow: Pass source, target
@@ -82,14 +86,9 @@ export function useFollowManager(): UseFollowManagerReturn {
             const { getUserById } = await import('../services/users/usersService');
             const followerData = await getUserById(user.uid);
 
-            await sendNotification(targetUserId, {
-              type: 'follow',
-              actorId: user.uid,
-              message: 'started following you',
-              data: {
-                sourceUsername: followerData?.username || 'Someone',
-                sourceAvatarUri: followerData?.photoUrl
-              }
+            await sendFollowNotification(targetUserId, user.uid, {
+              sourceUsername: followerData?.username || 'Someone',
+              sourceAvatarUri: followerData?.photoUrl
             });
             console.log("✅ FOLLOW NOTIFICATION WRITE SUCCESS");
           } else {
