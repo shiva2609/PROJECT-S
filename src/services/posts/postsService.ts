@@ -220,6 +220,16 @@ export async function uploadMedia(
       throw new Error('Failed to refresh auth token before upload');
     }
 
+    // NATIVE AUTH CHECK & SETTLE DELAY (Critical for Real Devices)
+    // We must ensure the Native SDK (used by underlying storage) is also ready
+    const nativeAuth = require('@react-native-firebase/auth').default;
+    if (!nativeAuth().currentUser) {
+      console.error('[UPLOAD ERROR] Native Firebase Auth not fully initialized');
+      throw new Error('Firebase Auth not fully initialized for Storage upload');
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 300));
+
     const uploadTask = uploadBytesResumable(storageRef, blob);
 
     await new Promise((resolve, reject) => {

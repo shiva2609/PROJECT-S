@@ -61,7 +61,7 @@ export default function AddPostDetailsScreen({
     contentType: route.params?.contentType,
   });
 
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
   const { finalMedia = [], croppedMedia = [], contentType = 'post' } = route.params;
 
   useEffect(() => {
@@ -141,10 +141,17 @@ export default function AddPostDetailsScreen({
     // FORCE TOKEN HYDRATION (MANDATORY)
     const currentUser = auth().currentUser;
     console.warn('[UPLOAD] auth.currentUser:', currentUser?.uid);
+    console.warn('[UPLOAD] authReady:', authReady);
 
     if (!currentUser) {
       console.error('[UPLOAD ERROR] No authenticated user found before upload');
       throw new Error('User not authenticated - cannot upload');
+    }
+
+    // HARD BLOCK: Wait for Native Auth Readiness
+    if (!authReady) {
+      console.error('[UPLOAD ERROR] Firebase Auth not fully initialized');
+      throw new Error('Firebase Auth not fully initialized for Storage upload');
     }
 
     try {
@@ -158,6 +165,10 @@ export default function AddPostDetailsScreen({
     }
 
     console.warn('[UPLOAD] Starting putFile upload...');
+
+    // NATIVE SETTLE DELAY (Required for Release Builds)
+    await new Promise(resolve => setTimeout(resolve, 300));
+
     const task = reference.putFile(uploadUri);
 
     return new Promise((resolve, reject) => {

@@ -17,6 +17,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   initialized: boolean;
+  authReady: boolean;
   needsKYCVerification?: boolean;
   userRole: 'super_admin' | 'user' | null;
   roleChecked: boolean;
@@ -28,6 +29,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   initialized: false,
+  authReady: false,
   needsKYCVerification: false,
   userRole: null,
   roleChecked: false,
@@ -101,6 +103,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
+  const [authReady, setAuthReady] = useState(false); // Native auth readiness
   const [userRole, setUserRole] = useState<'super_admin' | 'user' | null>(null);
   const [roleChecked, setRoleChecked] = useState(false);
   const [userProfile, setUserProfile] = useState<UserPublicInfo | null>(null);
@@ -108,6 +111,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     // Subscribe to global user store to keep profile data in sync
     return userStore.subscribe(setUserProfile);
+  }, []);
+
+  // Track Native Authentication Readiness (Critical for Storage)
+  useEffect(() => {
+    // We import locally to avoid conflicts if needed, or rely on global
+    const nativeAuth = require('@react-native-firebase/auth').default;
+    const unsubscribe = nativeAuth().onAuthStateChanged((nativeUser: any) => {
+      console.log('🔐 [Native Auth] Readiness Check:', !!nativeUser);
+      setAuthReady(true);
+    });
+    return unsubscribe;
   }, []);
 
   // Auto-redirect to KYC verification if needed
@@ -177,6 +191,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       user,
       loading,
       initialized,
+      authReady, // Exposed Native Auth Readiness
       userRole,
       roleChecked,
       isSuperAdmin: userRole === 'super_admin',
