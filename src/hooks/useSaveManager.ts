@@ -1,10 +1,10 @@
 import { useState, useCallback, useRef } from 'react';
 import { useAuth } from '../providers/AuthProvider';
-import * as PostsAPI from '../services/posts/postsService';
+import { toggleSavePost as toggleSaveInteraction } from '../global/services/posts/post.interactions.service';
 
 interface UseSaveManagerReturn {
   savedPosts: Set<string>;
-  toggleSave: (postId: string) => Promise<void>;
+  toggleSave: (postId: string, currentIsSaved?: boolean) => Promise<void>;
   isSaved: (postId: string) => boolean;
 }
 
@@ -21,7 +21,7 @@ export function useSaveManager(): UseSaveManagerReturn {
     return savedPosts.has(postId);
   }, [savedPosts]);
 
-  const toggleSave = useCallback(async (postId: string): Promise<void> => {
+  const toggleSave = useCallback(async (postId: string, currentIsSaved?: boolean): Promise<void> => {
     if (!user?.uid) {
       throw new Error('User must be authenticated to save posts');
     }
@@ -31,7 +31,7 @@ export function useSaveManager(): UseSaveManagerReturn {
       return;
     }
 
-    const wasSaved = savedPosts.has(postId);
+    const wasSaved = currentIsSaved ?? savedPosts.has(postId);
 
     // Optimistic update - update UI instantly
     setSavedPosts(prev => {
@@ -47,11 +47,8 @@ export function useSaveManager(): UseSaveManagerReturn {
     processingRef.current.add(postId);
 
     try {
-      if (wasSaved) {
-        await PostsAPI.unsavePost(user.uid, postId);
-      } else {
-        await PostsAPI.savePost(user.uid, postId);
-      }
+      // Use explicit intent (shouldSave = !wasSaved)
+      await toggleSaveInteraction(postId, user.uid, !wasSaved);
     } catch (error) {
       // Rollback optimistic update on error
       setSavedPosts(prev => {

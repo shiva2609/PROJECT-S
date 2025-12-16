@@ -1,48 +1,36 @@
-/**
- * Notification API
- * 
- * Handles sending and fetching notifications.
- * Notifications stored in user's notification subcollection.
- */
-
 import {
-  doc,
-  addDoc,
-  updateDoc,
   collection,
+  addDoc,
+  serverTimestamp,
+  doc,
+  updateDoc,
+  writeBatch,
+  getDocs,
   query,
   where,
-  getDocs,
-  limit as firestoreLimit,
   orderBy,
+  limit as firestoreLimit,
   startAfter,
-  serverTimestamp,
-  writeBatch,
+  Timestamp
 } from 'firebase/firestore';
 import { db } from '../auth/authService';
-import { getUserById } from './UsersAPI';
 import { normalizeNotification as normalizeNotificationGlobal } from '../../utils/normalize/normalizeNotification';
 
 // ---------- Types ----------
 
-export interface Notification {
+export interface AppNotification {
   id: string;
-  type: string;
-  actorId?: string;
+  type: 'like' | 'comment' | 'follow';
+  actorId: string;
+  receiverId?: string; // Optional if implicit by collection
   postId?: string;
-  message?: string;
-  data?: any;
-  createdAt: any;
+  message: string;
   read: boolean;
+  createdAt: Timestamp | null;
+  data?: any;
 }
 
-interface NotificationPayload {
-  type: string;
-  actorId?: string;
-  postId?: string;
-  message?: string;
-  data?: any;
-}
+export interface Notification extends AppNotification { }
 
 interface PaginationOptions {
   limit?: number;
@@ -59,63 +47,92 @@ interface PaginationResult {
 function normalizeNotification(docSnap: any): Notification {
   // Use global normalizer for safe defaults
   const normalized = normalizeNotificationGlobal(docSnap);
-  if (!normalized) {
-    // Fallback to basic structure if normalization fails
-    const data = docSnap.data ? docSnap.data() : docSnap;
-    return {
-      id: docSnap.id || '',
-      type: data.type || 'unknown',
-      actorId: data.actorId || '',
-      postId: data.postId || '',
-      message: data.message || '',
-      data: data.data || {},
-      createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
-      read: data.read === true,
-    };
+  if (normalized) {
+    return normalized as unknown as Notification;
   }
-  
+
+  // Fallback
+  const data = docSnap.data ? docSnap.data() : docSnap;
   return {
-    id: normalized.id,
-    type: normalized.type,
-    actorId: normalized.actorId || '',
-    postId: normalized.postId || '',
-    message: normalized.message || '',
-    data: normalized.data || {},
-    createdAt: normalized.createdAt?.toMillis?.() || normalized.timestamp?.toMillis?.() || normalized.createdAt || Date.now(),
-    read: normalized.read,
-  };
+    id: docSnap.id,
+    type: data.type,
+    actorId: data.actorId,
+    message: data.message,
+    read: data.read,
+    createdAt: data.createdAt,
+    data: data.data,
+    postId: data.postId
+  } as Notification;
 }
+
 
 // ---------- Exported Functions ----------
 
 /**
  * Send a notification to a user
- * Stores notification doc and optionally triggers push via server/cloud function
- * @param toUserId - Target user ID
- * @param payload - Notification payload
+ * Writes to: notifications/{userId}/items/{notificationId}
  */
 export async function sendNotification(
-  toUserId: string,
-  payload: NotificationPayload
-): Promise<void> {
+  receiverId: string,
+  notification: Omit<AppNotification, 'id' | 'createdAt' | 'read'>
+): Promise<string> {
+  console.log("🔥 [NotificationAPI] sendNotification CALLED", { receiverId, type: notification.type });
   try {
-    const notificationsRef = collection(db, 'users', toUserId, 'notifications');
-    const notificationData = {
-      ...payload,
+    const notificationsRef = collection(db, 'notifications', receiverId, 'items');
+
+    // Check for duplicates (optional, skipped for now to ensure delivery)
+    console.log("🔥 [NotificationAPI] Preparing to write doc to", `notifications/${receiverId}/items`);
+
+    const docRef = await addDoc(notificationsRef, {
+      ...notification,
       createdAt: serverTimestamp(),
       read: false,
-    };
-    
-    await addDoc(notificationsRef, notificationData);
-    
-    // Note: In production, trigger push notification via Cloud Function
-    // Cloud Function should:
-    // 1. Get user's push tokens from user document
-    // 2. Send push notification via FCM/expo-notifications
-    // 3. Handle delivery receipts
-  } catch (error: any) {
-    console.error('Error sending notification:', error);
-    throw { code: 'send-notification-failed', message: 'Failed to send notification' };
+    });
+
+    console.log("🔥 [NotificationAPI] Write SUCCESS. Doc ID:", docRef.id);
+    return docRef.id;
+  } catch (error) {
+    console.error("🔥 [NotificationAPI] Write FAILED:", error);
+    throw error;
+  }
+}
+
+/**
+ * Mark a notification as read
+ */
+export async function markNotificationAsRead(userId: string, notificationId: string): Promise<void> {
+  try {
+    const notificationRef = doc(db, 'notifications', userId, 'items', notificationId);
+    await updateDoc(notificationRef, {
+      read: true
+    });
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    throw error;
+  }
+}
+
+/**
+ * Mark all notifications as read for a user
+ */
+export async function markAllNotificationsAsRead(userId: string): Promise<void> {
+  try {
+    const batch = writeBatch(db);
+    const notificationsRef = collection(db, 'notifications', userId, 'items');
+    const q = query(notificationsRef, where('read', '==', false));
+
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) return;
+
+    snapshot.docs.forEach((docSnap) => {
+      batch.update(docSnap.ref, { read: true });
+    });
+
+    await batch.commit();
+  } catch (error) {
+    console.error('Error marking all as read:', error);
+    throw error;
   }
 }
 
@@ -131,22 +148,22 @@ export async function fetchNotifications(
 ): Promise<PaginationResult> {
   try {
     const limit = options?.limit || 20;
-    const notificationsRef = collection(db, 'users', userId, 'notifications');
-    
+    const notificationsRef = collection(db, 'notifications', userId, 'items');
+
     let q = query(
       notificationsRef,
       orderBy('createdAt', 'desc'),
       firestoreLimit(limit)
     );
-    
+
     if (options?.lastDoc) {
       q = query(q, startAfter(options.lastDoc));
     }
-    
+
     const querySnapshot = await getDocs(q);
     const notifications = querySnapshot.docs.map(normalizeNotification);
     const lastDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
-    
+
     return {
       notifications,
       nextCursor: querySnapshot.docs.length === limit ? lastDoc : undefined,
@@ -157,67 +174,9 @@ export async function fetchNotifications(
   }
 }
 
-/**
- * Mark a notification as read
- * @param notificationId - Notification ID
- */
-export async function markAsRead(notificationId: string): Promise<void> {
-  try {
-    // Note: This requires userId - notificationId alone is not enough
-    // In production, use full path: users/{userId}/notifications/{notificationId}
-    // For now, this is a placeholder that would need userId
-    throw { code: 'user-id-required', message: 'User ID is required to mark notification as read' };
-  } catch (error: any) {
-    console.error('Error marking notification as read:', error);
-    throw { code: 'mark-read-failed', message: 'Failed to mark notification as read' };
-  }
-}
-
-/**
- * Mark all notifications as read for a user
- * @param userId - User ID
- */
-export async function markAllAsRead(userId: string): Promise<void> {
-  try {
-    const notificationsRef = collection(db, 'users', userId, 'notifications');
-    const unreadQuery = query(
-      notificationsRef,
-      where('read', '==', false)
-    );
-    
-    const querySnapshot = await getDocs(unreadQuery);
-    const batch = writeBatch(db);
-    
-    querySnapshot.docs.forEach(docSnap => {
-      const notificationRef = doc(db, 'users', userId, 'notifications', docSnap.id);
-      batch.update(notificationRef, { read: true, readAt: serverTimestamp() });
-    });
-    
-    await batch.commit();
-  } catch (error: any) {
-    console.error('Error marking all notifications as read:', error);
-    throw { code: 'mark-all-read-failed', message: 'Failed to mark all notifications as read' };
-  }
-}
-
 // Convenience functions for hooks
 export async function getNotifications(userId: string): Promise<Notification[]> {
   const result = await fetchNotifications(userId);
   return result.notifications;
-}
-
-// Note: markAsRead needs userId - hook should pass it
-// For now, provide a version that takes both
-export async function markNotificationAsRead(userId: string, notificationId: string): Promise<void> {
-  try {
-    const notificationRef = doc(db, 'users', userId, 'notifications', notificationId);
-    await updateDoc(notificationRef, {
-      read: true,
-      readAt: serverTimestamp(),
-    });
-  } catch (error: any) {
-    console.error('Error marking notification as read:', error);
-    throw { code: 'mark-read-failed', message: 'Failed to mark notification as read' };
-  }
 }
 

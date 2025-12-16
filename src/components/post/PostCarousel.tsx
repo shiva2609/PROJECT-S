@@ -64,10 +64,10 @@ const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio,
     const contentOffsetX = event.nativeEvent.contentOffset.x;
     const viewWidth = event.nativeEvent.layoutMeasurement?.width || containerWidth;
     const index = Math.round(contentOffsetX / viewWidth);
-    
+
     if (index !== currentIndex && index >= 0 && index < media.length) {
       setCurrentIndex(index);
-      
+
       // Pause all videos
       if (Video) {
         Object.values(videoRefs.current).forEach((video) => {
@@ -79,7 +79,7 @@ const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio,
             }
           }
         });
-        
+
         // Play current video if it's a video
         if (media[index]?.type === 'video') {
           const currentVideo = videoRefs.current[index];
@@ -119,10 +119,10 @@ const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio,
             playWhenInactive={false}
           />
         ) : (
-          <Image 
-            source={{ uri: item.uri }} 
-            style={{ width: containerWidth, height: containerHeight }}
-            resizeMode="cover" 
+          <Image
+            source={{ uri: item.uri }}
+            style={{ width: containerWidth, height: containerHeight, borderRadius: 12 }}
+            resizeMode="cover"
           />
         )}
       </View>
@@ -152,10 +152,10 @@ const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio,
             playWhenInactive={false}
           />
         ) : (
-          <Image 
-            source={{ uri: item.uri }} 
-            style={{ width: containerWidth, height: containerHeight }}
-            resizeMode="cover" 
+          <Image
+            source={{ uri: item.uri }}
+            style={{ width: containerWidth, height: containerHeight, borderRadius: 18,}}
+            resizeMode="cover"
           />
         )}
       </View>

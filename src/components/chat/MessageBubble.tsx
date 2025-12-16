@@ -85,8 +85,10 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 4,
   },
   receivedBubble: {
-    backgroundColor: Colors.white.secondary,
+    backgroundColor: '#FFFFFF',
     borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: '#EFEFEF', // Subtle border for definition
   },
   media: {
     width: 200,

@@ -27,6 +27,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../auth/authService';
+import { sendNotification } from '../notifications/NotificationAPI';
 import { retryWithBackoff } from '../../utils/retry';
 import { isOfflineError, safeFirestoreRead } from '../../utils/offlineHandler';
 import {
@@ -43,11 +44,11 @@ function normalizeUserPost(docSnap: QueryDocumentSnapshot<DocumentData>) {
   // Use global normalizer for comprehensive field normalization
   const normalized = normalizePostGlobal(docSnap);
   if (!normalized) return null;
-  
+
   // Also use safeFirestore normalizer for media URL extraction
   const safeNormalized = normalizePostDocument(docSnap);
   const mediaUrl = safeNormalized?.mediaUrl || normalized.mediaUrl || normalized.imageURL || '';
-  
+
   return {
     id: normalized.id,
     authorId: normalized.createdBy || normalized.userId || normalized.ownerId || normalized.authorId || null,
@@ -177,14 +178,14 @@ export async function uploadMedia(
     const timestamp = Date.now();
     const fileName = `${pathPrefix}/${timestamp}_${Math.random().toString(36).substring(7)}.${file.type === 'image' ? 'jpg' : 'mp4'}`;
     const storageRef = ref(storage, fileName);
-    
+
     // For React Native, we need to convert URI to blob
     // This is a placeholder - actual implementation depends on react-native-fs or similar
     const response = await fetch(file.uri);
     const blob = await response.blob();
-    
+
     const uploadTask = uploadBytesResumable(storageRef, blob);
-    
+
     await new Promise((resolve, reject) => {
       uploadTask.on(
         'state_changed',
@@ -195,9 +196,9 @@ export async function uploadMedia(
         () => resolve(uploadTask.snapshot)
       );
     });
-    
+
     const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-    
+
     return {
       url: downloadURL,
       meta: {
@@ -234,10 +235,10 @@ export async function createPost(
         mediaUrls.push(uploadResult.url);
       }
     }
-    
+
     // Extract hashtags from caption
     const hashtags = payload.caption ? extractHashtags(payload.caption) : [];
-    
+
     const postData = {
       authorId,
       media: mediaUrls,
@@ -249,10 +250,10 @@ export async function createPost(
       hashtags,
       ...payload.metadata,
     };
-    
+
     const postsRef = collection(db, 'posts');
     const docRef = await addDoc(postsRef, postData);
-    
+
     return {
       id: docRef.id,
       ...postData,
@@ -273,12 +274,12 @@ export async function updatePost(postId: string, data: Partial<Post>): Promise<v
   try {
     const postRef = doc(db, 'posts', postId);
     const updateData: any = { ...data };
-    
+
     // Extract hashtags if caption is updated
     if (updateData.caption) {
       updateData.hashtags = extractHashtags(updateData.caption);
     }
-    
+
     delete updateData.id;
     await updateDoc(postRef, updateData);
   } catch (error: any) {
@@ -295,7 +296,7 @@ export async function deletePost(postId: string): Promise<void> {
   try {
     const postRef = doc(db, 'posts', postId);
     await deleteDoc(postRef);
-    
+
     // Note: In production, you may want to delete associated comments and media files
   } catch (error: any) {
     console.error('Error deleting post:', error);
@@ -318,25 +319,25 @@ export async function fetchFeed(options?: {
       return await retryWithBackoff(async () => {
         const limit = options?.limit || 10;
         const postsRef = collection(db, 'posts');
-        
+
         let q = query(
           postsRef,
           orderBy('createdAt', 'desc'),
           firestoreLimit(limit + 1) // Fetch one extra to check if there's more
         );
-        
+
         if (options?.lastDoc) {
           q = query(q, startAfter(options.lastDoc));
         }
-        
+
         const querySnapshot = await getDocs(q);
         const docs = querySnapshot.docs;
         const hasMore = docs.length > limit;
         const postsToReturn = hasMore ? docs.slice(0, limit) : docs;
-        
+
         const posts = postsToReturn.map(normalizePost);
         const lastDoc = postsToReturn[postsToReturn.length - 1];
-        
+
         return {
           posts,
           lastDoc,
@@ -366,7 +367,7 @@ export async function fetchPostsByUser(
     console.warn('[fetchPostsByUser] Invalid userId, returning empty list');
     return { posts: [], nextCursor: undefined };
   }
-  
+
   return safeFirestoreRead(
     async () => {
       return await retryWithBackoff(async () => {
@@ -403,7 +404,7 @@ export async function fetchPostsByUser(
         const normalized = docs
           .map(normalizeUserPost)
           .filter((p): p is NonNullable<typeof p> => p !== null);
-        
+
         const resolved = await Promise.all(
           normalized.map(async (p) => {
             if (!p || !p.media || p.media.length === 0) return p;
@@ -452,7 +453,7 @@ export async function getComments(postId: string): Promise<Comment[]> {
     const commentsRef = collection(db, 'posts', postId, 'comments');
     const q = query(commentsRef, orderBy('timestamp', 'desc'));
     const querySnapshot = await getDocs(q);
-    
+
     return querySnapshot.docs.map(doc => ({
       id: doc.id,
       postId,
@@ -482,11 +483,12 @@ export async function addComment(
   userId: string,
   text: string
 ): Promise<{ commentId: string }> {
+  console.log("🔥 ADD COMMENT FUNCTION HIT", { postId, userId });
   try {
     // Get user data for comment
-    const { getUserById } = await import('./UsersAPI');
+    const { getUserById } = await import('../users/usersService');
     const user = await getUserById(userId);
-    
+
     const commentsRef = collection(db, 'posts', postId, 'comments');
     const commentData = {
       userId,
@@ -496,24 +498,71 @@ export async function addComment(
       timestamp: serverTimestamp(),
       likeCount: 0,
     };
-    
+
     // Use batch write for atomicity (addDoc + increment count)
     const batch = writeBatch(db);
     const commentRef = doc(commentsRef);
     batch.set(commentRef, commentData);
-    
+
     // Increment comment count atomically
     const postRef = doc(db, 'posts', postId);
     batch.update(postRef, {
       commentCount: increment(1),
     });
-    
+
     await batch.commit();
-    
+
     return { commentId: commentRef.id };
   } catch (error: any) {
     console.error('Error adding comment:', error);
     throw { code: 'add-comment-failed', message: 'Failed to add comment' };
+  }
+}
+
+/**
+ * Helper to trigger notification for comment
+ * (Separate function to avoid cluttering addComment)
+ */
+async function triggerCommentNotification(postId: string, commenterId: string, commentText: string, commentId: string) {
+  console.log("🔥 TRIGGER COMMENT NOTIFICATION HIT");
+  try {
+    const postRef = doc(db, 'posts', postId);
+    const postSnap = await getDoc(postRef);
+
+    if (postSnap.exists()) {
+      const postData = postSnap.data();
+      const authorId = postData.authorId || postData.userId || postData.createdBy;
+
+      console.log("⚠️ COMMENT GUARD CHECK", { authorId, commenterId });
+
+      if (authorId && authorId !== commenterId) {
+        console.log("🔥 SENDING COMMENT NOTIFICATION TO:", authorId);
+        const { getUserById } = await import('../users/usersService');
+        const commenter = await getUserById(commenterId);
+
+        await sendNotification(authorId, {
+          type: 'comment',
+          actorId: commenterId,
+          postId: postId,
+          message: `commented: "${commentText}"`,
+          data: {
+            postId,
+            commentId,
+            text: commentText,
+            postImage: postData.mediaUrl || postData.imageUrl || (postData.media && postData.media[0]),
+            sourceUsername: commenter?.username || 'Someone',
+            sourceAvatarUri: commenter?.photoUrl
+          }
+        });
+        console.log("✅ COMMENT NOTIFICATION WRITE SUCCESS");
+      } else {
+        console.log("⚠️ SKIPPED: Self-comment or missing authorId");
+      }
+    } else {
+      console.log("⚠️ SKIPPED: Post not found for comment");
+    }
+  } catch (e) {
+    console.error("❌ COMMENT NOTIFICATION FAILED", e);
   }
 }
 
@@ -528,13 +577,13 @@ export async function deleteComment(postId: string, commentId: string): Promise<
     const batch = writeBatch(db);
     const commentRef = doc(db, 'posts', postId, 'comments', commentId);
     batch.delete(commentRef);
-    
+
     // Decrement comment count atomically
     const postRef = doc(db, 'posts', postId);
     batch.update(postRef, {
       commentCount: increment(-1),
     });
-    
+
     await batch.commit();
   } catch (error: any) {
     console.error('Error deleting comment:', error);
@@ -556,7 +605,7 @@ export async function savePost(userId: string, postId: string): Promise<void> {
       postId,
       savedAt: serverTimestamp(),
     });
-    
+
     // Increment saved count
     const postRef = doc(db, 'posts', postId);
     await updateDoc(postRef, {
@@ -577,7 +626,7 @@ export async function unsavePost(userId: string, postId: string): Promise<void> 
   try {
     const savedRef = doc(db, 'users', userId, 'saved', postId);
     await deleteDoc(savedRef);
-    
+
     // Decrement saved count
     const postRef = doc(db, 'posts', postId);
     await updateDoc(postRef, {
@@ -642,16 +691,16 @@ export async function searchHashtags(
     if (!searchQuery) {
       return [];
     }
-    
+
     const postsRef = collection(db, 'posts');
     const q = query(
       postsRef,
       where('hashtags', 'array-contains', searchQuery),
       firestoreLimit(limit)
     );
-    
+
     const querySnapshot = await getDocs(q);
-    
+
     // Count occurrences (simplified - in production, use a hashtags collection)
     const tagCounts: Record<string, number> = {};
     querySnapshot.docs.forEach(doc => {
@@ -662,7 +711,7 @@ export async function searchHashtags(
         }
       });
     });
-    
+
     return Object.entries(tagCounts)
       .map(([tag, count]) => ({ tag, count }))
       .sort((a, b) => b.count - a.count)

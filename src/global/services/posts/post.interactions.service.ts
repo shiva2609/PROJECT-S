@@ -31,23 +31,26 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../services/auth/authService';
 import { getUsersPublicInfo } from '../user/user.service';
+import { sendNotification } from '../../../services/notifications/NotificationAPI';
 
 /**
  * Toggle like on a post
  * Creates or deletes posts/{postId}/likes/{userId}
  * AND syncs with legacy root 'likes' collection for backward compatibility
  */
-export async function toggleLike(postId: string, userId: string): Promise<void> {
+export async function toggleLike(postId: string, userId: string, shouldLike?: boolean): Promise<void> {
   if (!postId || !userId) {
     throw new Error('Post ID and User ID are required');
   }
+
+  console.log("🔥 TOGGLE LIKE HIT", { postId, userId });
 
   const likeRef = doc(db, 'posts', postId, 'likes', userId);
   const legacyLikeRef = doc(db, 'likes', `${userId}_${postId}`);
   const postRef = doc(db, 'posts', postId);
 
   try {
-    await runTransaction(db, async (transaction) => {
+    const action = await runTransaction(db, async (transaction) => {
       // First, verify the post exists
       const postSnap = await transaction.get(postRef);
       if (!postSnap.exists()) {
@@ -59,7 +62,22 @@ export async function toggleLike(postId: string, userId: string): Promise<void> 
       const exists = likeSnap.exists();
       const currentLikeCount = postSnap.data().likeCount || 0;
 
-      if (exists) {
+      // Determine action based on intent or toggle
+      let action: 'like' | 'unlike' | 'none';
+
+      if (shouldLike !== undefined) {
+        if (shouldLike && !exists) action = 'like';
+        else if (!shouldLike && exists) action = 'unlike';
+        else action = 'none';
+      } else {
+        action = exists ? 'unlike' : 'like';
+      }
+
+      if (action === 'none') {
+        return;
+      }
+
+      if (action === 'unlike') {
         // Unlike: delete the document and legacy doc
         console.log('[toggleLike] Unliking post:', postId, 'Current count:', currentLikeCount);
         transaction.delete(likeRef);
@@ -74,7 +92,7 @@ export async function toggleLike(postId: string, userId: string): Promise<void> 
 
       } else {
         // Like: create the document and legacy doc
-        console.log('[toggleLike] Liking post:', postId, 'Current count:', currentLikeCount);
+        console.log("🔥 [toggleLike] Liking post:", postId, "Current count:", currentLikeCount);
         const timestamp = serverTimestamp();
 
         transaction.set(likeRef, {
@@ -93,11 +111,52 @@ export async function toggleLike(postId: string, userId: string): Promise<void> 
         transaction.update(postRef, {
           likeCount: newCount
         });
-        console.log('[toggleLike] New count after like:', newCount);
+        console.log("🔥 [toggleLike] New count after like:", newCount);
       }
+
+      return action;
     });
 
     console.log('[toggleLike] Transaction completed successfully for post:', postId);
+    console.log("🔥 [toggleLike] Transaction result:", action);
+
+    // NOTIFICATION TRIGGER
+    // action is returned from runTransaction
+    if (shouldLike !== false && action !== 'unlike' && action !== 'none') {
+      console.log("🔥 ABOUT TO TRIGGER LIKE NOTIFICATION");
+      try {
+        const postSnap = await getDoc(postRef);
+        if (postSnap.exists()) {
+          const postData = postSnap.data();
+          const authorId = postData.authorId || postData.userId || postData.createdBy;
+
+          if (authorId && authorId !== userId) {
+            console.log("🔥 SENDING LIKE NOTIFICATION TO:", authorId);
+            // Fetch liker details
+            const { getUserById } = await import('../../../services/users/usersService');
+            const liker = await getUserById(userId);
+
+            await sendNotification(authorId, {
+              type: 'like',
+              actorId: userId,
+              postId: postId,
+              message: 'liked your post',
+              data: {
+                postId,
+                postImage: postData.mediaUrl || postData.imageUrl || (postData.media && postData.media[0]),
+                sourceUsername: liker?.username || 'Someone',
+                sourceAvatarUri: liker?.photoUrl
+              }
+            });
+            console.log("✅ LIKE NOTIFICATION WRITE SUCCESS");
+          } else {
+            console.log("⚠️ SKIPPED: Self-like or missing authorId");
+          }
+        }
+      } catch (nErr) {
+        console.error("❌ LIKE NOTIFICATION FAILED", nErr);
+      }
+    }
   } catch (error) {
     console.error('[toggleLike] Transaction failed:', {
       postId,
@@ -209,6 +268,41 @@ export async function addComment(
 
   await batch.commit();
 
+  // NOTIFICATION TRIGGER
+  console.log("🔥 ABOUT TO TRIGGER COMMENT NOTIFICATION");
+  try {
+    const postSnap = await getDoc(postRef);
+    if (postSnap.exists()) {
+      const postData = postSnap.data();
+      const authorId = postData.authorId || postData.userId || postData.createdBy;
+
+      if (authorId && authorId !== userId) {
+        console.log("🔥 SENDING COMMENT NOTIFICATION TO:", authorId);
+        // Fetch commenter details
+        const { getUserById } = await import('../../../services/users/usersService');
+        const commenter = await getUserById(userId);
+
+        await sendNotification(authorId, {
+          type: 'comment',
+          actorId: userId,
+          postId: postId,
+          message: `commented: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
+          data: {
+            postId,
+            commentId: commentRef.id,
+            text: text,
+            postImage: postData.mediaUrl || postData.imageUrl || (postData.media && postData.media[0]),
+            sourceUsername: commenter?.username || 'Someone',
+            sourceAvatarUri: commenter?.photoUrl
+          }
+        });
+        console.log("✅ COMMENT NOTIFICATION WRITE SUCCESS");
+      }
+    }
+  } catch (nErr) {
+    console.error("❌ COMMENT NOTIFICATION FAILED", nErr);
+  }
+
   return commentRef.id;
 }
 
@@ -313,7 +407,7 @@ export function listenToPostComments(
  * Save → users/{userId}/savedPosts/{postId}
  * Unsave → delete doc
  */
-export async function toggleSavePost(postId: string, userId: string): Promise<void> {
+export async function toggleSavePost(postId: string, userId: string, shouldSave?: boolean): Promise<void> {
   if (!postId || !userId) {
     throw new Error('Post ID and User ID are required');
   }
@@ -322,10 +416,26 @@ export async function toggleSavePost(postId: string, userId: string): Promise<vo
   const postRef = doc(db, 'posts', postId);
 
   const savedPostSnap = await getDoc(savedPostRef);
+  const exists = savedPostSnap.exists();
 
   const batch = writeBatch(db);
 
-  if (savedPostSnap.exists()) {
+  // Determine action based on intent or toggle
+  let action: 'save' | 'unsave' | 'none';
+
+  if (shouldSave !== undefined) {
+    if (shouldSave && !exists) action = 'save';
+    else if (!shouldSave && exists) action = 'unsave';
+    else action = 'none';
+  } else {
+    action = exists ? 'unsave' : 'save';
+  }
+
+  if (action === 'none') {
+    return;
+  }
+
+  if (action === 'unsave') {
     // Unsave: delete the document
     batch.delete(savedPostRef);
     // Optional: decrement savedCount on post if tracked
@@ -449,4 +559,59 @@ export function listenToSavedPosts(
       callback([]);
     }
   );
+}
+/**
+ * Get interaction states (liked, saved) for a batch of posts
+ * Efficiently fetches status for the current user
+ */
+export async function getPostInteractionStates(
+  userId: string,
+  postIds: string[]
+): Promise<Record<string, { isLiked: boolean; isSaved: boolean }>> {
+  if (!userId || !postIds || postIds.length === 0) {
+    return {};
+  }
+
+  const results: Record<string, { isLiked: boolean; isSaved: boolean }> = {};
+  const uniquePostIds = [...new Set(postIds)];
+
+  // Create promises for Likes and Saves
+  // 1. Check Likes: using legacy 'likes/{userId}_{postId}' collection for checking existence
+  const likePromises = uniquePostIds.map(async (postId) => {
+    try {
+      const docRef = doc(db, 'likes', `${userId}_${postId}`);
+      const snap = await getDoc(docRef);
+      return { postId, isLiked: snap.exists() };
+    } catch (e) {
+      console.warn(`Error checking like for ${postId}`, e);
+      return { postId, isLiked: false };
+    }
+  });
+
+  // 2. Check Saves: using 'users/{userId}/savedPosts/{postId}'
+  const savePromises = uniquePostIds.map(async (postId) => {
+    try {
+      const docRef = doc(db, 'users', userId, 'savedPosts', postId);
+      const snap = await getDoc(docRef);
+      return { postId, isSaved: snap.exists() };
+    } catch (e) {
+      console.warn(`Error checking save for ${postId}`, e);
+      return { postId, isSaved: false };
+    }
+  });
+
+  // Execute in parallel
+  const [likes, saves] = await Promise.all([
+    Promise.all(likePromises),
+    Promise.all(savePromises)
+  ]);
+
+  // Combine results
+  uniquePostIds.forEach(postId => {
+    const likeStatus = likes.find(l => l.postId === postId)?.isLiked || false;
+    const saveStatus = saves.find(s => s.postId === postId)?.isSaved || false;
+    results[postId] = { isLiked: likeStatus, isSaved: saveStatus };
+  });
+
+  return results;
 }

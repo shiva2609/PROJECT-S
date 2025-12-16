@@ -16,6 +16,7 @@ import PostCard from '../../components/post/PostCard';
 import FollowingSuggestions from '../../components/suggestions/FollowingSuggestions';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
+import PostSkeleton from '../../components/post/PostSkeleton';
 
 interface FollowingScreenProps {
   navigation?: any;
@@ -23,11 +24,11 @@ interface FollowingScreenProps {
   onPostPress?: (post: any) => void;
 }
 
-export default function FollowingScreen({ navigation, onUserPress, onPostPress }: FollowingScreenProps) {
+export default function FollowingUsersScreen({ navigation, onUserPress, onPostPress }: FollowingScreenProps) {
   const { user } = useAuth();
   const { following, refreshRelations } = useUserRelations();
   const { toggleFollow: handleFollowUser } = useUnifiedFollow();
-  
+
   // Use global home feed hook for following feed
   const {
     feed: postsFromHook,
@@ -37,27 +38,27 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
     fetchMore,
     refresh,
   } = useHomeFeed(user?.uid, { feedType: 'following', limit: 10 });
-  
+
   // Local state for post updates
   const [posts, setPosts] = useState<PostWithAuthor[]>([]);
-  
+
   // Sync posts from hook
   useEffect(() => {
     setPosts(postsFromHook);
   }, [postsFromHook]);
-  
+
   // Update post function
   const updatePost = useCallback((postId: string, updates: Partial<PostWithAuthor>) => {
     setPosts((prev) =>
       prev.map((post) => (post.id === postId ? { ...post, ...updates } : post))
     );
   }, []);
-  
+
   // Remove post function
   const removePost = useCallback((postId: string) => {
     setPosts((prev) => prev.filter((post) => post.id !== postId));
   }, []);
-  
+
   const postActions = usePostActions((postId: string, updates: any) => {
     const currentPost = posts.find(p => p.id === postId);
     if (currentPost) {
@@ -82,17 +83,17 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
     }
   });
 
-  const handleLike = useCallback(async (postId: string) => {
+  const handleLike = useCallback(async (postId: string, currentIsLiked?: boolean) => {
     try {
-      await postActions.toggleLike(postId);
+      await postActions.toggleLike(postId, currentIsLiked);
     } catch (error: any) {
       console.error('Error toggling like:', error);
     }
   }, [postActions]);
 
-  const handleSave = useCallback(async (postId: string) => {
+  const handleSave = useCallback(async (postId: string, currentIsSaved?: boolean) => {
     try {
-      await postActions.toggleSave(postId);
+      await postActions.toggleSave(postId, currentIsSaved);
     } catch (error: any) {
       console.error('Error toggling save:', error);
     }
@@ -118,12 +119,13 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
 
   const renderPost = useCallback(({ item }: { item: PostWithAuthor }) => {
     const authorId = item.authorId || item.userId || item.createdBy || item.ownerId || '';
-    const isLiked = postActions.isLiked(item.id);
-    const isSaved = postActions.isSaved(item.id);
+    // Use item properties as source of truth
+    const isLiked = item.isLiked ?? false;
+    const isSaved = item.isSaved ?? false;
     const isOwnerFollowed = item.isFollowingAuthor ?? true; // In following feed, all should be followed
     // Following feed: never show Follow button (all posts are from followed users)
     const showFollowButton = false;
-    
+
     // Create post object with author info and images for PostCard
     const postForCard = {
       ...item,
@@ -134,30 +136,30 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
       // Ensure imageURLs is available
       imageURLs: item.imageURLs || item.mediaUrls || [],
     };
-    
+
     return (
       <PostCard
         post={postForCard as any}
         isLiked={isLiked}
         isSaved={isSaved}
-        onLike={() => handleLike(item.id)}
+        onLike={() => handleLike(item.id, isLiked)}
         onComment={() => {
           const postIndex = posts.findIndex((p) => p.id === item.id);
-          navigation?.navigate('PostDetail', { 
+          navigation?.navigate('PostDetail', {
             postId: item.id,
             posts: posts as any,
             index: postIndex >= 0 ? postIndex : 0,
           });
         }}
         onShare={() => handleShare(item as any)}
-        onBookmark={() => handleSave(item.id)}
-        onProfilePress={() => onUserPress?.(authorId) || navigation?.push('ProfileScreen', { userId: authorId })}
+        onBookmark={() => handleSave(item.id, isSaved)}
+        onProfilePress={() => onUserPress?.(authorId) || navigation?.navigate('ProfileScreen', { userId: authorId })}
         onPostDetailPress={() => {
           const postIndex = posts.findIndex((p) => p.id === item.id);
-          onPostPress?.(item) || navigation?.navigate('PostDetail', { 
-            posts: posts as any, 
+          onPostPress?.(item) || navigation?.navigate('PostDetail', {
+            posts: posts as any,
             index: postIndex >= 0 ? postIndex : 0,
-            postId: item.id 
+            postId: item.id
           });
         }}
         currentUserId={user?.uid}
@@ -181,8 +183,11 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
 
   if (loading && posts.length === 0) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.brand.primary} />
+      <View style={styles.container}>
+        <View style={{ paddingTop: 10 }}>
+          <PostSkeleton />
+          <PostSkeleton />
+        </View>
       </View>
     );
   }
@@ -207,6 +212,8 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
         }
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 400 }}
         ListFooterComponent={
           <>
             {postsEnded && (
@@ -217,7 +224,7 @@ export default function FollowingScreen({ navigation, onUserPress, onPostPress }
             )}
             {shouldShowSuggestions && (
               <View style={styles.suggestionsWrapper}>
-                <FollowingSuggestions 
+                <FollowingSuggestions
                   onUserPress={onUserPress}
                   compact={true}
                   showContactsCard={true}

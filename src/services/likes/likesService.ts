@@ -23,6 +23,8 @@ import {
   increment,
 } from 'firebase/firestore';
 import { db } from '../auth/authService';
+import { sendNotification } from '../notifications/NotificationAPI';
+import { getDoc as getPostDoc } from 'firebase/firestore'; // Alias to avoid conflict if needed or use existing getDoc
 
 // ---------- Types ----------
 
@@ -47,6 +49,8 @@ export async function likePost(userId: string, postId: string): Promise<void> {
   try {
     const likeId = `${userId}_${postId}`;
     const likeRef = doc(db, 'likes', likeId);
+
+    console.log("🔥 LIKE FUNCTION HIT", { userId, postId });
 
     // Check if already liked
     const likeSnap = await getDoc(likeRef);
@@ -78,6 +82,48 @@ export async function likePost(userId: string, postId: string): Promise<void> {
         likeCount: increment(1),
       });
     });
+
+    console.log("🔥 ABOUT TO TRIGGER NOTIFICATION", { userId, postId });
+    // TRIGGER NOTIFICATION (Client-side polyfill)
+    try {
+      console.log("🔥 NOTIFICATION TRIGGER ENTERED");
+      // Fetch post owner to send notification
+      const postRef = doc(db, 'posts', postId);
+      const postSnap = await getDoc(postRef);
+      if (postSnap.exists()) {
+        const postData = postSnap.data();
+        const authorId = postData.authorId || postData.userId || postData.createdBy; // handles different schemas
+        console.log("⚠️ GUARD CHECK", { authorId, currentUserId: userId });
+
+        // Don't notify if liking own post
+        if (authorId && authorId !== userId) {
+          console.log("🔥 SENDING NOTIFICATION TO:", authorId);
+          const { getUserById } = await import('../users/usersService');
+          const liker = await getUserById(userId);
+
+          await sendNotification(authorId, {
+            type: 'like',
+            actorId: userId,
+            postId: postId,
+            message: 'liked your post',
+            data: {
+              postId,
+              postImage: postData.mediaUrl || postData.imageUrl || (postData.media && postData.media[0]),
+              sourceUsername: liker?.username || 'Someone',
+              sourceAvatarUri: liker?.photoUrl
+            }
+          });
+          console.log("✅ NOTIFICATION WRITE SUCCESS");
+        } else {
+          console.log("⚠️ SKIPPED: Self-like or missing authorId");
+        }
+      } else {
+        console.log("⚠️ SKIPPED: Post not found");
+      }
+    } catch (notifError) {
+      console.error("❌ NOTIFICATION WRITE FAILED", notifError);
+      // Don't fail the like action if notification fails
+    }
 
     console.log('[likePost] Successfully liked post:', postId);
   } catch (error: any) {

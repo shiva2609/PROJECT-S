@@ -7,6 +7,7 @@
  * 3. listenToFollowState - follow state query
  */
 
+
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
@@ -34,6 +35,7 @@ import { listenToSavedPosts, getSavedPosts } from '../../global/services/posts/p
 import { getPostsByIds } from '../../global/services/posts/post.service';
 import { useSession } from '../../core/session';
 import { getOrCreateChat } from '../../features/messages/services';
+import ProfileSkeleton from '../../components/profile/ProfileSkeleton';
 
 export default function ProfileScreen({ navigation, route }: any) {
   const { user: currentUser } = useAuth();
@@ -194,13 +196,23 @@ export default function ProfileScreen({ navigation, route }: any) {
   }, [refresh]);
 
 
+  // Determine which posts to show
+  const displayedPosts = (activeTab === 'saved' ? savedPosts : posts) || [];
+
   // Render post thumbnail
-  const renderPostThumbnail = useCallback(({ item }: { item: Post }) => {
+  const renderPostThumbnail = useCallback(({ item, index }: { item: Post; index: number }) => {
     const imageUrl = item.imageURL || item.coverImage || (item.gallery && item.gallery[0]) || '';
     return (
       <TouchableOpacity
         style={styles.postThumbnail}
-        onPress={() => navigation?.navigate('PostDetail', { postId: item.id })}
+        onPress={() => {
+          navigation?.navigate('PostDetail', {
+            postId: item.id,
+            userId: profileUser?.id || targetUserId, // Context for feed fetch if needed
+            posts: displayedPosts, // Pass current list for immediate rendering
+            index: index // Pass index for fast scroll
+          });
+        }}
         activeOpacity={0.8}
       >
         {imageUrl ? (
@@ -216,14 +228,12 @@ export default function ProfileScreen({ navigation, route }: any) {
         )}
       </TouchableOpacity>
     );
-  }, [navigation]);
+  }, [navigation, profileUser?.id, targetUserId, displayedPosts]);
 
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.brand.primary} />
-        </View>
+        <ProfileSkeleton />
       </SafeAreaView>
     );
   }
@@ -238,8 +248,7 @@ export default function ProfileScreen({ navigation, route }: any) {
     );
   }
 
-  // Determine which posts to show
-  const displayedPosts = (activeTab === 'saved' ? savedPosts : posts) || [];
+
 
   return (
     <SafeAreaView style={styles.container}>
@@ -284,7 +293,8 @@ export default function ProfileScreen({ navigation, route }: any) {
               <View style={styles.cardRight}>
                 <View style={styles.headerTopRow}>
                   <View style={styles.nameColumn}>
-                    <View style={styles.nameBadgeRow}>
+                    {/* Row 1: Name (or Username) + Badge */}
+                    <View style={styles.nameRow}>
                       <Text style={styles.profileDisplayName} numberOfLines={1}>
                         {profileUser.name || profileUser.username || 'User'}
                       </Text>
@@ -293,15 +303,19 @@ export default function ProfileScreen({ navigation, route }: any) {
                           <VerifiedBadge size={16} />
                         </View>
                       )}
-                      {profileUser.accountType && (
+                    </View>
+
+                    {/* Row 3: Account Type */}
+                    {profileUser.accountType && (
+                      <View style={styles.accountTypeContainer}>
                         <Text style={styles.accountType}>
                           {profileUser.accountType}
                         </Text>
-                      )}
-                    </View>
+                      </View>
+                    )}
                   </View>
 
-                  {/* Action Button (Edit - Top Right) or Hidden for Follow Button which is now at bottom */}
+                  {/* Action Button (Edit - Top Right) */}
                   <View style={styles.actionButtonWrapper}>
                     {isOwnProfile && (
                       <TouchableOpacity style={styles.editButtonSmall} onPress={handleEditProfile}>
@@ -417,12 +431,17 @@ export default function ProfileScreen({ navigation, route }: any) {
         ) : (
           <View style={styles.emptyPostsContainer}>
             <Icon
-              name={activeTab === 'saved' ? 'bookmark-outline' : 'grid-outline'}
+              name={activeTab === 'saved' ? 'bookmark-outline' : 'camera-outline'}
               size={48}
               color={Colors.black.qua}
             />
-            <Text style={styles.emptyPostsText}>
+            <Text style={styles.emptyPostsTitle}>
               {activeTab === 'saved' ? 'No saved posts yet' : 'No posts yet'}
+            </Text>
+            <Text style={styles.emptyPostsSubtitle}>
+              {activeTab === 'saved'
+                ? 'Posts you save will appear here.'
+                : (isOwnProfile ? 'Share your moments with the world.' : 'User hasn\'t posted anything yet.')}
             </Text>
           </View>
         )}
@@ -464,7 +483,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.white.tertiary,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16, // Slightly smaller for username in top bar
     fontFamily: Fonts.semibold,
     color: Colors.black.primary,
   },
@@ -476,11 +495,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   profileCard: {
-    flexDirection: 'column', // Changed to column for footer
+    flexDirection: 'column',
     backgroundColor: Colors.white.secondary,
     borderRadius: 20,
     padding: 20,
-    // Shadow support
+    // Shadow
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
@@ -493,7 +512,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   cardLeft: {
-    marginRight: 12,
+    marginRight: 16, // Increased spacing
   },
   cardRight: {
     flex: 1,
@@ -503,49 +522,58 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   nameColumn: {
     flex: 1,
     paddingRight: 8,
   },
-  nameBadgeRow: {
+  nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 2,
     flexWrap: 'wrap',
-    marginBottom: 4,
   },
   profileDisplayName: {
-    fontSize: 18,
+    fontSize: 20, // Larger
     fontFamily: Fonts.bold,
     color: Colors.black.primary,
     marginRight: 6,
   },
+
+  accountTypeContainer: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 92, 2, 0.1)', // Light orange pill
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginBottom: 4,
+  },
   accountType: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: Fonts.semibold,
     color: Colors.brand.primary,
-    marginLeft: 6,
+    textTransform: 'uppercase',
   },
   badgeWrapper: {
-    // adjusted for alignment
+    justifyContent: 'center',
   },
   actionButtonWrapper: {
     marginLeft: 4,
   },
   bioText: {
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: Fonts.regular,
-    color: Colors.black.secondary,
+    color: Colors.black.primary,
     lineHeight: 18,
-    marginTop: 4,
+    marginTop: 8,
   },
   cardFooterAction: {
     marginTop: 16,
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    paddingTop: 8,
+    paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: Colors.white.tertiary,
   },
@@ -572,7 +600,7 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     marginTop: 20,
-    justifyContent: 'space-around', // Distributed evenly
+    justifyContent: 'space-around',
     paddingHorizontal: 8,
   },
   statItem: {
@@ -592,14 +620,16 @@ const styles = StyleSheet.create({
   },
   editButtonSmall: {
     paddingHorizontal: 12,
-    paddingVertical: 4,
-    backgroundColor: Colors.brand.primary,
+    paddingVertical: 6,
+    backgroundColor: Colors.white.primary,
+    borderWidth: 1,
+    borderColor: Colors.brand.primary,
     borderRadius: 20,
   },
   editButtonTextSmall: {
-    fontSize: 10,
+    fontSize: 11,
     fontFamily: Fonts.semibold,
-    color: Colors.white.primary,
+    color: Colors.brand.primary,
   },
   tabs: {
     flexDirection: 'row',
@@ -607,6 +637,7 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.white.tertiary,
     borderBottomWidth: 1,
     borderBottomColor: Colors.white.tertiary,
+    marginTop: 8,
   },
   tab: {
     flex: 1,
@@ -619,6 +650,7 @@ const styles = StyleSheet.create({
   },
   postsGrid: {
     padding: 2,
+    minHeight: 200,
   },
   gridContent: {
     padding: 2,
@@ -646,11 +678,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 60,
+    paddingHorizontal: 32,
   },
-  emptyPostsText: {
-    fontSize: 16,
+  emptyPostsTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.semibold,
+    color: Colors.black.primary,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyPostsSubtitle: {
+    fontSize: 14,
     fontFamily: Fonts.regular,
     color: Colors.black.qua,
-    marginTop: 16,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

@@ -1,10 +1,10 @@
 import { useState, useCallback, useRef } from 'react';
 import { useAuth } from '../providers/AuthProvider';
-import * as LikesAPI from '../services/likes/likesService';
+import { toggleLike as toggleLikeInteraction } from '../global/services/posts/post.interactions.service';
 
 interface UseLikesManagerReturn {
   likedPosts: Set<string>;
-  toggleLike: (postId: string) => Promise<void>;
+  toggleLike: (postId: string, currentIsLiked?: boolean) => Promise<void>;
   isLiked: (postId: string) => boolean;
   likeCountUpdater: (postId: string, currentCount: number) => number;
 }
@@ -27,7 +27,7 @@ export function useLikesManager(): UseLikesManagerReturn {
     return isCurrentlyLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
   }, [likedPosts]);
 
-  const toggleLike = useCallback(async (postId: string): Promise<void> => {
+  const toggleLike = useCallback(async (postId: string, currentIsLiked?: boolean): Promise<void> => {
     if (!user?.uid) {
       throw new Error('User must be authenticated to like posts');
     }
@@ -37,8 +37,8 @@ export function useLikesManager(): UseLikesManagerReturn {
       return;
     }
 
-    const wasLiked = likedPosts.has(postId);
-    
+    const wasLiked = currentIsLiked ?? likedPosts.has(postId);
+
     // Optimistic update - update UI instantly
     setLikedPosts(prev => {
       const newSet = new Set(prev);
@@ -53,11 +53,8 @@ export function useLikesManager(): UseLikesManagerReturn {
     processingRef.current.add(postId);
 
     try {
-      if (wasLiked) {
-        await LikesAPI.unlikePost(user.uid, postId);
-      } else {
-        await LikesAPI.likePost(user.uid, postId);
-      }
+      // Use explicit intent (shouldLike = !wasLiked)
+      await toggleLikeInteraction(postId, user.uid, !wasLiked);
     } catch (error) {
       // Rollback optimistic update on error
       setLikedPosts(prev => {

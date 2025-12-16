@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../../providers/AuthProvider';
-import { getCopilotChatMessages, hasCopilotChat } from '../../services/chat/chatService';
-import { getLastReadTimestamp } from '../../services/notifications/notificationService';
+import { getCopilotChatMessages, hasCopilotChat } from '../../services/chat/chatService'; // Keep for now
 import { useProfilePhoto } from '../../hooks/useProfilePhoto';
 import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/users/userProfilePhotoService';
 import { Colors } from '../../theme/colors';
-import { listenToUserChats, Chat } from '../../features/messages/services';
+import { listenToConversations } from '../../services/chat/MessagesAPI';
 import * as UsersAPI from '../../services/users/usersService';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../../services/auth/authService';
 
 interface ChatListItem {
   id: string; // chatId
@@ -58,74 +59,123 @@ export default function ChatsScreen({ navigation }: any) {
   const [chats, setChats] = useState<ChatListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'All' | "Group's" | 'Communities' | 'Private'>('All');
 
+  // Raw data from listeners
+  const [rawConversations, setRawConversations] = useState<any[]>([]);
+  const [lastReads, setLastReads] = useState<{ [chatId: string]: number }>({});
+
+  // 1. Listen to Conversations (V2)
   useEffect(() => {
     if (!user?.uid) {
       setLoading(false);
       return;
     }
 
-    // Subscribe to V1 chats
-    const unsubscribe = listenToUserChats(user.uid, async (chats) => {
+    const unsubscribe = listenToConversations(user.uid, (conversations) => {
+      setRawConversations(conversations);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  // 2. Listen to Last Read Timestamps (Instant Unread Updates)
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    try {
+      const lastReadRef = collection(db, 'users', user.uid, 'lastRead');
+      const unsubscribe = onSnapshot(lastReadRef, (snapshot) => {
+        const reads: { [key: string]: number } = {};
+        snapshot.docs.forEach((doc) => {
+          const data = doc.data();
+          // Prioritize lastReadAt (number) -> timestamp (Firestore) -> 0
+          reads[doc.id] = data.lastReadAt || data.timestamp?.toMillis?.() || 0;
+        });
+        setLastReads(reads);
+      });
+      return () => unsubscribe();
+    } catch (e) {
+      console.error("Error listening to lastReads", e);
+    }
+  }, [user?.uid]);
+
+  // 3. Derive Chat List View Model
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    let isMounted = true;
+
+    const deriveChats = async () => {
       try {
-        const chatItems = await Promise.all(chats.map(async (chat) => {
+        const chatItems = await Promise.all(rawConversations.map(async (chat) => {
           // Find other user ID
-          const otherUserId = chat.members.find(id => id !== user.uid);
+          const participants = chat.participants || [];
+          const otherUserId = participants.find((id: string) => id !== user.uid);
+
           if (!otherUserId) return null;
 
           // Fetch other user profile
+          // Note: Ideally cache this, but for V1 we fetch to ensure freshness
           let otherUser = undefined;
           let username = 'User';
           let profilePhoto = undefined;
 
           try {
             otherUser = await UsersAPI.getUserById(otherUserId);
-            // Fallback Rule: Name > Username > 'User'
             username = otherUser?.name || otherUser?.username || 'User';
             profilePhoto = otherUser?.photoUrl;
           } catch (e) {
-            console.log('Error fetching user ' + otherUserId);
+            // console.log('Error fetching user ' + otherUserId);
           }
 
-          const lastMessage = chat.lastMessage;
-          const lastMessageTime = lastMessage?.createdAt?.toMillis?.() || chat.updatedAt?.toMillis?.() || Date.now();
+          // Handle last message
+          const lastMessageText = typeof chat.lastMessage === 'string'
+            ? chat.lastMessage
+            : chat.lastMessage?.text || 'Start a conversation';
 
-          // Calculate unread status
-          // V1 Limitation: chat.lastMessage doesn't have seenBy yet. 
-          // Defaulting to false to safely render.
-          const isUnread = false;
+          const lastMessageTime = chat.lastMessageAt?.toMillis?.()
+            || chat.updatedAt?.toMillis?.()
+            || chat.lastMessage?.createdAt?.toMillis?.()
+            || Date.now();
+
+          // Unread Logic
+          // A. If I am the sender -> Read
+          // B. If I am NOT the sender -> Check timestamps
+          const isSender = chat.lastSenderId === user.uid;
+          const lastReadTime = lastReads[chat.id] || 0;
+
+          const isUnread = !isSender && (lastMessageTime > lastReadTime);
 
           const item: ChatListItem = {
-            id: chat.chatId,
+            id: chat.id,
             userId: otherUserId,
             username,
             profilePhoto,
-            lastMessage: lastMessage?.text || 'Start a conversation',
+            lastMessage: lastMessageText,
             lastMessageTime,
-            unreadCount: 0,
+            unreadCount: isUnread ? 1 : 0,
             isTyping: false,
             isUnread
           };
           return item;
         }));
 
-
         const validChats = chatItems.filter((i): i is ChatListItem => i !== null);
 
-        // Add Sanchari Copilot chat if it exists (Preserve existing logic)
-        const hasCopilot = await hasCopilotChat(user.uid);
-        if (hasCopilot) {
-          try {
+        // --- Copilot Logic (Preserved) ---
+        // We can check copilot unread using the same lastReads map if it's stored there with 'sanchari-copilot' key
+        try {
+          const hasCopilot = await hasCopilotChat(user.uid);
+          if (hasCopilot) {
             const copilotMessages = await getCopilotChatMessages(user.uid);
             if (copilotMessages.length > 0) {
               const lastCopilotMessage: any = copilotMessages[0];
-              const lastReadTime = await getLastReadTimestamp(user.uid, 'sanchari-copilot');
               const lastMessageTime = lastCopilotMessage?.timestamp || Date.now();
-              const isUnread = lastMessageTime > lastReadTime;
+              const copilotReadTime = lastReads['sanchari-copilot'] || 0;
+              const isUnread = lastMessageTime > copilotReadTime;
 
               validChats.push({
-                id: 'sanchari-copilot', // Special ID
+                id: 'sanchari-copilot',
                 userId: 'sanchari-copilot',
                 username: 'Sanchari Copilot',
                 profilePhoto: undefined,
@@ -136,24 +186,28 @@ export default function ChatsScreen({ navigation }: any) {
                 isUnread,
               });
             }
-          } catch (e) {
-            console.error('Error fetching copilot:', e);
           }
+        } catch (e) {
+          console.error('Error fetching copilot:', e);
         }
+        // --------------------------------
 
-        // Sort by last message time
         validChats.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
 
-        setChats(validChats);
-        setLoading(false);
+        if (isMounted) {
+          setChats(validChats);
+          setLoading(false);
+        }
       } catch (error) {
         console.error('Error processing chats:', error);
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
-    });
+    };
 
-    return () => unsubscribe();
-  }, [user?.uid]);
+    deriveChats();
+
+    return () => { isMounted = false; };
+  }, [user?.uid, rawConversations, lastReads]); // Re-run when data or reads change
 
   const filteredChats = chats.filter((chat) => {
     if (searchQuery.trim()) {
@@ -162,39 +216,12 @@ export default function ChatsScreen({ navigation }: any) {
     return true;
   });
 
-  const formatTime = (timestamp?: number) => {
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-
-    if (days === 0) {
-      const hours = date.getHours();
-      const minutes = date.getMinutes();
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      const displayHours = hours % 12 || 12;
-      return `${displayHours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
-    } else if (days === 1) {
-      return 'Yesterday';
-    } else if (days < 7) {
-      return `${days}d ago`;
-    } else {
-      return date.toLocaleDateString();
-    }
-  };
-
   const renderChatItem = ({ item, index }: { item: ChatListItem; index: number }) => {
-    const isAlternate = index % 2 === 0 && !item.isUnread;
     const isPlaceholder = item.lastMessage === 'Start a conversation';
 
     return (
       <TouchableOpacity
-        style={[
-          styles.chatItem,
-          item.isUnread && styles.chatItemUnread,
-          isAlternate && styles.chatItemAlternate,
-        ]}
+        style={styles.chatItem}
         onPress={async () => {
           if (item.userId === 'sanchari-copilot') {
             navigation.navigate('Messaging', {
@@ -269,39 +296,12 @@ export default function ChatsScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <Icon name="search-outline" size={20} color="#757574" style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search"
-          placeholderTextColor="#757574"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
-
-      {/* Segmented Control */}
-      <View style={styles.tabContainer}>
-        {(['All', "Group's", 'Communities', 'Private'] as const).map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.tabActive]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
       {/* Chat List */}
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#E87A5D" />
         </View>
-      ) : filteredChats.length === 0 ? (
+      ) : chats.length === 0 ? (
         <View style={styles.emptyState}>
           <Icon name="chatbubbles-outline" size={64} color="#757574" />
           <Text style={styles.emptyText}>No chats yet</Text>
@@ -309,7 +309,7 @@ export default function ChatsScreen({ navigation }: any) {
         </View>
       ) : (
         <FlatList
-          data={filteredChats}
+          data={chats}
           keyExtractor={(item) => item.id}
           renderItem={renderChatItem}
           contentContainerStyle={styles.chatList}
@@ -323,7 +323,7 @@ export default function ChatsScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F5F1', // Neutral-50
+    backgroundColor: '#F8F5F1', // Light grey to show off white cards
   },
   header: {
     flexDirection: 'row',
@@ -345,100 +345,49 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#3C3C3B', // Neutral-900
+    color: '#3C3C3B',
     fontFamily: 'System',
   },
   settingsButton: {
     padding: 4,
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F5F5F5',
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 12,
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    color: '#3C3C3B',
-    fontFamily: 'System',
-  },
-  tabContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#FF5C0233', // Tertiary Light (20% opacity)
-    borderRadius: 10,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 2,
-    gap: 2,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-  },
-  tabActive: {
-    backgroundColor: '#FF5C02', // Brand Coral
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#3C3C3B',
-    fontFamily: 'System',
-  },
-  tabTextActive: {
-    color: '#FFFFFF',
-  },
   chatList: {
     paddingHorizontal: 16,
     paddingBottom: 20,
+    paddingTop: 16, // Add top padding for first card
   },
   chatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 16,
-    marginBottom: 8,
     backgroundColor: '#FFFFFF',
-  },
-  chatItemAlternate: {
-    backgroundColor: '#FF5C0233', // Light coral background (20% opacity)
-  },
-  chatItemUnread: {
-    backgroundColor: '#FF5C0215', // Very light orange for unread (8% opacity)
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.brand.primary,
+    padding: 16,
+    borderRadius: 20, // Smooth rounded corners
+    marginBottom: 12,
+    // Soft Shadow
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 3,
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     borderWidth: 1,
     borderColor: '#EAEAEA',
   },
   avatarPlaceholder: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: '#E87A5D',
     justifyContent: 'center',
     alignItems: 'center',
@@ -447,44 +396,45 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
     fontFamily: 'System',
   },
   chatContent: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 14,
     justifyContent: 'center',
   },
   chatName: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600', // Semi-bold for read
     color: '#3C3C3B',
     marginBottom: 4,
     fontFamily: 'System',
   },
   chatNameUnread: {
-    fontWeight: '800',
-    color: Colors.black.primary,
+    fontWeight: '800', // Bold for unread
+    color: '#000000',
   },
   chatMessage: {
     fontSize: 14,
-    color: '#757574',
+    color: '#8E8E8E', // Muted text for read
     fontFamily: 'System',
   },
   chatMessageUnread: {
-    color: Colors.black.secondary,
-    fontWeight: '500',
+    color: '#3C3C3B', // Darker text for unread
+    fontWeight: '600',
   },
   typingText: {
     fontStyle: 'italic',
     color: '#757574',
   },
   unreadBadge: {
-    width: 20,
+    minWidth: 20,
     height: 20,
+    paddingHorizontal: 6,
     borderRadius: 10,
-    backgroundColor: '#E87A5D', // Brand Coral
+    backgroundColor: '#FF5C02', // Brand Coral
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
@@ -499,12 +449,14 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
   },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+    backgroundColor: '#FFFFFF',
   },
   emptyText: {
     fontSize: 18,
