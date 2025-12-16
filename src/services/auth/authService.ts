@@ -61,6 +61,7 @@ export interface UserData {
 	// Optional KYC and agreement fields
 	kycData?: any;
 	safetyAgreement?: any;
+	isNewUser?: boolean;
 }
 
 // ---------- Helper Functions ----------
@@ -248,6 +249,7 @@ export async function signUp(
 			verificationStatus: 'none' as VerificationStatus,
 			role: 'traveler' as const, // Legacy support
 			createdAt: serverTimestamp(), // Use server timestamp
+			isNewUser: true, // Explicit flag for new user routing
 		};
 
 		console.log('📝 Creating Firestore user document...');

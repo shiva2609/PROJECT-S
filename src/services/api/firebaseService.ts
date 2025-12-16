@@ -402,13 +402,19 @@ export async function uploadImageAsync(
 ): Promise<string> {
 	try {
 		// New signature: (imageAsset, userId)
-		if (userId && arg1 && typeof arg1 === 'object' && 'uri' in arg1 && !('path' in arg1)) {
+		if (arg1 && typeof arg1 === 'object' && 'uri' in arg1 && !('path' in arg1)) {
+			if (!userId) throw new Error('User ID is required for upload');
 			const image: any = arg1;
 			if (!image?.uri) throw new Error('No image URI found');
+
+			// Conforms to storage.rules: match /posts/{userId}/{fileName}
 			const fileName = `${userId}_${Date.now()}.jpg`;
-			const reference = rnfbStorage().ref(`posts/${fileName}`);
+			const storagePath = `posts/${userId}/${fileName}`;
+
+			const reference = rnfbStorage().ref(storagePath);
 			const pathToFile = Platform.OS === 'ios' ? String(image.uri).replace('file://', '') : String(image.uri);
-			console.log('🚀 Uploading to Firebase Storage (new signature):', pathToFile);
+
+			console.log('🚀 Uploading to Firebase Storage:', storagePath);
 			await reference.putFile(pathToFile);
 			const downloadURL = await reference.getDownloadURL();
 			console.log('✅ File uploaded! URL:', downloadURL);
@@ -441,11 +447,29 @@ export async function createPost(params: {
 	username: string;
 	imageUrl: string;
 	caption?: string;
+	userAvatar?: string; // Optional user avatar, fetched if missing
 }): Promise<Post> {
+	// Fetch user avatar if not provided
+	let userAvatar = params.userAvatar;
+	if (!userAvatar) {
+		try {
+			const userDoc = await getDoc(doc(db(), 'users', params.userId));
+			if (userDoc.exists()) {
+				const userData = userDoc.data();
+				userAvatar = userData.profilePhoto || userData.photoURL || null;
+			}
+		} catch (e) {
+			console.warn('⚠️ Could not fetch user avatar for post creation:', e);
+		}
+	}
+
 	const base = {
 		createdBy: params.userId, // Primary field
 		userId: params.userId, // Legacy field for backward compatibility
 		username: params.username,
+		// Ensure userAvatar is stored for static display
+		userAvatar: userAvatar || null,
+		profilePhoto: userAvatar || null, // Legacy compatibility
 		imageUrl: params.imageUrl,
 		caption: params.caption ?? '',
 		likeCount: 0,
@@ -457,7 +481,7 @@ export async function createPost(params: {
 		createdAt: serverTimestamp(), // Always use serverTimestamp
 	};
 	const ref = await withRetry(() => addDoc(collection(db(), 'posts'), base));
-	return { id: ref.id, ...base } as Post;
+	return { id: ref.id, ...base } as unknown as Post;
 }
 
 export async function createReel(params: {
@@ -465,11 +489,29 @@ export async function createReel(params: {
 	username: string;
 	videoUrl: string;
 	caption?: string;
+	userAvatar?: string;
 }): Promise<any> {
+	// Fetch user avatar if not provided
+	let userAvatar = params.userAvatar;
+	if (!userAvatar) {
+		try {
+			const userDoc = await getDoc(doc(db(), 'users', params.userId));
+			if (userDoc.exists()) {
+				const userData = userDoc.data();
+				userAvatar = userData.profilePhoto || userData.photoURL || null;
+			}
+		} catch (e) {
+			console.warn('⚠️ Could not fetch user avatar for reel creation:', e);
+		}
+	}
+
 	const base = {
 		createdBy: params.userId, // Primary field
 		userId: params.userId, // Legacy field for backward compatibility
 		username: params.username,
+		// Ensure userAvatar is stored for static display
+		userAvatar: userAvatar || null,
+		profilePhoto: userAvatar || null, // Legacy compatibility
 		videoUrl: params.videoUrl,
 		caption: params.caption ?? '',
 		likeCount: 0,

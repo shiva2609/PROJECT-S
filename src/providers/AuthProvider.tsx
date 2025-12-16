@@ -126,10 +126,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Reset role check state
         setRoleChecked(false);
 
-        // Start fetching current user data (profile data retrieval)
-        userStore.fetchCurrentUser(firebaseUser.uid).catch((error) => {
-          console.error('[AuthProvider] Error fetching current user data:', error);
-        });
+
+        // BootGate will handle fetching current user data
+        // userStore.fetchCurrentUser(firebaseUser.uid) is moved there
 
         // Check if user is super admin (try multiple document ID formats)
         try {

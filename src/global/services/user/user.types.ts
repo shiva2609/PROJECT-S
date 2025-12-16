@@ -16,6 +16,7 @@ export interface UserPublicInfo {
   aboutMe?: string;
   travelPlan?: any[];
   onboardingComplete?: boolean;
+  isNewUser?: boolean;
 }
 
 export interface UserCounts {

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, ReactNode } from 'react';
-import { useAuth } from './AuthProvider';
 import * as UsersAPI from '../services/users/usersService';
+
+import { userStore } from '../global/stores/userStore';
 
 interface UserContextType {
   currentUser: UsersAPI.User | null;
@@ -18,26 +19,20 @@ interface UserProviderProps {
  * Extends AuthContext with user profile information
  */
 export function UserProvider({ children }: UserProviderProps) {
-  const { user } = useAuth();
-  const [currentUser, setCurrentUser] = React.useState<UsersAPI.User | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
+  // Subscribe to userStore (which is populated by BootGate)
+  const [currentUser, setCurrentUser] = React.useState<UsersAPI.User | null>(
+    userStore.getCurrentUser() as UsersAPI.User | null
+  );
+  const [isLoading, setIsLoading] = React.useState(userStore.getLoading());
 
   React.useEffect(() => {
-    if (user?.uid) {
-      UsersAPI.getUserById(user.uid)
-        .then((userData) => {
-          setCurrentUser(userData || null);
-          setIsLoading(false);
-        })
-        .catch((error) => {
-          console.error('Error fetching user data:', error);
-          setIsLoading(false);
-        });
-    } else {
-      setCurrentUser(null);
-      setIsLoading(false);
-    }
-  }, [user?.uid]);
+    // Sync with global store
+    // This allows BootGate to drive the fetching and we just reflect the state
+    return userStore.subscribe((user) => {
+      setCurrentUser(user as UsersAPI.User | null);
+      setIsLoading(userStore.getLoading());
+    });
+  }, []);
 
   const value: UserContextType = {
     currentUser,

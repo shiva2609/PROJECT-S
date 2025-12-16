@@ -110,6 +110,7 @@ export async function getUserPublicInfo(userId: string): Promise<UserPublicInfo 
       aboutMe: (normalized as any).aboutMe || (raw as any).aboutMe || (raw as any).about || '',
       travelPlan: normalized.travelPlan || [],
       onboardingComplete: normalized.onboardingComplete || false,
+      isNewUser: (normalized as any).isNewUser ?? (raw as any).isNewUser ?? false,
     };
 
     // Update cache
@@ -245,6 +246,7 @@ export function listenToUserPublicInfo(
             aboutMe: (normalized as any).aboutMe || (raw as any).aboutMe || (raw as any).about || '',
             travelPlan: normalized.travelPlan || [],
             onboardingComplete: normalized.onboardingComplete || false,
+            isNewUser: (normalized as any).isNewUser ?? (raw as any).isNewUser ?? false,
           };
 
           callback(userInfo);

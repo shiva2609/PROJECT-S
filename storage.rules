@@ -135,6 +135,40 @@ service firebase.storage {
       );
     }
     
+    // Reels (video content)
+    match /reels/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) &&
+                     request.resource.size < 100 * 1024 * 1024 && // 100MB for reels
+                     request.resource.contentType.matches('video/.*');
+      allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+
+    // Role-specific galleries
+    match /stayPhotos/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) &&
+                     request.resource.size < 10 * 1024 * 1024 &&
+                     request.resource.contentType.matches('image/.*');
+      allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+
+    match /previousEventGallery/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) &&
+                     request.resource.size < 10 * 1024 * 1024 &&
+                     request.resource.contentType.matches('image/.*');
+      allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+
+    match /courseGallery/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) &&
+                     request.resource.size < 10 * 1024 * 1024 &&
+                     request.resource.contentType.matches('image/.*');
+      allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+
     // Deny all other paths
     match /{allPaths=**} {
       allow read, write: if false;
