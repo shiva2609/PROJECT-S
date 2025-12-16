@@ -170,19 +170,55 @@ function extractHashtags(caption: string): string[] {
  * @param pathPrefix - Storage path prefix (e.g., 'posts', 'profile')
  * @returns Upload result with URL and metadata
  */
+/**
+ * Upload media file to Firebase Storage
+ * @param file - File object with uri and type
+ * @param userId - User ID (required for path)
+ * @param postId - Post ID (required for path)
+ * @param pathPrefix - RESERVED/IGNORED in V1 (defaults to 'posts')
+ * @returns Upload result with URL and metadata
+ */
 export async function uploadMedia(
   file: { uri: string; type: 'image' | 'video' },
-  pathPrefix: string = 'posts'
+  userId: string,
+  postId: string,
+  pathPrefix: string = 'posts' // Keep for compatibility but ignore for path construction
 ): Promise<MediaUploadResult> {
   try {
+    // V1 Canonical Path: users/{userId}/posts/{postId}/{mediaId}
     const timestamp = Date.now();
-    const fileName = `${pathPrefix}/${timestamp}_${Math.random().toString(36).substring(7)}.${file.type === 'image' ? 'jpg' : 'mp4'}`;
-    const storageRef = ref(storage, fileName);
+    const fileName = `media_${timestamp}_${Math.random().toString(36).substring(7)}.${file.type === 'image' ? 'jpg' : 'mp4'}`;
+    const storagePath = `users/${userId}/posts/${postId}/${fileName}`;
+    const storageRef = ref(storage, storagePath);
+
+    console.warn(`[UPLOAD] Uploading to canonical path: ${storagePath}`);
 
     // For React Native, we need to convert URI to blob
-    // This is a placeholder - actual implementation depends on react-native-fs or similar
     const response = await fetch(file.uri);
     const blob = await response.blob();
+
+    // FORCE TOKEN HYDRATION (MANDATORY)
+    // Note: 'db' and 'storage' are from authService which uses modular SDK.
+    // We need to get the current user instance to refresh token.
+    const { getAuth } = await import('firebase/auth');
+    const auth = getAuth();
+    const currentUser = auth.currentUser;
+    console.warn('[UPLOAD] auth.currentUser:', currentUser?.uid);
+
+    if (!currentUser) {
+      console.error('[UPLOAD ERROR] No authenticated user found before upload');
+      throw new Error('User not authenticated - cannot upload');
+    }
+
+    try {
+      console.warn('[UPLOAD] Forcing token refresh before upload...');
+      const token = await currentUser.getIdToken(true);
+      console.warn(`[UPLOAD] Token refreshed successfully. User: ${currentUser.uid}`);
+      console.warn(`[UPLOAD] Has Token: ${!!token}`);
+    } catch (tokenError) {
+      console.error('[UPLOAD ERROR] Failed to refresh token:', tokenError);
+      throw new Error('Failed to refresh auth token before upload');
+    }
 
     const uploadTask = uploadBytesResumable(storageRef, blob);
 
@@ -192,7 +228,10 @@ export async function uploadMedia(
         (snapshot) => {
           // Progress tracking can be added here
         },
-        (error) => reject(error),
+        (error) => {
+          console.error('[UPLOAD ERROR FULL]', error);
+          reject(error);
+        },
         () => resolve(uploadTask.snapshot)
       );
     });
@@ -203,7 +242,6 @@ export async function uploadMedia(
       url: downloadURL,
       meta: {
         // Metadata extraction would go here
-        // For now, return placeholder
       },
     };
   } catch (error: any) {
@@ -227,11 +265,15 @@ export async function createPost(
   mediaFiles?: { uri: string; type: 'image' | 'video' }[]
 ): Promise<Post> {
   try {
+    // Generate postId upfront
+    const postId = `post_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
     // Upload media files first
     const mediaUrls: string[] = [];
     if (mediaFiles && mediaFiles.length > 0) {
       for (const file of mediaFiles) {
-        const uploadResult = await uploadMedia(file, 'posts');
+        // Use the new signature with userId and postId
+        const uploadResult = await uploadMedia(file, authorId, postId);
         mediaUrls.push(uploadResult.url);
       }
     }
@@ -240,6 +282,7 @@ export async function createPost(
     const hashtags = payload.caption ? extractHashtags(payload.caption) : [];
 
     const postData = {
+      id: postId, // Explicitly include ID in data if needed, but doc ID is key
       authorId,
       media: mediaUrls,
       caption: payload.caption || '',
@@ -251,11 +294,11 @@ export async function createPost(
       ...payload.metadata,
     };
 
-    const postsRef = collection(db, 'posts');
-    const docRef = await addDoc(postsRef, postData);
+    const postRef = doc(db, 'posts', postId);
+    await setDoc(postRef, postData);
 
     return {
-      id: docRef.id,
+      id: postId,
       ...postData,
       createdAt: new Date(),
     } as Post;

@@ -60,17 +60,17 @@ export default function AddPostDetailsScreen({
     croppedMediaLength: route.params?.croppedMedia?.length || 0,
     contentType: route.params?.contentType,
   });
-  
+
   const { user } = useAuth();
   const { finalMedia = [], croppedMedia = [], contentType = 'post' } = route.params;
-  
+
   useEffect(() => {
     console.log('🟢 [AddPostDetailsScreen] useEffect - Component mounted');
     return () => {
       console.log('🔴 [AddPostDetailsScreen] useEffect cleanup - Component unmounting');
     };
   }, []);
-  
+
   // Use finalMedia (REAL cropped bitmaps) - NO fallbacks to original URIs
   const [mediaItems, setMediaItems] = useState<CropData[]>(() => {
     // Prefer finalMedia (new format with real bitmaps)
@@ -78,13 +78,13 @@ export default function AddPostDetailsScreen({
       console.log('🟢 [AddPostDetailsScreen] Using finalMedia:', finalMedia.length, 'items');
       return finalMedia;
     }
-    
+
     // Legacy support for croppedMedia (will be removed)
     if (croppedMedia && croppedMedia.length > 0) {
       console.log('⚠️ [AddPostDetailsScreen] Using legacy croppedMedia format');
       return croppedMedia;
     }
-    
+
     // NO fallback - if no media, return empty array
     console.warn('⚠️ [AddPostDetailsScreen] No media provided - empty array');
     return [];
@@ -112,32 +112,52 @@ export default function AddPostDetailsScreen({
     switch (ratio) {
       case '1:1': return 1;
       case '4:5': return 0.8;
-      case '16:9': return 16/9;
+      case '16:9': return 16 / 9;
       default: return 1;
     }
   };
 
-  const uploadImage = async (imageUri: string): Promise<string> => {
+  const uploadImage = async (imageUri: string, postId: string): Promise<string> => {
     console.log('📤 [AddPostDetailsScreen] uploadImage called');
     console.log('📤 [AddPostDetailsScreen] Upload params:', {
       imageUri: imageUri.substring(0, 50) + '...',
       userId: user?.uid,
+      postId,
       platform: Platform.OS,
     });
-    
-    const fileName = `post_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    const storagePath = `/posts/${user?.uid}/${fileName}`;
-    console.log('📤 [AddPostDetailsScreen] Storage path:', storagePath);
-    
+
+    // V1 Canonical Path: users/{userId}/posts/{postId}/{mediaId}
+    const fileName = `media_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+    const storagePath = `users/${user?.uid}/posts/${postId}/${fileName}`;
+    console.warn(`[UPLOAD] Storage path: ${storagePath}`);
+
     const reference = storage().ref(storagePath);
 
     let uploadUri = imageUri;
     if (Platform.OS === 'ios' && uploadUri.startsWith('file://')) {
       uploadUri = uploadUri.replace('file://', '');
-      console.log('📤 [AddPostDetailsScreen] iOS: Removed file:// prefix');
     }
 
-    console.log('📤 [AddPostDetailsScreen] Starting putFile upload...');
+    // FORCE TOKEN HYDRATION (MANDATORY)
+    const currentUser = auth().currentUser;
+    console.warn('[UPLOAD] auth.currentUser:', currentUser?.uid);
+
+    if (!currentUser) {
+      console.error('[UPLOAD ERROR] No authenticated user found before upload');
+      throw new Error('User not authenticated - cannot upload');
+    }
+
+    try {
+      console.warn('[UPLOAD] Forcing token refresh before upload...');
+      const token = await currentUser.getIdToken(true);
+      console.warn(`[UPLOAD] Token refreshed successfully. User: ${currentUser.uid}`);
+      console.warn(`[UPLOAD] Has Token: ${!!token}`);
+    } catch (tokenError) {
+      console.error('[UPLOAD ERROR] Failed to refresh token:', tokenError);
+      throw new Error('Failed to refresh auth token before upload');
+    }
+
+    console.warn('[UPLOAD] Starting putFile upload...');
     const task = reference.putFile(uploadUri);
 
     return new Promise((resolve, reject) => {
@@ -149,21 +169,21 @@ export default function AddPostDetailsScreen({
           );
           setProgress(percent);
           if (percent % 25 === 0) { // Log every 25% to avoid spam
-            console.log(`📤 [AddPostDetailsScreen] Upload progress: ${percent}%`);
+            console.warn(`[UPLOAD] Progress: ${percent}%`);
           }
         },
         (error) => {
-          console.error('❌ [AddPostDetailsScreen] Upload error:', error);
+          console.error('[UPLOAD ERROR FULL]', error);
           reject(error);
         },
         async () => {
           try {
-            console.log('📤 [AddPostDetailsScreen] Upload complete, getting download URL...');
+            console.warn('[UPLOAD] Upload complete, getting download URL...');
             const url = await reference.getDownloadURL();
-            console.log('✅ [AddPostDetailsScreen] Download URL obtained:', url.substring(0, 50) + '...');
+            console.warn(`[UPLOAD] Download URL obtained: ${url.substring(0, 50)}...`);
             resolve(url);
           } catch (urlError: any) {
-            console.error('❌ [AddPostDetailsScreen] Error getting download URL:', urlError);
+            console.error('[UPLOAD ERROR] Error getting download URL:', urlError);
             reject(urlError);
           }
         }
@@ -227,20 +247,25 @@ export default function AddPostDetailsScreen({
         Alert.alert('Error', 'No media to upload');
         return;
       }
-      
+
       const firstItem = mediaItems[0];
       if (!firstItem) {
         console.log('❌ [AddPostDetailsScreen] First item is null, aborting');
         Alert.alert('Error', 'No media to upload');
         return;
       }
-      
+
+      // Generate postId client-side BEFORE upload
+      const postId = `post_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
       console.log('🔵 [AddPostDetailsScreen] Starting image uploads...');
       console.log('🔵 [AddPostDetailsScreen] Upload details:', {
+        postId,
+        userId: user.uid,
         totalImages: mediaItems.length,
         firstItemRatio: firstItem.ratio,
       });
-      
+
       // Upload ALL images to Firebase Storage
       const mediaUrls: string[] = [];
       for (let i = 0; i < mediaItems.length; i++) {
@@ -249,17 +274,17 @@ export default function AddPostDetailsScreen({
           console.warn(`⚠️ [AddPostDetailsScreen] Skipping item ${i} - no finalUri`);
           continue;
         }
-        
+
         console.log(`📤 [AddPostDetailsScreen] Uploading image ${i + 1}/${mediaItems.length}...`);
-        const imageUrl = await uploadImage(item.finalUri);
+        const imageUrl = await uploadImage(item.finalUri, postId);
         mediaUrls.push(imageUrl);
         console.log(`✅ [AddPostDetailsScreen] Image ${i + 1} uploaded: ${imageUrl.substring(0, 50)}...`);
       }
-      
+
       if (mediaUrls.length === 0) {
         throw new Error('Failed to upload any images');
       }
-      
+
       console.log('✅ [AddPostDetailsScreen] All images uploaded successfully');
       console.log(`✅ [AddPostDetailsScreen] Total URLs: ${mediaUrls.length}`);
 
@@ -282,12 +307,12 @@ export default function AddPostDetailsScreen({
       // Create post document with mediaUrls array (multi-image support)
       // CRITICAL: mediaUrls contains the FINAL cropped bitmap URLs (exact adjusted frames)
       const firstImageUrl = mediaUrls[0] || '';
-      
+
       console.log('🔵 [AddPostDetailsScreen] Creating post document with final cropped bitmaps:');
       console.log('🔵 [AddPostDetailsScreen] mediaUrls count:', mediaUrls.length);
       console.log('🔵 [AddPostDetailsScreen] firstImageUrl (finalCroppedUrl):', firstImageUrl.substring(0, 80) + '...');
       console.log('🔵 [AddPostDetailsScreen] Aspect ratio:', firstItem.cropData.ratio);
-      
+
       // CRITICAL: Build media array for compatibility (contains FINAL cropped bitmap URLs)
       // This ensures PostCard and other components can read from either mediaUrls or media array
       // IMPORTANT: mediaUrls contains the uploaded final cropped bitmap URLs from Firebase Storage
@@ -303,10 +328,10 @@ export default function AddPostDetailsScreen({
           id: `media-${index}`,
         };
       });
-      
+
       const postData = {
         type: 'post',
-        postId: `post_${Date.now()}_${Math.random().toString(36).substring(7)}`, // Unique postId
+        postId: postId, // Use the pre-generated postId
         ownerId: currentUser.uid,
         createdBy: currentUser.uid,
         userId: currentUser.uid,
@@ -334,7 +359,7 @@ export default function AddPostDetailsScreen({
         aspectRatio: getAspectRatioValue(firstItem.cropData.ratio),
         createdAt: firestore.FieldValue.serverTimestamp(),
       };
-      
+
       // CRITICAL: Log the post data to verify all URLs are final cropped bitmaps
       console.log('🔵 [AddPostDetailsScreen] Post data structure:', {
         mediaUrlsCount: postData.mediaUrls.length,
@@ -346,7 +371,7 @@ export default function AddPostDetailsScreen({
       });
 
       console.log('🔵 [AddPostDetailsScreen] Creating Firestore document...');
-      await firestore().collection('posts').add(postData);
+      await firestore().collection('posts').doc(postId).set(postData); // Use set() with specific ID
       console.log('✅ [AddPostDetailsScreen] Post document created successfully');
 
       // Navigate directly to home without alert to prevent ghost screens
@@ -356,7 +381,7 @@ export default function AddPostDetailsScreen({
         canGoBack: navigation.canGoBack?.(),
         getState: navigation.getState?.(),
       });
-      
+
       setTimeout(() => {
         try {
           console.log('🔵 [AddPostDetailsScreen] Executing navigation reset...');
@@ -365,12 +390,12 @@ export default function AddPostDetailsScreen({
             hasReset: typeof rootNav.reset === 'function',
             navigatorType: rootNav.constructor?.name,
           });
-          
+
           rootNav.reset({
             index: 0,
             routes: [{ name: 'MainTabs', params: { screen: 'Home' } }],
           });
-          
+
           console.log('✅ [AddPostDetailsScreen] Navigation reset completed - should be on Home now');
         } catch (navError) {
           console.error('❌ [AddPostDetailsScreen] Navigation error:', navError);

@@ -55,35 +55,16 @@ service firebase.storage {
     }
     
     // Posts media (public read, owner write)
-    match /posts/{postId}/media/{mediaId} {
-      // Public read for authenticated users
-      allow read: if isAuthenticated();
-      
-      // Only post owner can write
-      allow write: if isAuthenticated() && 
-                     // Check if user is post owner via Firestore
-                     firestore.get(/databases/(default)/documents/posts/$(postId)).data.createdBy == request.auth.uid &&
-                     // Validate file size (50MB max for videos)
-                     request.resource.size < 50 * 1024 * 1024 &&
-                     // Validate content type
-                     request.resource.contentType.matches('image/.*|video/.*');
-      
-      // Post owner or super admin can delete
-      allow delete: if isAuthenticated() && (
-        isSuperAdmin() ||
-        firestore.get(/databases/(default)/documents/posts/$(postId)).data.createdBy == request.auth.uid
-      );
+    match /users/{userId}/posts/{postId}/{mediaId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && request.resource.size < 50 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*|video/.*');
+      allow delete: if request.auth != null
+                    && request.auth.uid == userId;
     }
-    
-    // Legacy posts path (posts/{userId}/{fileName})
-    match /posts/{userId}/{fileName} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner(userId) &&
-                     request.resource.size < 50 * 1024 * 1024 &&
-                     request.resource.contentType.matches('image/.*|video/.*');
-      allow delete: if isOwner(userId) || isSuperAdmin();
-    }
-    
+
     // Messages media (participants only)
     match /messages/{conversationId}/{messageId}/{mediaId} {
       // Only conversation participants can read
@@ -120,19 +101,6 @@ service firebase.storage {
                      (request.resource.contentType.matches('image/.*|video/.*') ||
                       request.resource.contentType.matches('application/.*'));
       allow delete: if isOwner(userId) || isSuperAdmin();
-    }
-    
-    // Post media alternative path
-    match /postMedia/{postId}/{mediaId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && 
-                     firestore.get(/databases/(default)/documents/posts/$(postId)).data.createdBy == request.auth.uid &&
-                     request.resource.size < 50 * 1024 * 1024 &&
-                     request.resource.contentType.matches('image/.*|video/.*');
-      allow delete: if isAuthenticated() && (
-        isSuperAdmin() ||
-        firestore.get(/databases/(default)/documents/posts/$(postId)).data.createdBy == request.auth.uid
-      );
     }
     
     // Reels (video content)
