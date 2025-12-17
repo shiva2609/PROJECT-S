@@ -53,7 +53,6 @@ import CropAdjustScreen from '../../screens/Create/CropAdjustScreen';
 import ProfilePhotoCropScreen from '../../screens/Account/ProfilePhotoCropScreen';
 import FollowersScreen from '../../screens/Account/FollowersScreen';
 import BlockedUsersScreen from '../../screens/Account/BlockedUsersScreen'; // V1 MODERATION
-import AddPostDetailsScreen from '../../screens/Create/AddPostDetailsScreen';
 import PostPreviewScreen from '../../screens/Create/PostPreviewScreen';
 import CreatePostScreen from '../../screens/Create/CreatePostScreen';
 import CreateReelScreen from '../../screens/Create/CreateReelScreen';
@@ -302,14 +301,6 @@ export default function AppNavigator() {
               <Stack.Screen
                 name="ProfilePhotoCrop"
                 component={ProfilePhotoCropScreen}
-                options={{
-                  headerShown: false,
-                  gestureEnabled: true,
-                }}
-              />
-              <Stack.Screen
-                name="AddPostDetails"
-                component={AddPostDetailsScreen}
                 options={{
                   headerShown: false,
                   gestureEnabled: true,

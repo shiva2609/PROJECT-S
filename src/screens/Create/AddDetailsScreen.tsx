@@ -15,7 +15,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
-import { useAuthReady } from '@/hooks/useAuthReady';
 import storage from '@react-native-firebase/storage';
 import auth from '@react-native-firebase/auth';
 import { Platform, InteractionManager } from 'react-native';
@@ -28,6 +27,7 @@ import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/fires
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function AddDetailsScreen({ navigation }: any) {
+  console.log('🔥🔥🔥 MOUNTED: AddDetailsScreen — src/screens/Create/AddDetailsScreen.tsx 🔥🔥🔥');
   console.log('🟢 [AddDetailsScreen] Component mounted/rendered');
 
   useEffect(() => {
@@ -36,9 +36,6 @@ export default function AddDetailsScreen({ navigation }: any) {
       console.log('🔴 [AddDetailsScreen] useEffect cleanup - Component unmounting');
     };
   }, []);
-
-  // Porting strict V1 Upload Logic from AddPostDetailsScreen
-  const { ready: authReady, user } = useAuthReady();
 
   const {
     selectedImages,
@@ -172,97 +169,11 @@ export default function AddDetailsScreen({ navigation }: any) {
     );
   }, [selectedImages, previewIndex, cropParams, imageSizes, previewDimensions]);
 
-  const uploadImage = async (imageUri: string, postId: string): Promise<string> => {
-    // V1 Canonical Path: users/{userId}/posts/{postId}/{mediaId}
-    const fileName = `media_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    const storagePath = `users/${user?.uid}/posts/${postId}/${fileName}`;
-    console.warn(`[UPLOAD] Storage path: ${storagePath}`);
-
-    const reference = storage().ref(storagePath);
-
-    let uploadUri = imageUri;
-    if (Platform.OS === 'ios' && uploadUri.startsWith('file://')) {
-      uploadUri = uploadUri.replace('file://', '');
-    }
-
-    // FORCE TOKEN HYDRATION (MANDATORY)
-    // User is already validated by useAuthReady hook before handlePost is called
-    if (!user) {
-      console.error('[UPLOAD ERROR] No authenticated user found before upload');
-      throw new Error('User not authenticated - cannot upload');
-    }
-
-    // HARD BLOCK: Wait for Native Auth Readiness
-    if (!authReady) {
-      console.error('[UPLOAD ERROR] Firebase Auth not fully initialized');
-      throw new Error('Firebase Auth not fully initialized for Storage upload');
-    }
-
-    try {
-      console.warn('[UPLOAD] Forcing token refresh before upload...');
-      const token = await user.getIdToken(true);
-      console.warn(`[UPLOAD] Token refreshed successfully. User: ${user.uid}`);
-      console.warn(`[UPLOAD] Has Token: ${!!token}`);
-    } catch (tokenError) {
-      console.error('[UPLOAD ERROR] Failed to refresh token:', tokenError);
-      throw new Error('Failed to refresh auth token before upload');
-    }
-
-    console.warn('[UPLOAD] Starting putFile upload...');
-
-    // NATIVE SETTLE DELAY (Required for Release Builds)
-    await new Promise(resolve => setTimeout(resolve, 300));
-
-    const task = reference.putFile(uploadUri);
-
-    return new Promise((resolve, reject) => {
-      task.on(
-        'state_changed',
-        (taskSnapshot) => {
-          const percent = Math.round(
-            (taskSnapshot.bytesTransferred / taskSnapshot.totalBytes) * 100
-          );
-          setProgress(percent);
-          if (percent % 25 === 0) {
-            console.warn(`[UPLOAD] Progress: ${percent}%`);
-          }
-        },
-        (error) => {
-          console.error('[UPLOAD ERROR FULL]', error);
-          reject(error);
-        },
-        async () => {
-          try {
-            console.warn('[UPLOAD] Upload complete, getting download URL...');
-            const url = await reference.getDownloadURL();
-            console.warn(`[UPLOAD] Download URL obtained: ${url.substring(0, 50)}...`);
-            resolve(url);
-          } catch (urlError: any) {
-            console.error('[UPLOAD ERROR] Error getting download URL:', urlError);
-            reject(urlError);
-          }
-        }
-      );
-    });
-  };
-
   const handlePost = async () => {
     console.warn('🔵 [AddDetailsScreen] POST button clicked - START');
 
     if (isPosting) return;
     if (!isMounted) return;
-
-    // HARD BLOCK: Auth must be ready
-    if (!authReady) {
-      console.log('❌ [AddDetailsScreen] Auth not ready, aborting');
-      if (isMounted) Alert.alert('Error', 'Authentication is still initializing. Please wait.');
-      return;
-    }
-
-    if (!user) {
-      if (isMounted) Alert.alert('Error', 'Please log in to create a post');
-      return;
-    }
 
     if (selectedImages.length === 0) {
       if (isMounted) Alert.alert('Error', 'No images to post');
@@ -275,8 +186,15 @@ export default function AddDetailsScreen({ navigation }: any) {
     setProgress(0);
 
     try {
-      console.warn('🟢 [AddDetailsScreen] Step 1: Processing final crops...');
+      // STEP 1 — MANDATORY AUTH GATE (NO SHORTCUTS)
+      const { requireAuthUser } = await import('@/services/auth/requireAuthUser');
+      console.warn('🔐 Requiring authenticated user...');
+      const authUser = await requireAuthUser() as import('@react-native-firebase/auth').FirebaseAuthTypes.User;
+      const uid = authUser.uid;
+      console.warn('✅ Auth user verified. UID:', uid);
 
+      // STEP 2 — PROCESS FINAL CROPS
+      console.warn('🟢 [AddDetailsScreen] Step 1: Processing final crops...');
       const finalImageUris = await processFinalCrops(
         selectedImages,
         cropParams,
@@ -286,23 +204,46 @@ export default function AddDetailsScreen({ navigation }: any) {
       );
 
       if (finalImageUris.length === 0) throw new Error('No images processed');
+      console.warn('✅ Processed', finalImageUris.length, 'images');
 
-      // GENERATE POST ID UPFRONT
+      // STEP 3 — GENERATE POST ID UPFRONT
       const postId = `post_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      console.warn('🟢 [AddDetailsScreen] Generated postId:', postId);
 
-      console.warn('🟢 [AddDetailsScreen] Step 2: Uploading images associated with postId:', postId);
+      // STEP 4 — UPLOAD IMAGES
+      console.warn('🟢 [AddDetailsScreen] Step 2: Uploading images...');
       const uploadedUrls: string[] = [];
       for (let i = 0; i < finalImageUris.length; i++) {
-        console.warn(`🟢 [AddDetailsScreen] Uploading image ${i + 1}/${finalImageUris.length}...`);
-        const uploadedUrl = await uploadImage(finalImageUris[i], postId);
-        uploadedUrls.push(uploadedUrl);
+        console.warn(`📤 Uploading image ${i + 1}/${finalImageUris.length}...`);
+
+        const fileName = `media_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+        const storagePath = `users/${uid}/posts/${postId}/${fileName}`;
+        const reference = storage().ref(storagePath);
+
+        let uploadUri = finalImageUris[i];
+        if (!uploadUri) {
+          console.warn(`⚠️ Skipping image ${i + 1} - no URI`);
+          continue;
+        }
+
+        if (Platform.OS === 'ios' && uploadUri.startsWith('file://')) {
+          uploadUri = uploadUri.replace('file://', '');
+        }
+
+        // Token already refreshed by requireAuthUser, but add settle delay
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        await reference.putFile(uploadUri);
+        const downloadUrl = await reference.getDownloadURL();
+
+        uploadedUrls.push(downloadUrl);
         setProgress(Math.round(((i + 1) / finalImageUris.length) * 50));
+        console.warn(`✅ Image ${i + 1} uploaded`);
       }
 
-      const imageUrl = uploadedUrls[0];
-      // Use user from useAuthReady hook (already validated above)
-      if (!user) throw new Error('User not authenticated');
+      if (uploadedUrls.length === 0) throw new Error('Failed to upload any images');
 
+      // STEP 5 — PREPARE POST DATA
       const tagArray = tags
         .split(/[,\s]+/)
         .map((tag) => tag.trim())
@@ -310,33 +251,22 @@ export default function AddDetailsScreen({ navigation }: any) {
         .map((tag) => (tag.startsWith('#') ? tag : `#${tag}`));
 
       const hasDetails = !!(description.trim() || location.trim() || tagArray.length > 0);
-
-      const detectMediaType = (uri: string): 'image' | 'video' => {
-        const ext = uri.split('.').pop()?.toLowerCase() || '';
-        const videoExtensions = ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'];
-        return videoExtensions.includes(ext) ? 'video' : 'image';
-      };
+      const firstImageUrl = uploadedUrls[0];
 
       const mediaArray = uploadedUrls.map((url, index) => ({
-        type: detectMediaType(url),
+        type: 'image' as const,
         url: url,
         uri: url,
         id: `media-${index}`,
       }));
 
-      const locationValue = location.trim();
-      const captionValue = description.trim();
-      const detailsValue = hasDetails ? description.trim() : null;
-      const firstImageUrl = uploadedUrls[0] || '';
-
-      // Explicitly include postId in the document data
       const postData: any = {
         type: 'post',
         postId: postId,
-        id: postId, // Redundant but safe
-        createdBy: user.uid,
-        userId: user.uid,
-        username: user.displayName || user.email || 'User',
+        id: postId,
+        createdBy: uid,
+        userId: uid,
+        username: authUser.displayName || authUser.email || 'User',
         mediaUrls: uploadedUrls,
         finalCroppedUrl: firstImageUrl,
         imageUrl: firstImageUrl,
@@ -351,22 +281,20 @@ export default function AddDetailsScreen({ navigation }: any) {
         createdAt: serverTimestamp(),
       };
 
-      if (captionValue) postData.caption = captionValue;
-      if (locationValue) {
-        postData.location = locationValue;
-        postData.placeName = locationValue;
+      if (description.trim()) postData.caption = description.trim();
+      if (location.trim()) {
+        postData.location = location.trim();
+        postData.placeName = location.trim();
       }
-      if (detailsValue) postData.details = detailsValue;
+      if (hasDetails) postData.details = description.trim();
       if (tagArray.length > 0) postData.tags = tagArray;
 
-      console.warn('🟢 [AddDetailsScreen] Step 3: Creating Firestore document with ID:', postId);
-
-      // Use setDoc with the pre-generated postId
-      // const { setDoc, doc } = require('firebase/firestore'); // Removed in favor of top-level import
+      // STEP 6 — CREATE FIRESTORE DOCUMENT
+      console.warn('🟢 [AddDetailsScreen] Step 3: Creating Firestore document...');
       await setDoc(doc(db, 'posts', postId), postData);
+      console.warn('✅ Post document created successfully');
 
-      console.warn('✅ [AddDetailsScreen] Post document created successfully');
-
+      // STEP 7 — NAVIGATE TO HOME
       if (isMounted) {
         setTimeout(() => {
           if (isMounted) {
@@ -386,10 +314,16 @@ export default function AddDetailsScreen({ navigation }: any) {
       console.error('❌ [AddDetailsScreen] Error creating post:', error);
       if (isMounted) {
         setTimeout(() => {
-          if (isMounted) Alert.alert('Error', error.message || 'Failed to create post');
+          if (isMounted) {
+            const errorMessage = error.message === 'AUTH_NOT_READY'
+              ? 'Authentication is still initializing. Please wait and try again.'
+              : error.message || 'Failed to create post';
+            Alert.alert('Error', errorMessage);
+          }
         }, 500);
       }
     } finally {
+      // STEP 5 — ENSURE FINALLY BLOCK (MANDATORY)
       if (isMounted) {
         setUploading(false);
         setProcessing(false);
@@ -411,15 +345,13 @@ export default function AddDetailsScreen({ navigation }: any) {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Add Details</Text>
         <TouchableOpacity
-          style={[styles.headerButton, (isPosting || uploading || processing || !authReady) && styles.headerButtonDisabled]}
+          style={[styles.headerButton, (isPosting || uploading || processing) && styles.headerButtonDisabled]}
           onPress={handlePost}
-          disabled={isPosting || uploading || processing || !authReady}
+          disabled={isPosting || uploading || processing}
           activeOpacity={0.7}
         >
           {isPosting || uploading || processing ? (
             <ActivityIndicator size="small" color={Colors.brand.primary} />
-          ) : !authReady ? (
-            <ActivityIndicator size="small" color={Colors.black.qua} />
           ) : (
             <Text style={styles.postButton}>Post</Text>
           )}
