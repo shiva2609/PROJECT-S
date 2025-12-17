@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
-import { useAuth } from '../../providers/AuthProvider';
+import { useAuthReady } from '@/hooks/useAuthReady';
 import { navigateToScreen } from '../../utils/navigationHelpers';
 import storage from '@react-native-firebase/storage';
 import firestore from '@react-native-firebase/firestore';
@@ -61,7 +61,7 @@ export default function AddPostDetailsScreen({
     contentType: route.params?.contentType,
   });
 
-  const { user, authReady } = useAuth();
+  const { ready: authReady, user } = useAuthReady();
   const { finalMedia = [], croppedMedia = [], contentType = 'post' } = route.params;
 
   useEffect(() => {
@@ -139,11 +139,8 @@ export default function AddPostDetailsScreen({
     }
 
     // FORCE TOKEN HYDRATION (MANDATORY)
-    const currentUser = auth().currentUser;
-    console.warn('[UPLOAD] auth.currentUser:', currentUser?.uid);
-    console.warn('[UPLOAD] authReady:', authReady);
-
-    if (!currentUser) {
+    // User is already validated by useAuthReady hook before handlePost is called
+    if (!user) {
       console.error('[UPLOAD ERROR] No authenticated user found before upload');
       throw new Error('User not authenticated - cannot upload');
     }
@@ -156,8 +153,8 @@ export default function AddPostDetailsScreen({
 
     try {
       console.warn('[UPLOAD] Forcing token refresh before upload...');
-      const token = await currentUser.getIdToken(true);
-      console.warn(`[UPLOAD] Token refreshed successfully. User: ${currentUser.uid}`);
+      const token = await user.getIdToken(true);
+      console.warn(`[UPLOAD] Token refreshed successfully. User: ${user.uid}`);
       console.warn(`[UPLOAD] Has Token: ${!!token}`);
     } catch (tokenError) {
       console.error('[UPLOAD ERROR] Failed to refresh token:', tokenError);
@@ -233,8 +230,16 @@ export default function AddPostDetailsScreen({
     console.log('🔵 [AddPostDetailsScreen] Current screen state:', {
       mediaItemsCount: mediaItems.length,
       hasUser: !!user,
+      authReady,
       currentScreen: 'AddPostDetailsScreen',
     });
+
+    // HARD BLOCK: Auth must be ready
+    if (!authReady) {
+      console.log('❌ [AddPostDetailsScreen] Auth not ready, aborting');
+      Alert.alert('Error', 'Authentication is still initializing. Please wait.');
+      return;
+    }
 
     if (!user) {
       console.log('❌ [AddPostDetailsScreen] No user, aborting');
@@ -299,9 +304,8 @@ export default function AddPostDetailsScreen({
       console.log('✅ [AddPostDetailsScreen] All images uploaded successfully');
       console.log(`✅ [AddPostDetailsScreen] Total URLs: ${mediaUrls.length}`);
 
-      // Get current user
-      const currentUser = auth().currentUser;
-      if (!currentUser) {
+      // Use user from useAuthReady hook (already validated above)
+      if (!user) {
         throw new Error('User not authenticated');
       }
 
@@ -343,10 +347,10 @@ export default function AddPostDetailsScreen({
       const postData = {
         type: 'post',
         postId: postId, // Use the pre-generated postId
-        ownerId: currentUser.uid,
-        createdBy: currentUser.uid,
-        userId: currentUser.uid,
-        username: currentUser.displayName || currentUser.email || 'User',
+        ownerId: user.uid,
+        createdBy: user.uid,
+        userId: user.uid,
+        username: user.displayName || user.email || 'User',
         // PRIMARY: mediaUrls array contains FINAL cropped bitmap URLs (exact adjusted frames)
         mediaUrls: mediaUrls, // Array of all uploaded FINAL cropped bitmap URLs
         // CRITICAL: media array also contains FINAL cropped bitmap URLs (for compatibility)
@@ -447,10 +451,12 @@ export default function AddPostDetailsScreen({
         <TouchableOpacity
           style={styles.headerButton}
           onPress={handlePost}
-          disabled={uploading}
+          disabled={uploading || !authReady}
         >
           {uploading ? (
             <ActivityIndicator size="small" color={Colors.brand.primary} />
+          ) : !authReady ? (
+            <ActivityIndicator size="small" color={Colors.black.qua} />
           ) : (
             <Text style={styles.postButton}>Post</Text>
           )}

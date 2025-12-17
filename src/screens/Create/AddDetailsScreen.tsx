@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
-import { useAuth } from '../../providers/AuthProvider';
+import { useAuthReady } from '@/hooks/useAuthReady';
 import storage from '@react-native-firebase/storage';
 import auth from '@react-native-firebase/auth';
 import { Platform, InteractionManager } from 'react-native';
@@ -38,7 +38,7 @@ export default function AddDetailsScreen({ navigation }: any) {
   }, []);
 
   // Porting strict V1 Upload Logic from AddPostDetailsScreen
-  const { user, authReady } = useAuth();
+  const { ready: authReady, user } = useAuthReady();
 
   const {
     selectedImages,
@@ -186,11 +186,8 @@ export default function AddDetailsScreen({ navigation }: any) {
     }
 
     // FORCE TOKEN HYDRATION (MANDATORY)
-    const currentUser = auth().currentUser;
-    console.warn('[UPLOAD] auth.currentUser:', currentUser?.uid);
-    console.warn('[UPLOAD] authReady:', authReady);
-
-    if (!currentUser) {
+    // User is already validated by useAuthReady hook before handlePost is called
+    if (!user) {
       console.error('[UPLOAD ERROR] No authenticated user found before upload');
       throw new Error('User not authenticated - cannot upload');
     }
@@ -203,8 +200,8 @@ export default function AddDetailsScreen({ navigation }: any) {
 
     try {
       console.warn('[UPLOAD] Forcing token refresh before upload...');
-      const token = await currentUser.getIdToken(true);
-      console.warn(`[UPLOAD] Token refreshed successfully. User: ${currentUser.uid}`);
+      const token = await user.getIdToken(true);
+      console.warn(`[UPLOAD] Token refreshed successfully. User: ${user.uid}`);
       console.warn(`[UPLOAD] Has Token: ${!!token}`);
     } catch (tokenError) {
       console.error('[UPLOAD ERROR] Failed to refresh token:', tokenError);
@@ -255,6 +252,13 @@ export default function AddDetailsScreen({ navigation }: any) {
     if (isPosting) return;
     if (!isMounted) return;
 
+    // HARD BLOCK: Auth must be ready
+    if (!authReady) {
+      console.log('❌ [AddDetailsScreen] Auth not ready, aborting');
+      if (isMounted) Alert.alert('Error', 'Authentication is still initializing. Please wait.');
+      return;
+    }
+
     if (!user) {
       if (isMounted) Alert.alert('Error', 'Please log in to create a post');
       return;
@@ -296,8 +300,8 @@ export default function AddDetailsScreen({ navigation }: any) {
       }
 
       const imageUrl = uploadedUrls[0];
-      const currentUser = auth().currentUser;
-      if (!currentUser) throw new Error('User not authenticated');
+      // Use user from useAuthReady hook (already validated above)
+      if (!user) throw new Error('User not authenticated');
 
       const tagArray = tags
         .split(/[,\s]+/)
@@ -330,9 +334,9 @@ export default function AddDetailsScreen({ navigation }: any) {
         type: 'post',
         postId: postId,
         id: postId, // Redundant but safe
-        createdBy: currentUser.uid,
-        userId: currentUser.uid,
-        username: currentUser.displayName || currentUser.email || 'User',
+        createdBy: user.uid,
+        userId: user.uid,
+        username: user.displayName || user.email || 'User',
         mediaUrls: uploadedUrls,
         finalCroppedUrl: firstImageUrl,
         imageUrl: firstImageUrl,
@@ -407,13 +411,15 @@ export default function AddDetailsScreen({ navigation }: any) {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Add Details</Text>
         <TouchableOpacity
-          style={[styles.headerButton, (isPosting || uploading || processing) && styles.headerButtonDisabled]}
+          style={[styles.headerButton, (isPosting || uploading || processing || !authReady) && styles.headerButtonDisabled]}
           onPress={handlePost}
-          disabled={isPosting || uploading || processing}
+          disabled={isPosting || uploading || processing || !authReady}
           activeOpacity={0.7}
         >
           {isPosting || uploading || processing ? (
             <ActivityIndicator size="small" color={Colors.brand.primary} />
+          ) : !authReady ? (
+            <ActivityIndicator size="small" color={Colors.black.qua} />
           ) : (
             <Text style={styles.postButton}>Post</Text>
           )}
