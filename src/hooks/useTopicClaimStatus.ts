@@ -14,8 +14,8 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../services/auth/authService';
+import { doc, getDoc, onSnapshot } from '../core/firebase/compat';
+import { db } from '../core/firebase';
 
 interface TopicClaimStatus {
   claimed: boolean;
@@ -85,7 +85,7 @@ export function useTopicClaimStatus(
       // Get deadline timestamp
       let deadline: number | null = null;
       const deadlineField = userData.topicClaimDeadline;
-      
+
       if (deadlineField) {
         // Handle Firestore Timestamp
         if (deadlineField.toMillis && typeof deadlineField.toMillis === 'function') {
@@ -122,7 +122,7 @@ export function useTopicClaimStatus(
       setStatus((prev) => ({
         ...prev,
         loading: false,
-        error: err instanceof Error ? err : new Error('Failed to check topic claim status'),
+        error: error instanceof Error ? error : new Error('Failed to check topic claim status'),
       }));
     }
   }, [userId]);

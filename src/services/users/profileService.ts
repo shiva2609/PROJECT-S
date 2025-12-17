@@ -5,7 +5,7 @@
  * These are called on ProfileScreen mount to fetch fresh data
  */
 
-import { db } from '../auth/authService';
+import { db } from '../../core/firebase';
 import {
   collection,
   query,
@@ -15,7 +15,7 @@ import {
   doc,
   orderBy,
   onSnapshot,
-} from 'firebase/firestore';
+} from '../../core/firebase/compat';
 import { store } from '../../store';
 import { setUserProfile, setUserProfileLoading } from '../../store/slices/userProfileSlice';
 import { setUserPosts, setUserPostsLoading } from '../../store/slices/userPostsSlice';
@@ -49,11 +49,11 @@ function convertTimestamp(timestamp: any): number {
  */
 export async function fetchUserProfile(userId: string): Promise<void> {
   store.dispatch(setUserProfileLoading({ userId, loading: true }));
-  
+
   try {
     const userRef = doc(db, 'users', userId);
     const snapshot = await getDoc(userRef);
-    
+
     if (snapshot.exists()) {
       // Use global normalizer for safe defaults
       const normalized = normalizeUser(snapshot);
@@ -103,13 +103,13 @@ export async function fetchUserPosts(userId: string): Promise<void> {
     store.dispatch(setUserPostsLoading({ userId, loading: false }));
     return;
   }
-  
+
   store.dispatch(setUserPostsLoading({ userId, loading: true }));
-  
+
   try {
     let snapshot: any;
     let postsQuery: any;
-    
+
     // PRIMARY: Try createdBy first with orderBy
     try {
       postsQuery = query(
@@ -156,7 +156,7 @@ export async function fetchUserPosts(userId: string): Promise<void> {
         throw orderByError;
       }
     }
-    
+
     // If no results with createdBy, try userId field
     if (snapshot.empty && !snapshot.docs) {
       try {
@@ -178,24 +178,24 @@ export async function fetchUserPosts(userId: string): Promise<void> {
         }
       }
     }
-    
+
     // Use global normalizer for safe defaults
     const posts: Post[] = snapshot.docs
       .map((docSnap) => {
         try {
           const normalized = normalizePost(docSnap);
           if (!normalized) return null;
-          
+
           // Convert to Post format expected by Redux
           return {
             id: normalized.id,
             imageURL: normalized.imageURL || normalized.mediaUrl || undefined,
             imageUrl: normalized.imageURL || normalized.mediaUrl || undefined,
             finalCroppedUrl: normalized.mediaUrl || undefined,
-            mediaUrls: normalized.gallery && normalized.gallery.length > 0 
-              ? normalized.gallery 
-              : normalized.mediaUrl 
-                ? [normalized.mediaUrl] 
+            mediaUrls: normalized.gallery && normalized.gallery.length > 0
+              ? normalized.gallery
+              : normalized.mediaUrl
+                ? [normalized.mediaUrl]
                 : undefined,
             coverImage: normalized.coverImage || undefined,
             gallery: normalized.gallery || undefined,
@@ -210,10 +210,10 @@ export async function fetchUserPosts(userId: string): Promise<void> {
         }
       })
       .filter((post): post is Post => post !== null && post.id && post.id.trim().length > 0);
-    
+
     // Client-side sort by createdAt desc to cover cases without orderBy
     posts.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    
+
     store.dispatch(setUserPosts({ userId, posts }));
   } catch (error: any) {
     console.error('Error fetching user posts:', error);
@@ -238,27 +238,27 @@ export async function fetchFollowState(currentUserId: string, targetUserId: stri
     store.dispatch(setUserFollowState({ userId: targetUserId, followState }));
     return;
   }
-  
+
   try {
     // Check if current user follows target user
     const followId = `${currentUserId}_${targetUserId}`;
     const followRef = doc(db, 'follows', followId);
     const followSnapshot = await getDoc(followRef);
     const isFollowing = followSnapshot.exists();
-    
+
     // Check if target user follows current user (isFollowedBack)
     const followedBackId = `${targetUserId}_${currentUserId}`;
     const followedBackRef = doc(db, 'follows', followedBackId);
     const followedBackSnapshot = await getDoc(followedBackRef);
     const isFollowedBack = followedBackSnapshot.exists();
-    
+
     // Get follower and following counts from target user's profile
     const targetUserRef = doc(db, 'users', targetUserId);
     const targetUserSnapshot = await getDoc(targetUserRef);
-    
+
     let followerCount = 0;
     let followingCount = 0;
-    
+
     if (targetUserSnapshot.exists()) {
       const normalized = normalizeUser(targetUserSnapshot);
       if (normalized) {
@@ -266,7 +266,7 @@ export async function fetchFollowState(currentUserId: string, targetUserId: stri
         followingCount = normalized.followingCount;
       }
     }
-    
+
     const followState: FollowState = {
       isFollowing,
       isFollowedBack,
@@ -274,7 +274,7 @@ export async function fetchFollowState(currentUserId: string, targetUserId: stri
       followingCount,
       isLoading: false,
     };
-    
+
     store.dispatch(setUserFollowState({ userId: targetUserId, followState }));
   } catch (error) {
     console.error('Error fetching follow state:', error);

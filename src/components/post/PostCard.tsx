@@ -5,8 +5,8 @@ import {
   StyleSheet,
   Dimensions,
 } from 'react-native';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../services/auth/authService';
+import { doc, getDoc } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { useProfilePhoto } from '../../hooks/useProfilePhoto';
 import { Post } from '../../services/api/firebaseService';
 import { formatTimestamp, parseHashtags } from '../../utils/postHelpers';

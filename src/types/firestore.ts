@@ -5,7 +5,7 @@
  * All fields match actual Firestore documents with proper optional types
  */
 
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '../core/firebase/compat';
 
 /**
  * User Document Interface
@@ -22,7 +22,7 @@ export interface User {
   profilePic?: string | null;
   accountType?: string;
   verified?: boolean;
-  createdAt: Timestamp | null;
+  createdAt: Timestamp | null | number;
   followersCount: number;
   followingCount: number;
   postsCount?: number;
@@ -51,8 +51,8 @@ export interface Post {
   createdBy: string;
   userId?: string;
   ownerId?: string;
-  authorId?: string;
-  createdAt: Timestamp | null;
+  authorId?: string | null;
+  createdAt: Timestamp | null | number;
   imageURL?: string | null;
   imageUrl?: string | null;
   mediaUrl?: string | null;

@@ -1,5 +1,5 @@
-import { db } from '../auth/authService';
-import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../core/firebase';
+import { doc, getDoc } from '../../core/firebase/compat';
 
 export interface RolesConfigDoc {
   [roleKey: string]: { required: string[] };

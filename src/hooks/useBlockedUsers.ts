@@ -4,8 +4,8 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../services/auth/authService'; // Correct path to db
+import { doc, onSnapshot } from '../core/firebase/compat';
+import { db } from '../core/firebase'; // Correct path to db
 import { unblockUser as unblockUserService } from '../services/moderation/blockService';
 
 export function useBlockedUsers(currentUserId: string | undefined) {

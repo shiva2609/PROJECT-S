@@ -5,7 +5,7 @@
  * Ensures all required fields exist with safe defaults
  */
 
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '../../core/firebase/compat';
 import { User } from '../../types/firestore';
 
 /**

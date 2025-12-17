@@ -1,16 +1,12 @@
 /**
- * Firebase Storage Instance
+ * Firebase Storage Instance (Native)
  * 
- * SINGLE SOURCE OF TRUTH for Firebase Storage.
- * Exports a single Storage instance.
- * 
- * DO NOT call getStorage() anywhere else.
+ * Uses @react-native-firebase/storage
  */
 
-import { getStorage, FirebaseStorage } from 'firebase/storage';
-import { firebaseApp } from './app';
+import storage from '@react-native-firebase/storage';
 
-const storage: FirebaseStorage = getStorage(firebaseApp);
-console.log('✅ Firebase Storage initialized');
+const storageInstance = storage();
+console.log('✅ Firebase Storage (Native) initialized');
 
-export { storage };
+export { storageInstance as storage };

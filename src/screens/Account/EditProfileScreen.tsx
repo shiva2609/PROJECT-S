@@ -38,15 +38,15 @@ import { useFocusEffect } from '@react-navigation/native';
  */
 const generateAutoBio = (formData: ProfileData, accountType: AccountType): string => {
   const parts: string[] = [];
-  
+
   // Start with account type
   const accountTypeDisplay = accountType === 'Host' ? 'Trip Host' :
-                            accountType === 'EventOrganizer' ? 'Event Organizer' :
-                            accountType === 'RideCreator' ? 'Ride Partner' :
-                            accountType === 'StayHost' ? 'Stay Host' :
-                            accountType === 'AdventurePro' ? 'Adventure Pro' :
-                            accountType === 'Agency' ? 'Travel Agency' :
-                            accountType;
+    accountType === 'EventOrganizer' ? 'Event Organizer' :
+      accountType === 'RideCreator' ? 'Ride Partner' :
+        accountType === 'StayHost' ? 'Stay Host' :
+          accountType === 'AdventurePro' ? 'Adventure Pro' :
+            accountType === 'Agency' ? 'Travel Agency' :
+              accountType;
   parts.push(accountTypeDisplay);
 
   // Role-specific bio generation
@@ -152,7 +152,7 @@ const generateAutoBio = (formData: ProfileData, accountType: AccountType): strin
 
   // Join parts with " | " separator
   let bio = parts.join(' | ');
-  
+
   // Add period at the end if not empty
   if (bio && !bio.endsWith('.')) {
     bio += '.';
@@ -347,10 +347,10 @@ export default function EditProfileScreen({ navigation, route }: any) {
           email: data.email || user.email,
           profilePhoto: data.profilePhoto || data.photoURL || data.profilePhotoUrl,
         });
-        
+
         const userAccountType = (data.accountType || data.role || 'Traveler') as AccountType;
         setAccountType(userAccountType);
-        
+
         const currentProfilePhoto = data.profilePhoto || data.photoURL || data.profilePhotoUrl || '';
         setPreviousProfilePhotoUrl(currentProfilePhoto || null);
         setFormData({
@@ -654,11 +654,12 @@ export default function EditProfileScreen({ navigation, route }: any) {
       if (result.assets && result.assets.length > 0) {
         setUploadingGallery(galleryField);
         const uploadPromises = result.assets.map(async (asset) => {
-          const fileName = `${galleryField}/${user?.uid}/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-          return await uploadImageAsync({
-            uri: asset.uri || '',
-            path: fileName,
-          });
+          if (!user?.uid) throw new Error('User ID required');
+          return await uploadImageAsync(
+            { uri: asset.uri || '' },
+            user.uid,
+            galleryField
+          );
         });
 
         const uploadedUrls = await Promise.all(uploadPromises);

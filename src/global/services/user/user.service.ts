@@ -5,8 +5,8 @@
  * Used by all profile screens, followers/following lists, and post grids
  */
 
-import { doc, onSnapshot, getDoc, getDocs, collection, query, where, orderBy, Unsubscribe, getCountFromServer } from 'firebase/firestore';
-import { db } from '../../../services/auth/authService';
+import { doc, onSnapshot, getDoc, getDocs, collection, query, where, orderBy, Unsubscribe, getCountFromServer } from '../../../core/firebase/compat';
+import { db } from '../../../core/firebase';
 import { normalizeUser } from '../../../utils/normalize/normalizeUser';
 import { normalizePost } from '../../../utils/normalize/normalizePost';
 import { Post } from '../../../types/firestore';

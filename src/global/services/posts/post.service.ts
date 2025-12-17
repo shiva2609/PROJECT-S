@@ -19,8 +19,8 @@ import {
   startAfter,
   QueryDocumentSnapshot,
   Timestamp,
-} from 'firebase/firestore';
-import { db } from '../../../services/auth/authService';
+} from '../../../core/firebase/compat';
+import { db } from '../../../core/firebase';
 import { normalizePost } from '../../../utils/normalize/normalizePost';
 import { Post as FirestorePost } from '../../../types/firestore';
 

@@ -24,9 +24,9 @@ import {
   serverTimestamp,
   QueryDocumentSnapshot,
   DocumentData,
-} from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../auth/authService';
+} from '../../core/firebase/compat';
+import { ref, uploadBytesResumable, getDownloadURL } from '../../core/firebase/compat';
+import { db, storage, auth } from '../../core/firebase';
 import { sendNotification } from '../notifications/NotificationAPI';
 import { retryWithBackoff } from '../../utils/retry';
 import { isOfflineError, safeFirestoreRead } from '../../utils/offlineHandler';
@@ -37,6 +37,7 @@ import {
   buildSafeQuery,
   sortByCreatedAtDesc,
   safeGetDocs,
+  extractCreatedAt,
 } from '../../utils/safeFirestore';
 import { normalizePost as normalizePostGlobal } from '../../utils/normalize/normalizePost';
 
@@ -51,10 +52,10 @@ function normalizeUserPost(docSnap: QueryDocumentSnapshot<DocumentData>) {
 
   return {
     id: normalized.id,
-    authorId: normalized.createdBy || normalized.userId || normalized.ownerId || normalized.authorId || null,
+    authorId: normalized.createdBy || normalized.userId || normalized.ownerId || normalized.authorId || undefined,
     media: mediaUrl ? [mediaUrl] : (normalized.gallery || []),
     caption: normalized.caption || '',
-    createdAt: normalized.createdAt,
+    createdAt: extractCreatedAt(normalized),
     likeCount: normalized.likeCount || normalized.likesCount || 0,
     commentCount: normalized.commentCount || normalized.commentsCount || 0,
     savedCount: normalized.savedCount || 0,
@@ -68,7 +69,7 @@ function normalizeUserPost(docSnap: QueryDocumentSnapshot<DocumentData>) {
 
 export interface Post {
   id: string;
-  authorId: string;
+  authorId?: string;
   media: string[];
   caption?: string;
   createdAt: any;
@@ -197,11 +198,6 @@ export async function uploadMedia(
     const response = await fetch(file.uri);
     const blob = await response.blob();
 
-    // FORCE TOKEN HYDRATION (MANDATORY)
-    // Note: 'db' and 'storage' are from authService which uses modular SDK.
-    // We need to get the current user instance to refresh token.
-    const { getAuth } = await import('firebase/auth');
-    const auth = getAuth();
     const currentUser = auth.currentUser;
     console.warn('[UPLOAD] auth.currentUser:', currentUser?.uid);
 
@@ -210,15 +206,9 @@ export async function uploadMedia(
       throw new Error('User not authenticated - cannot upload');
     }
 
-    try {
-      console.warn('[UPLOAD] Forcing token refresh before upload...');
-      const token = await currentUser.getIdToken(true);
-      console.warn(`[UPLOAD] Token refreshed successfully. User: ${currentUser.uid}`);
-      console.warn(`[UPLOAD] Has Token: ${!!token}`);
-    } catch (tokenError) {
-      console.error('[UPLOAD ERROR] Failed to refresh token:', tokenError);
-      throw new Error('Failed to refresh auth token before upload');
-    }
+    // Note: We avoid manual token refresh here as per new architecture invariants
+    // "Remove any implicit assumptions of authentication" includes manual refresh hacks.
+    // If auth.currentUser exists, we assume it's valid.
 
     // NATIVE AUTH CHECK & SETTLE DELAY (Critical for Real Devices)
     // We must ensure the Native SDK (used by underlying storage) is also ready
@@ -274,6 +264,7 @@ export async function createPost(
   payload: Partial<Post>,
   mediaFiles?: { uri: string; type: 'image' | 'video' }[]
 ): Promise<Post> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     // Generate postId upfront
     const postId = `post_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -324,6 +315,7 @@ export async function createPost(
  * @param data - Partial post data to update
  */
 export async function updatePost(postId: string, data: Partial<Post>): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const postRef = doc(db, 'posts', postId);
     const updateData: any = { ...data };
@@ -346,6 +338,7 @@ export async function updatePost(postId: string, data: Partial<Post>): Promise<v
  * @param postId - Post document ID
  */
 export async function deletePost(postId: string): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const postRef = doc(db, 'posts', postId);
     await deleteDoc(postRef);
@@ -536,6 +529,7 @@ export async function addComment(
   userId: string,
   text: string
 ): Promise<{ commentId: string }> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   console.log("🔥 ADD COMMENT FUNCTION HIT", { postId, userId });
   try {
     // Get user data for comment
@@ -625,6 +619,7 @@ async function triggerCommentNotification(postId: string, commenterId: string, c
  * @param commentId - Comment ID
  */
 export async function deleteComment(postId: string, commentId: string): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     // Use batch write for atomicity (delete comment + decrement count)
     const batch = writeBatch(db);
@@ -652,6 +647,7 @@ export async function deleteComment(postId: string, commentId: string): Promise<
  * @param postId - Post ID
  */
 export async function savePost(userId: string, postId: string): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const savedRef = doc(db, 'users', userId, 'saved', postId);
     await setDoc(savedRef, {
@@ -676,6 +672,7 @@ export async function savePost(userId: string, postId: string): Promise<void> {
  * @param postId - Post ID
  */
 export async function unsavePost(userId: string, postId: string): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const savedRef = doc(db, 'users', userId, 'saved', postId);
     await deleteDoc(savedRef);
@@ -735,20 +732,20 @@ export async function incrementCommentCount(postId: string, delta: number = 1): 
  * @param limit - Maximum results (default: 20)
  * @returns Array of hashtag results with counts
  */
-export async function searchHashtags(
-  query: string,
+export async function searchPosts(
+  searchQuery: string,
   limit: number = 20
 ): Promise<{ tag: string; count: number }[]> {
   try {
-    const searchQuery = query.toLowerCase().trim().replace('#', '');
-    if (!searchQuery) {
+    const term = searchQuery.toLowerCase().trim().replace('#', '');
+    if (!term) {
       return [];
     }
 
     const postsRef = collection(db, 'posts');
     const q = query(
       postsRef,
-      where('hashtags', 'array-contains', searchQuery),
+      where('hashtags', 'array-contains', term),
       firestoreLimit(limit)
     );
 

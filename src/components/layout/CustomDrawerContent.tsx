@@ -8,25 +8,30 @@ import { DrawerItem } from './DrawerItem';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { useAuth } from '../../providers/AuthProvider';
-import { db } from '../../services/auth/authService';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../core/firebase';
+import { doc, onSnapshot } from '../../core/firebase/compat';
 import { AccountType, VerificationStatus } from '../../types/account';
 import { handleLogout, handleUpgradeAccount } from '../../utils/accountActions';
 import { DRAWER_MENU, MenuItemConfig } from '../../navigation/drawerMenu';
 
 export default function CustomDrawerContent(props: DrawerContentComponentProps) {
   const { navigation, state } = props;
-  const { user, userRole, roleChecked } = useAuth();
+  const { user, authReady } = useAuth();
   const dispatch = useDispatch();
+
   const currentRoute = state.routes[state.index]?.name;
   const [accountType, setAccountType] = useState<AccountType>('Traveler');
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('none');
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [roleChecked, setRoleChecked] = useState(false);
 
   // Fetch user account type and verification status for conditional rendering
   useEffect(() => {
     if (!user) {
       setAccountType('Traveler');
       setVerificationStatus('none');
+      setIsSuperAdmin(false);
+      setRoleChecked(true);
       return;
     }
 
@@ -41,14 +46,19 @@ export default function CustomDrawerContent(props: DrawerContentComponentProps) 
 
           setAccountType(accType);
           setVerificationStatus(verStatus);
+          // Check if role is explicitly super_admin or matches specific super admin logic if needed
+          setIsSuperAdmin(accType === 'super_admin' || data.role === 'superAdmin');
         } else {
           setAccountType('Traveler');
           setVerificationStatus('none');
+          setIsSuperAdmin(false);
         }
+        setRoleChecked(true);
       },
       (error) => {
         console.error('❌ CustomDrawerContent - Error fetching user data:', error);
         setAccountType('Traveler');
+        setRoleChecked(true);
       }
     );
 
@@ -72,7 +82,7 @@ export default function CustomDrawerContent(props: DrawerContentComponentProps) 
   };
 
   const isPending = verificationStatus === 'pending';
-  const isSuperAdmin = roleChecked && userRole === 'super_admin';
+  // isSuperAdmin value is now from state
 
   // Generate Menu Groups based on Roles
   const menuGroups = useMemo(() => {
@@ -132,7 +142,7 @@ export default function CustomDrawerContent(props: DrawerContentComponentProps) 
           showsVerticalScrollIndicator={false}
         >
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-            <Text style={{ color: Colors.text.secondary, fontSize: 14 }}>Loading...</Text>
+            <Text style={{ color: Colors.black.secondary, fontSize: 14 }}>Loading...</Text>
           </View>
         </DrawerContentScrollView>
       </View>

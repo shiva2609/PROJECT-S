@@ -7,7 +7,10 @@ import {
 	signInWithEmailAndPassword,
 	updateProfile,
 	User as FirebaseUser,
-} from 'firebase/auth';
+	sendPasswordResetEmail,
+	updatePassword,
+	signOut as firebaseSignOut,
+} from '../../core/firebase/compat';
 
 // Import Firestore functions
 import {
@@ -28,7 +31,7 @@ import {
 	runTransaction,
 	deleteDoc,
 	enableNetwork,
-} from 'firebase/firestore';
+} from '../../core/firebase/compat';
 
 // Import Storage functions
 import {
@@ -36,9 +39,8 @@ import {
 	uploadBytes,
 	uploadBytesResumable,
 	getDownloadURL,
-} from 'firebase/storage';
-import rnfbStorage from '@react-native-firebase/storage';
-import { Platform } from 'react-native';
+} from '../../core/firebase/compat';
+import { Platform, Alert } from 'react-native';
 
 // ---------- Types ----------
 
@@ -249,6 +251,109 @@ export async function saveUserTravelPlan(uid: string, planData: { selectedTypes:
 	}
 }
 
+// ---------- Auth Management ----------
+
+export async function checkUsernameAvailability(username: string): Promise<boolean> {
+	return await usernameAvailable(username);
+}
+
+export async function forgotPassword(identifier: string): Promise<void> {
+	try {
+		if (!identifier || identifier.trim().length === 0) {
+			throw new Error('Email or username is required');
+		}
+
+		let email: string;
+		if (identifier.includes('@')) {
+			email = identifier.trim().toLowerCase();
+		} else {
+			const cleanUsername = identifier.trim().toLowerCase();
+			// Synthesize email directly since we use that convention
+			email = synthesizeEmailFromUsername(cleanUsername);
+
+			// Try to find real email if possible
+			try {
+				const usernameDoc = await getDoc(doc(db(), 'usernames', cleanUsername));
+				if (usernameDoc.exists()) {
+					const { uid } = usernameDoc.data();
+					const userDoc = await getDoc(doc(db(), 'users', uid));
+					if (userDoc.exists()) {
+						email = (userDoc.data() as UserProfile).email || email;
+					}
+				}
+			} catch (e) {
+				// Fallback to synthesized
+			}
+		}
+
+		console.log('📧 Sending password reset email to:', email);
+		await sendPasswordResetEmail(auth, email);
+	} catch (error: any) {
+		console.error('❌ Forgot password error:', error);
+		if (error.code === 'auth/user-not-found') throw new Error('Email/username not found');
+		throw error;
+	}
+}
+
+export async function changePassword(newPassword: string): Promise<void> {
+	const user = auth.currentUser;
+	if (!user) throw new Error('No user signed in');
+	if (newPassword.length < 6) throw new Error('Password must be at least 6 characters');
+
+	await updatePassword(user, newPassword);
+	try {
+		await updateDoc(doc(db(), 'users', user.uid), {
+			passwordChangedAt: Date.now(),
+			updatedAt: Date.now(),
+		});
+	} catch (e) {/* ignore */ }
+}
+
+export async function signOut(): Promise<void> {
+	try {
+		await firebaseSignOut(auth);
+	} catch (error) {
+		console.error('Sign out error:', error);
+		throw error;
+	}
+}
+
+export async function getCurrentUserData(): Promise<UserProfile | null> {
+	const user = auth.currentUser;
+	if (!user) return null;
+	try {
+		const snap = await getDoc(doc(db(), 'users', user.uid));
+		return snap.exists() ? (snap.data() as UserProfile) : null;
+	} catch (e) {
+		console.error('Error getting current user data:', e);
+		return null;
+	}
+}
+
+export function getCurrentUserId(): string | null {
+	return auth.currentUser?.uid || null;
+}
+
+export function isAuthenticated(): boolean {
+	return auth.currentUser !== null;
+}
+
+export async function requireAuth(action: string): Promise<boolean> {
+	if (auth.currentUser) return true;
+
+	// Wait brief moment for auth state to settle
+	await new Promise(resolve => setTimeout(resolve, 500));
+
+	if (auth.currentUser) return true;
+
+	Alert.alert(
+		'Login Required',
+		`You must be logged in to ${action}. Please sign in and try again.`,
+		[{ text: 'OK' }]
+	);
+	return false;
+}
+
 // ---------- Storage ----------
 
 // Helper function to convert base64 string to blob
@@ -393,50 +498,61 @@ async function readFileAsBase64(uri: string): Promise<string> {
 	});
 }
 
-// Native-first image upload supporting two call styles:
-// 1) Legacy: uploadImageAsync({ uri, path })
-// 2) New:    uploadImageAsync(imageAsset, userId)
+/**
+ * ------------------------------------------------------------------
+ * STRICT UPLOAD CONTRACT
+ * ------------------------------------------------------------------
+ * 1. This service must NOT infer auth state for data ownership.
+ * 2. Caller MUST explicitly pass `userId`.
+ * 3. `userId` must be validated (non-empty string).
+ * 4. All uploads enforce canonical path: `users/{userId}/{folder}/{fileName}`
+ * ------------------------------------------------------------------
+ */
+
+// Native-first image upload with strict contract
 export async function uploadImageAsync(
-	arg1: { uri: string; path: string } | any,
-	userId?: string,
+	imageAsset: { uri: string },
+	userId: string,
+	folder: string = 'posts'
 ): Promise<string> {
+	// 1. Validate inputs immediately
+	if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+		throw new Error('❌ uploadImageAsync: Valid userId is REQUIRED with strict contract.');
+	}
+	if (!imageAsset || !imageAsset.uri) {
+		throw new Error('❌ uploadImageAsync: Image URI is required.');
+	}
+
+	// 2. Ensure Auth (Optional but recommended for security context, though we don't use the uid from it)
+	if (!auth.currentUser) {
+		console.warn('⚠️ uploadImageAsync: No authenticated user found in SDK. Upload might fail due to security rules.');
+	}
+
 	try {
-		// New signature: (imageAsset, userId)
-		if (arg1 && typeof arg1 === 'object' && 'uri' in arg1 && !('path' in arg1)) {
-			if (!userId) throw new Error('User ID is required for upload');
-			const image: any = arg1;
-			if (!image?.uri) throw new Error('No image URI found');
+		// 3. Construct Canonical Path
+		// Pattern: users/{userId}/{folder}/{fileName}
+		const timestamp = Date.now();
+		const randomStr = Math.random().toString(36).substring(7);
+		const fileName = `${timestamp}_${randomStr}.jpg`;
+		const storagePath = `users/${userId}/${folder}/${fileName}`;
 
-			// Conforms to storage.rules: match /posts/{userId}/{fileName}
-			const fileName = `${userId}_${Date.now()}.jpg`;
-			const storagePath = `posts/${userId}/${fileName}`;
+		console.log(`🚀 [Strict Upload] Starting upload to: ${storagePath}`);
 
-			const reference = rnfbStorage().ref(storagePath);
-			const pathToFile = Platform.OS === 'ios' ? String(image.uri).replace('file://', '') : String(image.uri);
+		const reference = firebaseStorage.ref(storagePath);
 
-			console.log('🚀 Uploading to Firebase Storage:', storagePath);
-			await reference.putFile(pathToFile);
-			const downloadURL = await reference.getDownloadURL();
-			console.log('✅ File uploaded! URL:', downloadURL);
-			return downloadURL;
-		}
+		// Handle file URI for React Native (iOS file:// removal)
+		const pathToFile = Platform.OS === 'ios' ? String(imageAsset.uri).replace('file://', '') : String(imageAsset.uri);
 
-		// Legacy signature: ({ uri, path })
-		if (arg1 && typeof arg1 === 'object' && 'uri' in arg1 && 'path' in arg1) {
-			const { uri, path } = arg1 as { uri: string; path: string };
-			const reference = rnfbStorage().ref(path);
-			const uploadUri = Platform.OS === 'ios' ? uri.replace('file://', '') : uri;
-			console.log('🚀 Uploading to Firebase Storage (legacy signature):', uploadUri);
-			await reference.putFile(uploadUri);
-			const downloadURL = await reference.getDownloadURL();
-			console.log('✅ File uploaded! URL:', downloadURL);
-			return downloadURL;
-		}
+		// 4. Perform Upload
+		await reference.putFile(pathToFile);
+		const downloadURL = await reference.getDownloadURL();
 
-		throw new Error('Invalid parameters for uploadImageAsync');
-	} catch (error) {
-		console.error('🔥 Upload failed:', error);
-		throw error;
+		console.log('✅ [Strict Upload] Success! URL:', downloadURL);
+		return downloadURL;
+
+	} catch (error: any) {
+		console.error('🔥 [Strict Upload] Failed:', error);
+		throw new Error(`Upload failed: ${error.message}`);
 	}
 }
 
@@ -449,6 +565,8 @@ export async function createPost(params: {
 	caption?: string;
 	userAvatar?: string; // Optional user avatar, fetched if missing
 }): Promise<Post> {
+	if (!auth.currentUser) throw new Error('User not authenticated');
+
 	// Fetch user avatar if not provided
 	let userAvatar = params.userAvatar;
 	if (!userAvatar) {
@@ -491,6 +609,8 @@ export async function createReel(params: {
 	caption?: string;
 	userAvatar?: string;
 }): Promise<any> {
+	if (!auth.currentUser) throw new Error('User not authenticated');
+
 	// Fetch user avatar if not provided
 	let userAvatar = params.userAvatar;
 	if (!userAvatar) {
@@ -588,7 +708,7 @@ export async function deletePost(postId: string, ownerId: string): Promise<void>
 					const storagePath = decodeURIComponent(encodedPath);
 
 					// Delete using React Native Firebase Storage
-					const storageRef = rnfbStorage().ref(storagePath);
+					const storageRef = firebaseStorage.ref(storagePath);
 					await storageRef.delete();
 					console.log('✅ Deleted media from Storage:', storagePath);
 				}
@@ -1134,10 +1254,10 @@ export async function unfollowUser(currentUserId: string, targetUserId: string):
  */
 export async function uploadProfilePhoto(finalImageUri: string, userId: string): Promise<string> {
 	try {
-		// Use fileName format to match storage rules pattern: profilePhotos/{userId}/{fileName}
+		// Use fileName format to match storage rules pattern: users/{userId}/profile_photos/{fileName}
 		const fileName = `${userId}.jpg`;
-		const storagePath = `profilePhotos/${userId}/${fileName}`;
-		const reference = rnfbStorage().ref(storagePath);
+		const storagePath = `users/${userId}/profile_photos/${fileName}`;
+		const reference = firebaseStorage.ref(storagePath);
 
 		// Prepare upload URI (remove file:// prefix if present)
 		let uploadUri = finalImageUri;
@@ -1185,7 +1305,7 @@ export async function deleteOldProfilePhoto(previousUrl: string | null | undefin
 			const storagePath = decodeURIComponent(encodedPath);
 
 			// Delete using React Native Firebase Storage
-			const storageRef = rnfbStorage().ref(storagePath);
+			const storageRef = firebaseStorage.ref(storagePath);
 			await storageRef.delete();
 			console.log('✅ [deleteOldProfilePhoto] Old profile photo deleted:', storagePath);
 		} else {

@@ -9,7 +9,7 @@ import { useAuth } from '../../providers/AuthProvider';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 export default function CreateReelScreen({ navigation }: any) {
-  const { user, initialized } = useAuth();
+  const { user, authReady } = useAuth();
   const [caption, setCaption] = useState('');
   const [video, setVideo] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
@@ -56,7 +56,7 @@ export default function CreateReelScreen({ navigation }: any) {
   };
 
   // Wait for auth initialization BEFORE rendering any content
-  if (!initialized) {
+  if (!authReady) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.surface }}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -151,8 +151,10 @@ export default function CreateReelScreen({ navigation }: any) {
       throw new Error('No video selected');
     }
 
-    const fileName = `reel_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
-    const reference = storage().ref(`/reels/${user.uid}/${fileName}`);
+    const fileName = `reels_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
+    // Canonical path: users/{uid}/reels/{fileName}
+    const storagePath = `users/${user.uid}/reels/${fileName}`;
+    const reference = storage().ref(storagePath);
 
     let uploadUri = videoAsset.uri;
     if (Platform.OS === 'ios') {
@@ -162,7 +164,7 @@ export default function CreateReelScreen({ navigation }: any) {
     }
 
     console.log('📤 Starting video upload to Firebase Storage...');
-    console.log('   Path:', `/reels/${user.uid}/${fileName}`);
+    console.log('   Path:', storagePath);
 
     const task = reference.putFile(uploadUri);
 
@@ -212,8 +214,8 @@ export default function CreateReelScreen({ navigation }: any) {
       // Upload video to Firebase Storage with progress tracking
       const videoUrl = await uploadVideo(video);
 
-      // Get current user from React Native Firebase Auth
-      const currentUser = auth().currentUser;
+      // Get current user from Auth Provider
+      const currentUser = user;
       if (!currentUser) {
         throw new Error('User not authenticated');
       }
@@ -320,7 +322,7 @@ export default function CreateReelScreen({ navigation }: any) {
             </TouchableOpacity>
           </View>
         )}
-        
+
         {/* Upload progress overlay */}
         {uploading && (
           <View style={styles.uploadOverlay}>
@@ -340,8 +342,8 @@ export default function CreateReelScreen({ navigation }: any) {
         editable={!uploading}
       />
 
-      <TouchableOpacity 
-        style={[styles.btn, (uploading || !video) && styles.btnDisabled]} 
+      <TouchableOpacity
+        style={[styles.btn, (uploading || !video) && styles.btnDisabled]}
         onPress={handleReel}
         disabled={uploading || !video}
       >
@@ -359,9 +361,9 @@ export default function CreateReelScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: colors.surface 
+  container: {
+    flex: 1,
+    backgroundColor: colors.surface
   },
   header: {
     flexDirection: 'row',
@@ -455,22 +457,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  input: { 
-    marginTop: 16, 
-    borderWidth: 1, 
-    borderColor: colors.border, 
-    borderRadius: 12, 
-    padding: 12, 
-    minHeight: 100, 
+  input: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 100,
     backgroundColor: 'white',
     color: colors.text,
     fontSize: 16,
   },
-  btn: { 
-    backgroundColor: colors.primary, 
-    padding: 14, 
-    borderRadius: 12, 
-    marginTop: 16, 
+  btn: {
+    backgroundColor: colors.primary,
+    padding: 14,
+    borderRadius: 12,
+    marginTop: 16,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -478,15 +480,15 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  btnDisabled: { 
-    opacity: 0.6 
+  btnDisabled: {
+    opacity: 0.6
   },
   btnContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  btnText: { 
-    color: 'white', 
+  btnText: {
+    color: 'white',
     fontWeight: '700',
     fontSize: 16,
   },

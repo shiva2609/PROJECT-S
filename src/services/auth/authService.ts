@@ -25,7 +25,7 @@ import {
 	signOut as firebaseSignOut,
 	deleteUser,
 	User,
-} from 'firebase/auth';
+} from '../../core/firebase/compat';
 
 // Import Firestore functions
 import {
@@ -38,7 +38,7 @@ import {
 	where,
 	getDocs,
 	serverTimestamp,
-} from 'firebase/firestore';
+} from '../../core/firebase/compat';
 
 import { AccountType, VerificationStatus } from '../../types/account';
 

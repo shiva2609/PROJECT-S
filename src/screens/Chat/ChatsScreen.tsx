@@ -18,8 +18,8 @@ import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/us
 import { Colors } from '../../theme/colors';
 import { listenToConversations } from '../../services/chat/MessagesAPI';
 import * as UsersAPI from '../../services/users/usersService';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '../../services/auth/authService';
+import { collection, onSnapshot } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 
 interface ChatListItem {
   id: string; // chatId

@@ -18,13 +18,13 @@ import {
   startAfter,
   runTransaction,
   serverTimestamp,
-} from 'firebase/firestore';
+} from '../../core/firebase/compat';
 import {
   increment,
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
+} from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { sendNotification } from '../notifications/NotificationAPI';
-import { getDoc as getPostDoc } from 'firebase/firestore'; // Alias to avoid conflict if needed or use existing getDoc
+import { getDoc as getPostDoc } from '../../core/firebase/compat'; // Alias to avoid conflict if needed or use existing getDoc
 
 // ---------- Types ----------
 

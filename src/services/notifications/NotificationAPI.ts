@@ -14,8 +14,8 @@ import {
   Timestamp,
   setDoc,
   deleteDoc
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
+} from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { normalizeNotification as normalizeNotificationGlobal } from '../../utils/normalize/normalizeNotification';
 
 // ---------- Types ----------

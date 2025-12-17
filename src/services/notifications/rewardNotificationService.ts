@@ -16,8 +16,9 @@ import {
   getDocs,
   serverTimestamp,
   Timestamp,
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
+  writeBatch
+} from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { incrementNotificationCount } from './notificationService';
 
 // Notification types
@@ -44,7 +45,7 @@ export async function createRewardNotification(
     }
 
     const notificationsRef = collection(db, 'notifications');
-    
+
     const notificationData = {
       userId,
       type: NOTIFICATION_TYPE_REWARD,
@@ -92,12 +93,12 @@ export async function getExistingRewardNotification(userId: string): Promise<any
       where('type', '==', NOTIFICATION_TYPE_REWARD),
       where('isClaimed', '==', false)
     );
-    
+
     const snapshot = await getDocs(q);
     if (snapshot.empty) {
       return null;
     }
-    
+
     // Return the first unclaimed reward notification
     const doc = snapshot.docs[0];
     return {
@@ -122,7 +123,7 @@ export async function markRewardNotificationAsClaimed(
 ): Promise<void> {
   try {
     const notificationsRef = collection(db, 'notifications');
-    
+
     if (notificationId) {
       // Mark specific notification
       const notificationRef = doc(notificationsRef, notificationId);
@@ -140,10 +141,10 @@ export async function markRewardNotificationAsClaimed(
         where('type', '==', NOTIFICATION_TYPE_REWARD),
         where('isClaimed', '==', false)
       );
-      
+
       const snapshot = await getDocs(q);
-      const batch = await import('firebase/firestore').then(m => m.writeBatch(db));
-      
+      const batch = writeBatch(db);
+
       snapshot.forEach((doc) => {
         batch.update(doc.ref, {
           isClaimed: true,
@@ -152,7 +153,7 @@ export async function markRewardNotificationAsClaimed(
           claimedAt: serverTimestamp(),
         });
       });
-      
+
       await batch.commit();
     }
 
@@ -177,10 +178,9 @@ export async function removeRewardNotification(userId: string): Promise<void> {
       where('type', '==', NOTIFICATION_TYPE_REWARD),
       where('isClaimed', '==', false)
     );
-    
-    const snapshot = await getDocs(q);
-    const batch = await import('firebase/firestore').then(m => m.writeBatch(db));
-    
+
+    const batch = writeBatch(db);
+
     snapshot.forEach((doc) => {
       batch.update(doc.ref, {
         isClaimed: true,
@@ -188,7 +188,7 @@ export async function removeRewardNotification(userId: string): Promise<void> {
         readAt: serverTimestamp(),
       });
     });
-    
+
     await batch.commit();
     console.log('✅ Reward notification(s) marked as claimed and read');
   } catch (error: any) {
@@ -245,13 +245,13 @@ export async function getUnclaimedRewardNotifications(userId: string): Promise<a
       where('type', '==', NOTIFICATION_TYPE_REWARD),
       where('isClaimed', '==', false)
     );
-    
+
     const snapshot = await getDocs(q);
     const notifications = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
-    
+
     return notifications;
   } catch (error: any) {
     console.error('❌ Error getting unclaimed reward notifications:', error);

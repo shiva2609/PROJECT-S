@@ -4,8 +4,8 @@
  * Unified service for follow/unfollow operations with optimistic updates
  */
 
-import { doc, getDoc, setDoc, deleteDoc, runTransaction, increment, serverTimestamp } from 'firebase/firestore';
-import { db } from '../auth/authService';
+import { doc, getDoc, setDoc, deleteDoc, runTransaction, increment, serverTimestamp } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { retryWithBackoff } from '../../utils/retry';
 import { validateUserId } from '../../utils/safeFirestore';
 
@@ -21,7 +21,7 @@ export async function followUser(currentUserId: string, targetUserId: string): P
   if (!validateUserId(currentUserId) || !validateUserId(targetUserId)) {
     throw { code: 'invalid-user-id', message: 'Invalid user ID' };
   }
-  
+
   if (currentUserId === targetUserId) {
     throw { code: 'cannot-follow-self', message: 'Cannot follow yourself' };
   }
@@ -103,7 +103,7 @@ export async function unfollowUser(currentUserId: string, targetUserId: string):
   if (!validateUserId(currentUserId) || !validateUserId(targetUserId)) {
     throw { code: 'invalid-user-id', message: 'Invalid user ID' };
   }
-  
+
   return retryWithBackoff(async () => {
     const followId = `${currentUserId}_${targetUserId}`;
     const followRef = doc(db, 'follows', followId);
@@ -174,7 +174,7 @@ export async function getFollowingList(userId: string): Promise<string[]> {
     console.warn('[getFollowingList] Invalid userId');
     return [];
   }
-  
+
   try {
     const usersService = await import('./usersService');
     const result = await usersService.getFollowing(userId);
@@ -194,7 +194,7 @@ export async function getFollowersList(userId: string): Promise<string[]> {
     console.warn('[getFollowersList] Invalid userId');
     return [];
   }
-  
+
   try {
     const usersService = await import('./usersService');
     const result = await usersService.getFollowers(userId);

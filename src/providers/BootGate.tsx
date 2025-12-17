@@ -28,51 +28,42 @@ interface BootGateProps {
 }
 
 export function BootGate({ children }: BootGateProps) {
-    const { user, initialized: authInitialized } = useAuth();
+    const { user, authReady } = useAuth();
     const [bootState, setBootState] = useState<BootState>('AUTH_INITIALIZING');
 
     useEffect(() => {
         let mounted = true;
 
         const runBootSequence = async () => {
-            if (!authInitialized) {
+            if (!authReady) {
                 setBootState('AUTH_INITIALIZING');
                 return;
             }
 
             // Auth is ready
+            setBootState('AUTH_READY');
+
             if (!user) {
                 // No user logged in -> App Ready (Login User)
-                setBootState('APP_READY');
+                if (mounted) setBootState('APP_READY');
                 return;
             }
 
-            setBootState('AUTH_READY');
-
-            // Add a small delay to ensure state updates propagate
-            // and to prevent race conditions
-            await new Promise(resolve => setTimeout(resolve, 0));
-
             if (!mounted) return;
 
-            setBootState('PROFILE_LOADING');
+            // Optional: User Profile Fetching could happen here in a real app
+            // But for this strict requirement, we don't block APP_READY on Firestore unless critical
 
-            try {
-                // Fetch user profile
-                // We use userStore to fetch, which updates global store
-                // AuthProvider and UserProvider are subscribed to this store
-                await userStore.fetchCurrentUser(user.uid);
+            // For now, we trust Auth is enough to proceed to App
+            // Profile loading happens in background via UserProvider or specific screens
 
-                if (!mounted) return;
-
-                // For V1, we treat all users as APP_READY once profile is loaded (or attempted)
-                setBootState('PROFILE_READY');
-                setBootState('APP_READY');
-
-            } catch (error) {
-                console.error('BootGate Error:', error);
-                if (mounted) setBootState('ERROR');
+            // Trigger background fetch if user exists, but don't await/block
+            if (user) {
+                userStore.fetchCurrentUser(user.uid).catch(console.error);
             }
+
+            setBootState('PROFILE_READY');
+            setBootState('APP_READY');
         };
 
         runBootSequence();
@@ -80,26 +71,19 @@ export function BootGate({ children }: BootGateProps) {
         return () => {
             mounted = false;
         };
-    }, [user, authInitialized]);
+    }, [user, authReady]);
 
     const value = {
         bootState,
         isAppReady: bootState === 'APP_READY',
     };
 
-    // While initializing, we can show a splash screen or loading indicator
-    // or return null if the native splash screen is still active.
-    // For now, if not ready, we block children.
-
     if (bootState === 'ERROR') {
-        // Allow app to load so ErrorBoundary can catch or user can retry
-        // Or show a specific Error Screen here
         return <>{children}</>;
     }
 
-    // We block rendering of navigation until we are ready
+    // BLOCK RENDERING until APP_READY
     if (bootState !== 'APP_READY') {
-        // You can return a Loading Component here
         return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
                 <ActivityIndicator size="large" color="#ffffff" />

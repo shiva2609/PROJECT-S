@@ -6,19 +6,18 @@
  * Parent post rating is automatically updated when reviews change.
  */
 
-import { 
-  collection, 
-  doc, 
-  addDoc, 
-  getDocs, 
-  query, 
+import {
+  collection,
+  doc,
+  addDoc,
+  getDocs,
+  query,
   orderBy,
   updateDoc,
   Timestamp,
-  Firestore,
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
-import { requireAuth, getCurrentUserId } from '../../utils/authUtils';
+} from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
+import { requireAuth, getCurrentUserId } from '../../services/api/firebaseService';
 
 export interface Review {
   id: string;
@@ -85,7 +84,7 @@ export async function getReviews(postId: string): Promise<Review[]> {
     const reviewsRef = collection(db, 'posts', postId, 'reviews');
     const q = query(reviewsRef, orderBy('createdAt', 'desc'));
     const snapshot = await getDocs(q);
-    
+
     return snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
@@ -102,7 +101,7 @@ export async function getReviews(postId: string): Promise<Review[]> {
 export async function recalculatePostRating(postId: string): Promise<void> {
   try {
     const reviews = await getReviews(postId);
-    
+
     if (reviews.length === 0) {
       // No reviews, set rating to null or 0
       const postRef = doc(db, 'posts', postId);
@@ -117,7 +116,7 @@ export async function recalculatePostRating(postId: string): Promise<void> {
 
     // Update parent post
     const postRef = doc(db, 'posts', postId);
-    await updateDoc(postRef, { 
+    await updateDoc(postRef, {
       rating: roundedRating,
       reviewCount: reviews.length,
     });
@@ -132,13 +131,13 @@ export async function recalculatePostRating(postId: string): Promise<void> {
  */
 export async function getReviewsForPosts(postIds: string[]): Promise<Record<string, Review[]>> {
   const result: Record<string, Review[]> = {};
-  
+
   await Promise.all(
     postIds.map(async (postId) => {
       result[postId] = await getReviews(postId);
     })
   );
-  
+
   return result;
 }
 

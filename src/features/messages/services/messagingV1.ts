@@ -50,7 +50,7 @@ import {
     arrayUnion,
     onSnapshot,
     Unsubscribe,
-} from 'firebase/firestore';
+} from '../../../core/firebase/compat';
 import { db } from '../../../core/firebase';
 import { buildChatId, parseChatId, getOtherUserId } from './chatIdentity';
 
@@ -122,13 +122,15 @@ export async function getOrCreateChat(
     }
 
     // Chat doesn't exist, create it
-    const [member1, member2] = [userId1, userId2].sort();
+    const sortedMembers = [userId1, userId2].sort();
+    const member1 = sortedMembers[0] || userId1;
+    const member2 = sortedMembers[1] || userId2;
     const now = serverTimestamp();
 
     const newChat: Omit<Chat, 'chatId'> = {
         members: [member1, member2],
-        updatedAt: now,
-        createdAt: now,
+        updatedAt: now as any as Timestamp,
+        createdAt: now as any as Timestamp,
     };
 
     await setDoc(chatRef, newChat);
@@ -184,7 +186,7 @@ export async function getUserChats(userId: string): Promise<Chat[]> {
 
     // Filter chats where user is a member
     const chats: Chat[] = [];
-    snapshot.forEach((docSnap) => {
+    snapshot.forEach((docSnap: any) => {
         const data = docSnap.data();
         if (data.members && data.members.includes(userId)) {
             chats.push({
@@ -350,9 +352,9 @@ export function listenToMessages(
     const messagesRef = collection(db, 'messages', chatId, 'items');
     const q = query(messagesRef, orderBy('createdAt', 'asc'));
 
-    return onSnapshot(q, (snapshot) => {
+    return onSnapshot(q, (snapshot: any) => {
         const messages: Message[] = [];
-        snapshot.forEach((docSnap) => {
+        snapshot.forEach((docSnap: any) => {
             const data = docSnap.data();
             messages.push({
                 id: docSnap.id,
@@ -379,7 +381,7 @@ export function listenToChat(
 ): Unsubscribe {
     const chatRef = doc(db, 'chats', chatId);
 
-    return onSnapshot(chatRef, (snapshot) => {
+    return onSnapshot(chatRef, (snapshot: any) => {
         if (!snapshot.exists()) {
             callback(null);
             return;
@@ -410,9 +412,9 @@ export function listenToUserChats(
     const chatsRef = collection(db, 'chats');
     const q = query(chatsRef, orderBy('updatedAt', 'desc'));
 
-    return onSnapshot(q, (snapshot) => {
+    return onSnapshot(q, (snapshot: any) => {
         const chats: Chat[] = [];
-        snapshot.forEach((docSnap) => {
+        snapshot.forEach((docSnap: any) => {
             const data = docSnap.data();
             if (data.members && data.members.includes(userId)) {
                 chats.push({

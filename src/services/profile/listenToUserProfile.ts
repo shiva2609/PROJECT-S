@@ -5,8 +5,9 @@
  * Returns normalized User object
  */
 
-import { doc, onSnapshot, Unsubscribe, DocumentSnapshot } from 'firebase/firestore';
-import { db } from '../auth/authService';
+import { doc, onSnapshot, Unsubscribe } from '../../core/firebase/compat';
+import { DocumentSnapshot } from 'firebase/firestore'; // Types can stay if compatible, or use Compat types
+import { db } from '../../core/firebase';
 import { User } from '../../types/firestore';
 import { normalizeUser } from '../../utils/normalize/normalizeUser';
 
@@ -26,7 +27,7 @@ export function listenToUserProfile(
     console.warn('[listenToUserProfile] Invalid userId');
     if (onError) onError(new Error('Invalid userId'));
     callback(null);
-    return () => {};
+    return () => { };
   }
 
   const userRef = doc(db, 'users', userId);
@@ -52,8 +53,8 @@ export function listenToUserProfile(
       },
       (error: any) => {
         // Suppress INTERNAL ASSERTION FAILED errors
-        if (error?.message?.includes('INTERNAL ASSERTION FAILED') || 
-            error?.message?.includes('Unexpected state')) {
+        if (error?.message?.includes('INTERNAL ASSERTION FAILED') ||
+          error?.message?.includes('Unexpected state')) {
           console.warn('[listenToUserProfile] Firestore internal error (non-fatal):', error.message?.substring(0, 100));
           callback(null);
           return;
@@ -67,7 +68,7 @@ export function listenToUserProfile(
     console.error('[listenToUserProfile] Setup error:', setupErr);
     if (onError) onError(setupErr);
     callback(null);
-    return () => {};
+    return () => { };
   }
 }
 

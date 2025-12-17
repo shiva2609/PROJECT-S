@@ -45,8 +45,8 @@ import {
   writeBatch,
   DocumentSnapshot,
   onSnapshot,
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
+} from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { retryWithBackoff } from '../../utils/retry';
 import { normalizeMessage as normalizeMessageGlobal } from '../../utils/normalize/normalizeMessage';
 
@@ -320,14 +320,14 @@ export function listenToConversations(
   return onSnapshot(
     q,
     { includeMetadataChanges: true },
-    (snapshot) => {
-      const conversations = snapshot.docs.map(doc => ({
+    (snapshot: any) => {
+      const conversations = snapshot.docs.map((doc: any) => ({
         id: doc.id,
         ...doc.data(),
       }));
       callback(conversations);
     },
-    (error) => {
+    (error: any) => {
       console.error('Error listening to conversations:', error);
       callback([]);
     }
@@ -350,11 +350,11 @@ export function listenToMessages(
   return onSnapshot(
     q,
     { includeMetadataChanges: true },
-    (snapshot) => {
+    (snapshot: any) => {
       const messages = snapshot.docs.map(normalizeMessage).reverse();
       callback(messages);
     },
-    (error) => {
+    (error: any) => {
       console.error('Error listening to messages:', error);
       callback([]);
     }
@@ -387,7 +387,7 @@ export async function getConversations(
     }
 
     const querySnapshot = await getDocs(q);
-    const conversations = querySnapshot.docs.map(doc => ({
+    const conversations = querySnapshot.docs.map((doc: any) => ({
       id: doc.id,
       ...doc.data(),
     }));

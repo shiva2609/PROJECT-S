@@ -10,8 +10,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppDispatch } from '../store';
 import { logout } from '../store';
 import { AUTH_USER_KEY } from './constants';
-import { signOut } from '../services/auth/authService';
-import { auth } from '../services/auth/authService';
+import { signOut } from '../services/api/firebaseService';
+import { db, auth } from '../core/firebase';
 import { NavigationProp } from '@react-navigation/native';
 import * as UsersAPI from '../services/users/usersService';
 

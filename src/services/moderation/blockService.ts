@@ -3,8 +3,8 @@
  * V1 MODERATION: Centralized block/unblock functionality
  */
 
-import { doc, updateDoc, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
-import { db } from '../auth/authService'; // Correct path to db
+import { doc, updateDoc, arrayUnion, arrayRemove, getDoc } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 
 /**
  * Block a user

@@ -8,7 +8,7 @@
 import { useEffect } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../services/auth/authService';
+import { db } from '../core/firebase';
 import { AccountType, UserAccountData } from '../types/account';
 import { requiresVerification } from '../hooks/useKYCManager';
 import { navigateToVerification } from './kycNavigation';
@@ -42,7 +42,7 @@ export function useKYCRedirect(userId: string | null, initialized: boolean) {
         // Check if verification is required and not completed
         if (requiresVerification(accountType as AccountType)) {
           const isVerified = kycStatus === 'approved' || kycStatus === 'verified' || verificationStatus === 'verified';
-          
+
           if (!isVerified) {
             // Small delay to ensure navigation is ready
             setTimeout(() => {

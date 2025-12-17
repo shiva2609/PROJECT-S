@@ -3,7 +3,7 @@
  * Normalization and safety checks for posts
  */
 
-import { serverTimestamp } from 'firebase/firestore';
+import { serverTimestamp } from '../core/firebase/compat';
 
 export interface PostData {
   id?: string;
@@ -52,12 +52,12 @@ export function sortPostsByCreatedAt(posts: PostData[]): PostData[] {
   return posts.sort((a, b) => {
     const aTime = getCreatedAtTimestamp(a.createdAt);
     const bTime = getCreatedAtTimestamp(b.createdAt);
-    
+
     // Posts without createdAt go to the end
     if (aTime === 0 && bTime === 0) return 0;
     if (aTime === 0) return 1;
     if (bTime === 0) return -1;
-    
+
     return bTime - aTime; // Descending
   });
 }
@@ -157,17 +157,17 @@ export function normalizePost(post: PostData): PostData {
   if (mediaUrls.length === 0 && normalized.mediaUrl && typeof normalized.mediaUrl === 'string' && normalized.mediaUrl.length > 0) {
     mediaUrls.push(normalized.mediaUrl);
   }
-  
+
   // Priority 4: Check for imageUrl (legacy field - use as fallback)
   if (mediaUrls.length === 0 && normalized.imageUrl && typeof normalized.imageUrl === 'string' && normalized.imageUrl.length > 0) {
     mediaUrls.push(normalized.imageUrl);
   }
-  
+
   // Priority 5: Check for photoUrl (alternative field)
   if (mediaUrls.length === 0 && (normalized as any).photoUrl && typeof (normalized as any).photoUrl === 'string' && (normalized as any).photoUrl.length > 0) {
     mediaUrls.push((normalized as any).photoUrl);
   }
-  
+
   // Priority 6: Check for files[0]?.url (nested structure)
   if (mediaUrls.length === 0 && Array.isArray((normalized as any).files) && (normalized as any).files.length > 0) {
     const fileUrl = (normalized as any).files[0]?.url || (normalized as any).files[0]?.uri;
@@ -175,7 +175,7 @@ export function normalizePost(post: PostData): PostData {
       mediaUrls.push(fileUrl);
     }
   }
-  
+
   // NOTE: We prioritize final cropped bitmaps, but fallback to other fields if needed
   // This ensures images always render, even if the post structure is non-standard
 

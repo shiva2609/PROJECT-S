@@ -18,8 +18,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../../providers/AuthProvider';
 import { listenToDirectMessages, sendMessage, ChatMessage } from '../../services/api/firebaseService';
 import { getCopilotChatMessages } from '../../services/chat/chatService';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
-import { db } from '../../services/auth/authService';
+import { collection, query, orderBy, onSnapshot } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import ItineraryCard from '../../components/itinerary/ItineraryCard';
 import { ItineraryResponse } from '../../services/itinerary/generateItinerary';
 import { markChatAsRead } from '../../services/notifications/notificationService';
@@ -56,7 +56,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
   const { userId, username, isCopilot } = route.params;
   // Use unified profile photo hook
   const profilePhoto = useProfilePhoto(isCopilot ? null : userId);
-  
+
   const [messages, setMessages] = useState<(ChatMessage | CopilotMessage)[]>([]);
   const [messageText, setMessageText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -74,21 +74,21 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
       // Listen to Copilot chat messages
       const messagesRef = collection(db, 'users', user.uid, 'chats', 'sanchari-copilot', 'messages');
       const q = query(messagesRef, orderBy('timestamp', 'asc'));
-      
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const copilotMessages: CopilotMessage[] = snapshot.docs.map((doc) => ({
+
+      const unsubscribe = onSnapshot(q, (snapshot: any) => {
+        const copilotMessages: CopilotMessage[] = snapshot.docs.map((doc: any) => ({
           id: doc.id,
           ...doc.data(),
         })) as CopilotMessage[];
-        
+
         setMessages(copilotMessages);
         setLoading(false);
-        
+
         // Scroll to top (start of conversation) when chat opens
         setTimeout(() => {
           flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
         }, 100);
-      }, (error) => {
+      }, (error: any) => {
         console.error('Error listening to copilot messages:', error);
         setLoading(false);
       });
@@ -99,7 +99,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
       const unsubscribe = listenToDirectMessages(user.uid, userId, (msgs) => {
         setMessages(msgs);
         setLoading(false);
-        
+
         // Scroll to top (start of conversation) when chat opens
         setTimeout(() => {
           flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -128,7 +128,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
         recipientId: userId,
         text,
       });
-      
+
       // Auto-scroll after sending
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
@@ -140,7 +140,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
 
   const formatTime = (timestamp: number | any) => {
     let date: Date;
-    
+
     // Handle Firestore Timestamp
     if (timestamp && typeof timestamp === 'object') {
       if (timestamp.toMillis && typeof timestamp.toMillis === 'function') {
@@ -155,7 +155,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
     } else {
       date = new Date();
     }
-    
+
     const hours = date.getHours();
     const minutes = date.getMinutes();
     const ampm = hours >= 12 ? 'PM' : 'AM';
@@ -167,11 +167,11 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
     const isUserMessage = item.senderId === user?.uid;
     const isCopilotMessage = (item as CopilotMessage).messageType === 'itinerary';
     const nextMessage = index < messages.length - 1 ? messages[index + 1] : undefined;
-    
+
     // Get timestamp properly
     let itemTimestamp: number | any = (item as ChatMessage).createdAt || (item as CopilotMessage).timestamp || Date.now();
     let nextTimestamp: number | any = nextMessage ? ((nextMessage as ChatMessage).createdAt || (nextMessage as CopilotMessage).timestamp || Date.now()) : Date.now();
-    
+
     // Convert Firestore Timestamps to numbers for comparison
     if (itemTimestamp && typeof itemTimestamp === 'object') {
       if (itemTimestamp.toMillis) {
@@ -187,8 +187,8 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
         nextTimestamp = nextTimestamp.seconds * 1000;
       }
     }
-    
-    const showTimestamp = index === messages.length - 1 || 
+
+    const showTimestamp = index === messages.length - 1 ||
       (Math.abs(nextTimestamp - itemTimestamp) > 300000); // 5 minutes
 
     // Render itinerary message
@@ -201,7 +201,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
               <Icon name="compass-outline" size={20} color="#FFFFFF" />
             </View>
             <View style={[styles.messageBubble, styles.otherBubble, { maxWidth: '85%' }]}>
-              <ItineraryCard 
+              <ItineraryCard
                 itinerary={copilotItem.itineraryData!}
                 onSave={undefined} // Already saved
               />
@@ -249,7 +249,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
               />
             )
           )}
-          
+
           <View
             style={[
               styles.messageBubble,
@@ -261,7 +261,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
             </Text>
           </View>
         </View>
-        
+
         {showTimestamp && (
           <Text style={[
             styles.timestamp,
@@ -283,8 +283,8 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
         {isCopilot ? 'No saved itineraries yet' : `No messages yet with ${username}`}
       </Text>
       <Text style={styles.emptySubtext}>
-        {isCopilot 
-          ? 'Save an itinerary from the Itinerary Builder to see it here.' 
+        {isCopilot
+          ? 'Save an itinerary from the Itinerary Builder to see it here.'
           : 'Start your first conversation with this traveler.'}
       </Text>
       {!isCopilot && (
@@ -325,8 +325,8 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
                 <Icon name="compass-outline" size={24} color="#FFFFFF" />
               </View>
             ) : profilePhoto ? (
-              <Image 
-                source={{ uri: profilePhoto }} 
+              <Image
+                source={{ uri: profilePhoto }}
                 style={styles.headerAvatar as any}
               />
             ) : (
