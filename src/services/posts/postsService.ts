@@ -639,90 +639,11 @@ export async function deleteComment(postId: string, commentId: string): Promise<
   }
 }
 
-// ---------- Save/Unsave ----------
+// CRITICAL: Interaction logic moved to post.interactions.service.ts
+// Do NOT add save/unsave/like/comment logic here.
+// Use PostInteractions.toggleLike, PostInteractions.toggleSavePost, etc.
 
-/**
- * Save a post for a user
- * @param userId - User ID
- * @param postId - Post ID
- */
-export async function savePost(userId: string, postId: string): Promise<void> {
-  if (!auth.currentUser) throw new Error('User not authenticated');
-  try {
-    const savedRef = doc(db, 'users', userId, 'saved', postId);
-    await setDoc(savedRef, {
-      postId,
-      savedAt: serverTimestamp(),
-    });
-
-    // Increment saved count
-    const postRef = doc(db, 'posts', postId);
-    await updateDoc(postRef, {
-      savedCount: increment(1),
-    });
-  } catch (error: any) {
-    console.error('Error saving post:', error);
-    throw { code: 'save-post-failed', message: 'Failed to save post' };
-  }
-}
-
-/**
- * Unsave a post for a user
- * @param userId - User ID
- * @param postId - Post ID
- */
-export async function unsavePost(userId: string, postId: string): Promise<void> {
-  if (!auth.currentUser) throw new Error('User not authenticated');
-  try {
-    const savedRef = doc(db, 'users', userId, 'saved', postId);
-    await deleteDoc(savedRef);
-
-    // Decrement saved count
-    const postRef = doc(db, 'posts', postId);
-    await updateDoc(postRef, {
-      savedCount: increment(-1),
-    });
-  } catch (error: any) {
-    console.error('Error unsaving post:', error);
-    throw { code: 'unsave-post-failed', message: 'Failed to unsave post' };
-  }
-}
-
-// ---------- Count Updates ----------
-
-/**
- * Increment like count for a post
- * @param postId - Post ID
- * @param delta - Amount to increment (default: 1)
- */
-export async function incrementLikeCount(postId: string, delta: number = 1): Promise<void> {
-  try {
-    const postRef = doc(db, 'posts', postId);
-    await updateDoc(postRef, {
-      likeCount: increment(delta),
-    });
-  } catch (error: any) {
-    console.error('Error incrementing like count:', error);
-    throw { code: 'increment-like-failed', message: 'Failed to update like count' };
-  }
-}
-
-/**
- * Increment comment count for a post
- * @param postId - Post ID
- * @param delta - Amount to increment (default: 1)
- */
-export async function incrementCommentCount(postId: string, delta: number = 1): Promise<void> {
-  try {
-    const postRef = doc(db, 'posts', postId);
-    await updateDoc(postRef, {
-      commentCount: increment(delta),
-    });
-  } catch (error: any) {
-    console.error('Error incrementing comment count:', error);
-    throw { code: 'increment-comment-failed', message: 'Failed to update comment count' };
-  }
-}
+// CRITICAL: Interaction logic moved to post.interactions.service.ts
 
 // ---------- Hashtag Search ----------
 

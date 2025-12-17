@@ -4,8 +4,8 @@
  * Handles saving and retrieving itineraries from Firestore
  */
 
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../auth/authService';
+import { collection, addDoc, serverTimestamp, getDocs } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { ItineraryResponse } from './generateItinerary';
 import { sendItineraryToChat } from '../chat/chatService';
 
@@ -62,13 +62,12 @@ export async function saveItineraryToFirestore(
  */
 export async function getUserItineraries(userId: string) {
   try {
-    const { getDocs } = await import('firebase/firestore');
     const itinerariesRef = collection(db, 'users', userId, 'itineraries');
     const snapshot = await getDocs(itinerariesRef);
 
-    return snapshot.docs.map((doc) => ({
+    return snapshot.docs.map((doc: any) => ({
       id: doc.id,
-      ...doc.data(),
+      ...(doc.data() as any),
     }));
   } catch (error: any) {
     console.error('❌ Error fetching user itineraries:', error);

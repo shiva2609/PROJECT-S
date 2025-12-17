@@ -50,7 +50,7 @@ const PostHeader = ({
                 />
                 <View style={styles.creatorInfo}>
                     <View style={styles.usernameRow}>
-                        <Text style={styles.username}>{username}</Text>
+                        <Text style={styles.username} numberOfLines={1}>{username}</Text>
                         {isVerified && (
                             <View style={styles.verifiedBadge}>
                                 <VerifiedBadge size={14} />
@@ -111,6 +111,7 @@ const styles = StyleSheet.create({
         fontFamily: Fonts.bold,
         fontSize: 14,
         color: '#000000',
+        flexShrink: 1,
     },
     verifiedBadge: {
         alignItems: 'center',

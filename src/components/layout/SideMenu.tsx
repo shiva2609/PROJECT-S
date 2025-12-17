@@ -324,11 +324,14 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
 
   const rewardsItems: MenuItemData[] = [
     { label: 'Explorer Points Wallet', icon: 'wallet-outline', route: 'PointsWallet' },
+    { label: 'Achievements', icon: 'trophy-outline', route: 'Achievements' },
+    { label: 'Traveller Card', icon: 'card-outline', route: 'TravellerCard' },
   ];
 
   const settingsItems: MenuItemData[] = [
     { label: 'Account Settings', icon: 'settings-outline', route: 'Account' },
     ...(showUpgrade ? [{ label: 'Upgrade Account', icon: 'arrow-up-circle-outline', route: 'RoleUpgrade' } as MenuItemData] : []),
+    { label: 'Terms & Policies', icon: 'document-text-outline', route: 'TermsPolicies' },
     { label: 'Logout', icon: 'log-out-outline', route: '', onPress: handleLogout },
   ];
 

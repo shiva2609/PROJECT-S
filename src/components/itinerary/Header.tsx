@@ -10,10 +10,14 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 
+import { useNavigation } from '@react-navigation/native';
+
 export default function Header() {
+  const navigation = useNavigation<any>();
   return (
     <View style={styles.container}>
       <View style={styles.content}>
+        <Icon name="arrow-back" size={24} color={Colors.black.primary} onPress={() => navigation.goBack()} style={{ marginRight: 16 }} />
         <View style={styles.iconContainer}>
           <Icon name="compass" size={28} color={Colors.brand.primary} />
         </View>
@@ -51,7 +55,7 @@ const styles = StyleSheet.create({
   },
   textContainer: {
     flex: 1,
-    marginVertical:12,
+    marginVertical: 12,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },

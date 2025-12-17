@@ -57,19 +57,40 @@ export default function PostDetailScreen() {
 
   // Map raw posts to PostWithAuthor
   const mapPostsToWithAuthor = useCallback((rawPosts: Post[], author: any): PostWithAuthor[] => {
-    if (!author) return rawPosts as any;
-    return rawPosts.map(p => ({
-      ...p,
-      username: author.username || 'User',
-      authorId: author.uid || userId, // Ensure authorId is set
-      authorUsername: author.username || 'User',
-      authorAvatar: author.photoURL || author.profilePhoto || author.profilePic,
-      user: {
-        id: author.uid || userId,
-        username: author.username,
-        photoURL: author.photoURL || author.profilePhoto
-      }
-    })) as PostWithAuthor[];
+    return rawPosts.map(p => {
+      const pAny = p as any;
+      // 1. Extract existing author info from the post object
+      const existingUsername = pAny.username || pAny.authorUsername || pAny.user?.username;
+      const existingAvatar = pAny.authorAvatar || pAny.userAvatar || pAny.profilePhoto || pAny.user?.photoURL || pAny.ownerAvatar;
+      const existingAuthorId = pAny.authorId || pAny.createdBy || pAny.userId || pAny.user?.id || pAny.ownerId;
+
+      // 2. Determine if we should use the provided author context (from useUser)
+      // Use context if:
+      // a) We explicitly passed it (author exists)
+      // b) AND (The post has no specific author ID OR the post's author ID matches the context ID)
+      const contextMatches = author && (!existingAuthorId || existingAuthorId === author.uid || existingAuthorId === author.id);
+
+      // 3. Resolve final values
+      // Priority: Existing Post Data -> Author Context -> Fallbacks
+      const finalUsername = existingUsername || (contextMatches ? author.username : undefined) || 'User';
+      const finalAuthorId = existingAuthorId || (contextMatches ? (author.uid || author.id) : userId);
+      const finalAvatar = existingAvatar || (contextMatches ? (author.photoURL || author.profilePhoto || author.profilePic) : undefined);
+
+      return {
+        ...p,
+        username: finalUsername,
+        authorId: finalAuthorId,
+        authorUsername: finalUsername,
+        authorAvatar: finalAvatar,
+        authorDisplayName: pAny.authorDisplayName || (contextMatches ? author.displayName : undefined) || finalUsername,
+        user: {
+          id: finalAuthorId,
+          username: finalUsername,
+          photoURL: finalAvatar,
+          displayName: pAny.authorDisplayName || (contextMatches ? author.displayName : undefined) || finalUsername,
+        }
+      } as PostWithAuthor;
+    });
   }, [userId]);
 
   useEffect(() => {

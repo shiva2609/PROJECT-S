@@ -13,15 +13,25 @@ import {
   View,
   Text,
   StyleSheet,
+  TouchableOpacity,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../theme/colors';
 import { Fonts } from '../theme/fonts';
 
 export default function TripsScreen() {
+  const navigation = useNavigation<any>();
   return (
     <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Icon name="arrow-back" size={24} color={Colors.black.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>My Trips</Text>
+        <View style={styles.backButton} />
+      </View>
       <View style={styles.content}>
         {/* Icon */}
         <View style={styles.iconCircle}>
@@ -30,6 +40,7 @@ export default function TripsScreen() {
 
         {/* Title */}
         <Text style={styles.title}>Coming Soon</Text>
+
 
         {/* Subtitle */}
         <Text style={styles.subtitle}>
@@ -55,6 +66,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: Colors.white.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.white.tertiary,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.bold,
+    color: Colors.black.primary,
   },
   iconCircle: {
     width: 100,

@@ -21,8 +21,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../../services/auth/authService';
+import { doc, getDoc, updateDoc } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { useAuth } from '../../providers/AuthProvider';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
@@ -1113,11 +1113,11 @@ export default function EditProfileScreen({ navigation, route }: any) {
                       maxHeight: 800,
                     });
                     if (result.assets && result.assets[0]) {
-                      const fileName = `business_logos/${user?.uid}/${Date.now()}.jpg`;
-                      const downloadURL = await uploadImageAsync({
-                        uri: result.assets[0].uri || '',
-                        path: fileName,
-                      });
+                      const downloadURL = await uploadImageAsync(
+                        { uri: result.assets[0].uri || '' },
+                        user?.uid!!,
+                        'business_logos'
+                      );
                       setFormData({ ...formData, businessLogo: downloadURL });
                     }
                   } catch (error) {

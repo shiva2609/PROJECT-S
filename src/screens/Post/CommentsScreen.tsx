@@ -22,7 +22,7 @@ import { useProfilePhoto } from '../../hooks/useProfilePhoto';
 import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/users/userProfilePhotoService';
 import * as PostInteractions from '../../global/services/posts/post.interactions.service';
 import { getUserPublicInfo } from '../../global/services/user/user.service';
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '../../core/firebase/compat';
 import UserAvatar from '../../components/user/UserAvatar';
 
 interface Comment {
@@ -140,14 +140,14 @@ export default function CommentsScreen({ navigation, route }: any) {
             {/* Spacer */}
             <View style={{ flex: 1 }} />
 
-            {/* Like Icon */}
+            {/* Like Icon 
             <TouchableOpacity
               style={styles.likeButton}
               activeOpacity={0.6}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <Icon name="heart-outline" size={16} color={Colors.black.qua} />
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
         </View>
       </View>
