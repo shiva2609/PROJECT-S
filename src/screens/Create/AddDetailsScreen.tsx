@@ -208,6 +208,8 @@ export default function AddDetailsScreen({ navigation }: any) {
 
       // STEP 3 — UPLOAD IMAGES
       const uploadedUrls: string[] = [];
+      const uploadedMedia: Array<{ url: string; storagePath: string; type: 'image' }> = [];
+
       for (let i = 0; i < finalImageUris.length; i++) {
         const fileName = `media_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
         const storagePath = `users/${uid}/posts/${postId}/${fileName}`;
@@ -230,6 +232,11 @@ export default function AddDetailsScreen({ navigation }: any) {
 
         const downloadUrl = await reference.getDownloadURL();
         uploadedUrls.push(downloadUrl);
+        uploadedMedia.push({
+          url: downloadUrl,
+          storagePath: storagePath,
+          type: 'image',
+        });
         setProgress(Math.round(((i + 1) / finalImageUris.length) * 50));
       }
 
@@ -245,10 +252,11 @@ export default function AddDetailsScreen({ navigation }: any) {
       const hasDetails = !!(description.trim() || location.trim() || tagArray.length > 0);
       const firstImageUrl = uploadedUrls[0];
 
-      const mediaArray = uploadedUrls.map((url, index) => ({
+      const mediaArray = uploadedMedia.map((item, index) => ({
         type: 'image' as const,
-        url: url,
-        uri: url,
+        url: item.url,
+        uri: item.url,
+        storagePath: item.storagePath, // CRITICAL: Store storagePath for deletion
         id: `media-${index}`,
       }));
 

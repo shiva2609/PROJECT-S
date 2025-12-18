@@ -19,7 +19,8 @@ import { Post } from '../../services/api/firebaseService';
 import { getPostDropdownOptions, DropdownOption } from '../../utils/postDropdownHelpers';
 import ConfirmationModal from '../common/ConfirmationModal';
 // V1: hidePost removed - Hide Post option no longer available
-import { deletePost, blockUser, muteUser } from '../../services/api/firebaseService';
+import { blockUser, muteUser } from '../../services/api/firebaseService';
+import { deletePost } from '../../services/posts/deletePost';
 import * as PostInteractions from '../../global/services/posts/post.interactions.service';
 import { useFollow } from '../../hooks/useFollow';
 import { showSuccessToast } from '../../utils/toast';

@@ -649,142 +649,16 @@ export async function createReel(params: {
 
 /**
  * Delete a post completely from everywhere
- * - Deletes from posts collection
- * - Deletes media from Firebase Storage
- * - Decrements postsCount in user document
- * - Deletes from likes/bookmarks collections if they exist
+ * 
+ * @deprecated Use deletePost from '../../services/posts/deletePost' instead
+ * This function is kept for backward compatibility but redirects to the new service
  */
 export async function deletePost(postId: string, ownerId: string): Promise<void> {
-	try {
-		// Step 1: Get post data to extract media URLs
-		const postRef = doc(db(), 'posts', postId);
-		const postSnap = await getDoc(postRef);
+	console.warn('⚠️ [firebaseService.deletePost] DEPRECATED: Use deletePost from services/posts/deletePost instead');
 
-		if (!postSnap.exists()) {
-			throw new Error('Post not found');
-		}
-
-		const postData = postSnap.data() as any;
-
-		// Step 2: Delete media from Firebase Storage
-		const mediaUrls: string[] = [];
-
-		// Collect all media URLs
-		if (postData.mediaUrls && Array.isArray(postData.mediaUrls)) {
-			mediaUrls.push(...postData.mediaUrls);
-		}
-		if (postData.imageUrl) {
-			mediaUrls.push(postData.imageUrl);
-		}
-		if (postData.mediaUrl) {
-			mediaUrls.push(postData.mediaUrl);
-		}
-		if (postData.coverImage) {
-			mediaUrls.push(postData.coverImage);
-		}
-		if (postData.finalCroppedUrl) {
-			mediaUrls.push(postData.finalCroppedUrl);
-		}
-		if (postData.media && Array.isArray(postData.media)) {
-			postData.media.forEach((item: any) => {
-				if (item.url) mediaUrls.push(item.url);
-				if (item.uri) mediaUrls.push(item.uri);
-			});
-		}
-
-		// Remove duplicates
-		const uniqueMediaUrls = [...new Set(mediaUrls)];
-
-		// Delete each media file from Storage
-		for (const url of uniqueMediaUrls) {
-			if (!url || typeof url !== 'string' || !url.includes('firebasestorage')) continue;
-
-			try {
-				// Extract storage path from URL
-				// URL format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encodedPath}?alt=media&token=...
-				const urlObj = new URL(url);
-				const pathMatch = urlObj.pathname.match(/\/o\/(.+)/);
-				if (pathMatch && pathMatch[1]) {
-					const encodedPath = pathMatch[1];
-					const storagePath = decodeURIComponent(encodedPath);
-
-					// Delete using React Native Firebase Storage
-					const storageRef = firebaseStorage.ref(storagePath);
-					await storageRef.delete();
-					console.log('✅ Deleted media from Storage:', storagePath);
-				}
-			} catch (storageError: any) {
-				// Log but don't fail - file might already be deleted
-				console.warn('⚠️ Could not delete media from Storage:', url, storageError.message);
-			}
-		}
-
-		// Step 3: Delete from main posts collection
-		await deleteDoc(postRef);
-		console.log('✅ Deleted post from posts collection');
-
-		// Step 4: Delete from user's posts subcollection (if exists)
-		try {
-			const userPostRef = doc(db(), 'users', ownerId, 'posts', postId);
-			const userPostSnap = await getDoc(userPostRef);
-			if (userPostSnap.exists()) {
-				await deleteDoc(userPostRef);
-				console.log('✅ Deleted post from user posts subcollection');
-			}
-		} catch (error: any) {
-			// Subcollection might not exist, that's okay
-			console.log('ℹ️ User posts subcollection not found or already deleted');
-		}
-
-		// Step 5: Delete from explore/feed collections (if they exist)
-		const feedCollections = ['explore', 'feed/global', 'user_feed'];
-		for (const collectionPath of feedCollections) {
-			try {
-				const feedRef = doc(db(), collectionPath, postId);
-				const feedSnap = await getDoc(feedRef);
-				if (feedSnap.exists()) {
-					await deleteDoc(feedRef);
-					console.log(`✅ Deleted post from ${collectionPath}`);
-				}
-			} catch (error: any) {
-				// Collection might not exist, that's okay
-				console.log(`ℹ️ ${collectionPath} not found or already deleted`);
-			}
-		}
-
-		// Step 6: Delete from likes/bookmarks collections (if they exist as separate docs)
-		const interactionCollections = ['likes', 'bookmarks'];
-		for (const collectionPath of interactionCollections) {
-			try {
-				const interactionRef = doc(db(), collectionPath, postId);
-				const interactionSnap = await getDoc(interactionRef);
-				if (interactionSnap.exists()) {
-					await deleteDoc(interactionRef);
-					console.log(`✅ Deleted post from ${collectionPath}`);
-				}
-			} catch (error: any) {
-				// Collection might not exist, that's okay
-				console.log(`ℹ️ ${collectionPath} not found or already deleted`);
-			}
-		}
-
-		// Step 7: Decrement postsCount in user document
-		try {
-			const userRef = doc(db(), 'users', ownerId);
-			await updateDoc(userRef, {
-				postsCount: increment(-1),
-			});
-			console.log('✅ Decremented postsCount');
-		} catch (error: any) {
-			// postsCount might not exist, that's okay
-			console.log('ℹ️ Could not decrement postsCount (field might not exist)');
-		}
-
-		console.log('✅ Post deleted successfully from all locations');
-	} catch (error: any) {
-		console.error('❌ Error deleting post:', error);
-		throw error;
-	}
+	// Import and call the new centralized service
+	const { deletePost: newDeletePost } = await import('../posts/deletePost');
+	return newDeletePost(postId, ownerId);
 }
 
 export function listenToFeed(onUpdate: (posts: Post[]) => void): () => void {
@@ -1186,17 +1060,80 @@ export async function unfollowUser(currentUserId: string, targetUserId: string):
 
 /**
  * Upload profile photo
- * Converts finalImage to blob and uploads to /profilePhotos/{userId}/{userId}.jpg
- * Returns downloadURL
+ * CRITICAL: Follows same pattern as post upload to prevent storage/unauthorized
+ * - Checks auth readiness
+ * - Forces token refresh
+ * - Uses native Firebase Storage SDK
+ * - Matches storage rules path exactly
+ * 
+ * @param finalImageUri - Local file URI of the cropped profile photo
+ * @param userId - User ID (must match auth.currentUser.uid)
+ * @returns Download URL of uploaded photo
  */
 export async function uploadProfilePhoto(finalImageUri: string, userId: string): Promise<string> {
 	try {
-		// Use fileName format to match storage rules pattern: users/{userId}/profile_photos/{fileName}
-		const fileName = `${userId}.jpg`;
-		const storagePath = `users/${userId}/profile_photos/${fileName}`;
+		// STEP 1: Verify auth readiness (matching post upload pattern)
+		const currentUser = auth.currentUser;
+		if (!currentUser) {
+			throw new Error('User not authenticated');
+		}
+
+		if (currentUser.uid !== userId) {
+			throw new Error('User ID mismatch - possible auth state corruption');
+		}
+
+		console.log('🔐 [uploadProfilePhoto] Auth check passed:', {
+			userId,
+			currentUserUid: currentUser.uid,
+			email: currentUser.email,
+			uidMatch: currentUser.uid === userId,
+			userIdLength: userId.length,
+			currentUserUidLength: currentUser.uid.length,
+		});
+
+		// CRITICAL: Verify UIDs match exactly
+		if (currentUser.uid !== userId) {
+			console.error('❌ [uploadProfilePhoto] UID MISMATCH:', {
+				passedUserId: userId,
+				authUserId: currentUser.uid,
+				difference: `Passed: ${userId}, Auth: ${currentUser.uid}`,
+			});
+			throw new Error(`User ID mismatch - passed: ${userId}, auth: ${currentUser.uid}`);
+		}
+		console.log('🔄 [uploadProfilePhoto] Forcing token refresh...');
+		try {
+			await currentUser.getIdToken(true); // Force refresh
+			console.log('✅ [uploadProfilePhoto] Token refreshed successfully');
+		} catch (tokenError: any) {
+			console.error('❌ [uploadProfilePhoto] Token refresh failed:', tokenError);
+			throw new Error(`Token refresh failed: ${tokenError.message}`);
+		}
+
+		// STEP 3: Native settle delay (matching post upload pattern)
+		// This ensures native Firebase SDK has processed the auth state
+		console.log('⏳ [uploadProfilePhoto] Waiting for native auth to settle (300ms)...');
+		await new Promise(resolve => setTimeout(resolve, 300));
+		console.log('✅ [uploadProfilePhoto] Native auth settled');
+
+		// STEP 4: Prepare storage path using LEGACY path (matches existing profile photos)
+		// CRITICAL: Use profilePhotos/{userId}/{fileName} to match existing storage structure
+		const authUid = currentUser.uid;
+		const fileName = `${authUid}.jpg`;
+		const storagePath = `profilePhotos/${authUid}/${fileName}`; // Legacy path without users/ prefix
+
+		console.log('📤 [uploadProfilePhoto] Upload details:', {
+			storagePath,
+			authUid,
+			passedUserId: userId,
+			uidMatch: authUid === userId,
+			fileName,
+			imageUri: finalImageUri.substring(0, 50) + '...',
+		});
+
+		// STEP 5: Get storage reference using React Native Firebase
 		const reference = firebaseStorage.ref(storagePath);
 
-		// Prepare upload URI (remove file:// prefix if present)
+		// STEP 6: Prepare upload URI (remove file:// prefix if present)
 		let uploadUri = finalImageUri;
 		if (Platform.OS === 'ios' && uploadUri.startsWith('file://')) {
 			uploadUri = uploadUri.replace('file://', '');
@@ -1205,13 +1142,24 @@ export async function uploadProfilePhoto(finalImageUri: string, userId: string):
 			uploadUri = uploadUri.replace('file://', '');
 		}
 
-		console.log('📤 [uploadProfilePhoto] Uploading profile photo to:', storagePath);
+		console.log('📤 [uploadProfilePhoto] Starting upload to:', storagePath);
+		console.log('📤 [uploadProfilePhoto] Upload URI:', uploadUri.substring(0, 50) + '...');
+
+		// STEP 7: Upload file
 		await reference.putFile(uploadUri);
+		console.log('✅ [uploadProfilePhoto] File uploaded successfully');
+
+		// STEP 8: Get download URL
 		const downloadURL = await reference.getDownloadURL();
-		console.log('✅ [uploadProfilePhoto] Profile photo uploaded successfully');
+		console.log('✅ [uploadProfilePhoto] Download URL retrieved:', downloadURL.substring(0, 80) + '...');
+
 		return downloadURL;
 	} catch (error: any) {
-		console.error('❌ Error uploading profile photo:', error);
+		console.error('❌ [uploadProfilePhoto] Upload failed:', {
+			error: error.message,
+			code: error.code,
+			userId,
+		});
 		throw error;
 	}
 }

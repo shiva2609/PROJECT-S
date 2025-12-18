@@ -307,7 +307,7 @@ interface ProfileData {
 }
 
 export default function EditProfileScreen({ navigation, route }: any) {
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -447,10 +447,22 @@ export default function EditProfileScreen({ navigation, route }: any) {
       return;
     }
 
+    // CRITICAL: Check auth readiness (matching post upload pattern)
+    if (!authReady) {
+      Alert.alert('Error', 'Authentication not ready. Please wait a moment and try again.');
+      return;
+    }
+
     try {
       setUploadingPhoto(true);
 
-      // Upload new profile photo
+      console.log('📸 [EditProfileScreen] Starting profile photo upload:', {
+        userId: user.uid,
+        authReady,
+        imageUri: finalImageUri.substring(0, 50) + '...',
+      });
+
+      // Upload new profile photo (now includes auth checks and token refresh)
       const downloadURL = await uploadProfilePhoto(finalImageUri, user.uid);
       console.log('✅ [EditProfileScreen] Profile photo uploaded:', downloadURL);
 
@@ -478,7 +490,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
     } finally {
       setUploadingPhoto(false);
     }
-  }, [user, previousProfilePhotoUrl, fetchUserData]);
+  }, [user, authReady, previousProfilePhotoUrl, fetchUserData]);
 
   // Handle finalProfilePhoto from ProfilePhotoCropScreen
   useFocusEffect(
