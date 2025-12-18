@@ -49,6 +49,7 @@ import {
 import { db } from '../../core/firebase';
 import { retryWithBackoff } from '../../utils/retry';
 import { normalizeMessage as normalizeMessageGlobal } from '../../utils/normalize/normalizeMessage';
+import { buildChatId } from '../../features/messages/services/chatIdentity';
 
 // ---------- Types ----------
 
@@ -119,6 +120,56 @@ function normalizeMessage(docSnap: DocumentSnapshot | any): Message {
 }
 
 // ---------- Exported Functions ----------
+
+/**
+ * Get or create a 1-to-1 conversation between two users
+ * 
+ * CANONICAL ENTRY POINT for creating conversations.
+ * GUARANTEES:
+ * - ONE conversation per user pair (deterministic conversationId)
+ * - Conversation appears in inbox immediately (no need to send first message)
+ * - Uses sorted alphabetical ID (alice_bob === bob_alice)
+ * 
+ * @param userA - First user ID
+ * @param userB - Second user ID
+ * @returns Conversation object with id
+ * 
+ * @example
+ * ```typescript
+ * const conversation = await getOrCreateConversation("alice", "bob");
+ * navigation.navigate('ChatRoom', { chatId: conversation.id });
+ * ```
+ */
+export async function getOrCreateConversation(
+  userA: string,
+  userB: string
+): Promise<{ id: string }> {
+  try {
+    // Generate deterministic conversationId (sorted alphabetically)
+    const conversationId = buildChatId(userA, userB);
+    const conversationRef = doc(db, 'conversations', conversationId);
+
+    // Check if conversation exists
+    const conversationSnap = await getDoc(conversationRef);
+
+    if (!conversationSnap.exists()) {
+      // Create conversation document
+      await setDoc(conversationRef, {
+        participants: [userA, userB],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        lastMessage: null,
+        lastMessageAt: null,
+        lastSenderId: null,
+      });
+    }
+
+    return { id: conversationId };
+  } catch (error: any) {
+    console.error('Error getting/creating conversation:', error);
+    throw { code: 'get-create-conversation-failed', message: 'Failed to get or create conversation' };
+  }
+}
 
 /**
  * Create a new conversation
@@ -310,6 +361,8 @@ export function listenToConversations(
   userId: string,
   callback: (conversations: any[]) => void
 ): () => void {
+  console.log('[MessagesAPI] Setting up conversations listener for userId:', userId);
+
   const conversationsRef = collection(db, 'conversations');
   const q = query(
     conversationsRef,
@@ -317,18 +370,45 @@ export function listenToConversations(
     orderBy('updatedAt', 'desc')
   );
 
-  return onSnapshot(
-    q,
-    { includeMetadataChanges: true },
-    (snapshot: any) => {
+  console.log('[MessagesAPI] Conversations query created, fetching initial data...');
+
+  // Force initial load with getDocs to ensure callback fires at least once
+  getDocs(q)
+    .then((snapshot: any) => {
+      console.log('[MessagesAPI] Initial conversations fetch complete! Docs count:', snapshot.docs.length);
       const conversations = snapshot.docs.map((doc: any) => ({
         id: doc.id,
         ...doc.data(),
       }));
+      console.log('[MessagesAPI] Calling callback with initial', conversations.length, 'conversations');
+      console.log('[MessagesAPI] Conversation IDs:', conversations.map(c => c.id));
+      callback(conversations);
+    })
+    .catch((error: any) => {
+      console.error('[MessagesAPI] Error fetching initial conversations:', error);
+      console.error('[MessagesAPI] Error code:', error?.code);
+      console.error('[MessagesAPI] Error message:', error?.message);
+      callback([]);
+    });
+
+  console.log('[MessagesAPI] Attaching onSnapshot for conversations real-time updates...');
+
+  return onSnapshot(
+    q,
+    { includeMetadataChanges: true },
+    (snapshot: any) => {
+      console.log('[MessagesAPI] Conversations snapshot received! Docs count:', snapshot.docs.length);
+      const conversations = snapshot.docs.map((doc: any) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      console.log('[MessagesAPI] Calling callback with', conversations.length, 'conversations');
       callback(conversations);
     },
     (error: any) => {
-      console.error('Error listening to conversations:', error);
+      console.error('[MessagesAPI] Error listening to conversations:', error);
+      console.error('[MessagesAPI] Error code:', error?.code);
+      console.error('[MessagesAPI] Error message:', error?.message);
       callback([]);
     }
   );
@@ -344,18 +424,43 @@ export function listenToMessages(
   conversationId: string,
   callback: (messages: Message[]) => void
 ): () => void {
+  console.log('[MessagesAPI] Setting up listener for conversationId:', conversationId);
+
   const messagesRef = collection(db, 'conversations', conversationId, 'messages');
   const q = query(messagesRef, orderBy('createdAt', 'desc'));
+
+  console.log('[MessagesAPI] Query created, fetching initial data...');
+
+  // Force initial load with getDocs to ensure callback fires at least once
+  getDocs(q)
+    .then((snapshot: any) => {
+      console.log('[MessagesAPI] Initial fetch complete! Docs count:', snapshot.docs.length);
+      const messages = snapshot.docs.map(normalizeMessage).reverse();
+      console.log('[MessagesAPI] Calling callback with initial', messages.length, 'messages');
+      callback(messages);
+    })
+    .catch((error: any) => {
+      console.error('[MessagesAPI] Error fetching initial messages:', error);
+      console.error('[MessagesAPI] Error code:', error?.code);
+      console.error('[MessagesAPI] Error message:', error?.message);
+      callback([]);
+    });
+
+  console.log('[MessagesAPI] Attaching onSnapshot for real-time updates...');
 
   return onSnapshot(
     q,
     { includeMetadataChanges: true },
     (snapshot: any) => {
+      console.log('[MessagesAPI] Snapshot received! Docs count:', snapshot.docs.length, 'hasPendingWrites:', snapshot.metadata?.hasPendingWrites);
       const messages = snapshot.docs.map(normalizeMessage).reverse();
+      console.log('[MessagesAPI] Calling callback with', messages.length, 'messages');
       callback(messages);
     },
     (error: any) => {
-      console.error('Error listening to messages:', error);
+      console.error('[MessagesAPI] Error listening to messages:', error);
+      console.error('[MessagesAPI] Error code:', error?.code);
+      console.error('[MessagesAPI] Error message:', error?.message);
       callback([]);
     }
   );

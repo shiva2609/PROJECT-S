@@ -1,5 +1,5 @@
 /**
- * Header Component for Sanchari Copilot
+ * Header Component for Ask Sanchari
  * 
  * Displays the app title with compass icon and subtitle
  */

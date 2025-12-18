@@ -33,7 +33,7 @@ import { useUser } from '../../global/hooks/useUser';
 import { useFollowStatus } from '../../global/hooks/useFollowStatus';
 import { useSavedPostsList } from '../../hooks/useSavedPostsList';
 import { useSession } from '../../core/session';
-import { getOrCreateChat } from '../../features/messages/services';
+import { getOrCreateConversation } from '../../services/chat/MessagesAPI';
 import ProfileSkeleton from '../../components/profile/ProfileSkeleton';
 
 export default function ProfileScreen({ navigation, route }: any) {
@@ -167,20 +167,20 @@ export default function ProfileScreen({ navigation, route }: any) {
       return;
     }
 
-    console.log('[ProfileScreen] Creating chat between:', sessionUserId, 'and', targetUserId);
+    console.log('[ProfileScreen] Creating conversation between:', sessionUserId, 'and', targetUserId);
     setCreatingChat(true);
     try {
-      // Create or get existing chat using deterministic chatId
-      const chat = await getOrCreateChat(sessionUserId, targetUserId);
-      console.log('[ProfileScreen] Chat created/retrieved:', chat.chatId);
+      // Create or get existing conversation using deterministic conversationId
+      const conversation = await getOrCreateConversation(sessionUserId, targetUserId);
+      console.log('[ProfileScreen] Conversation created/retrieved:', conversation.id);
 
       // SINGLE NAVIGATION CONTRACT: Only chatId is required
-      console.log('[ProfileScreen] Navigating to ChatRoom with chatId:', chat.chatId);
+      console.log('[ProfileScreen] Navigating to ChatRoom with chatId:', conversation.id);
       navigation?.navigate('ChatRoom', {
-        chatId: chat.chatId,
+        chatId: conversation.id,
       });
     } catch (error: any) {
-      console.error('[ProfileScreen] Error creating chat:', error);
+      console.error('[ProfileScreen] Error creating conversation:', error);
       // Show error to user
       if (error?.message) {
         console.error('[ProfileScreen] Error message:', error.message);

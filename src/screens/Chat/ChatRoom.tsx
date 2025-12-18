@@ -30,6 +30,10 @@ interface ChatRoomScreenProps {
   route: any;
 }
 
+// Header height constant for proper message list offset
+// Matches GlassHeader minHeight (56px) + safe area top padding
+const HEADER_HEIGHT = 56;
+
 /**
  * Chat Room Screen
  * 
@@ -78,10 +82,24 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
 
   // Listen to Chat (V2 API)
   useEffect(() => {
-    if (!chatId) return;
+    if (!chatId || !user?.uid) return;
+
+    console.log('[ChatRoom] Setting up listener for chatId:', chatId);
+
+    // Mark chat as read immediately when opening (don't wait for listener)
+    markChatAsRead(user.uid, chatId).catch(e => console.error('Failed to mark chat read on open:', e));
+
+    // Set loading false after a short delay to prevent infinite loading
+    // The listener will update messages when they arrive
+    const loadingTimeout = setTimeout(() => {
+      console.log('[ChatRoom] Loading timeout reached, setting loading=false');
+      setLoading(false);
+    }, 1000);
 
     // Use V2 listener with metadata changes (pending writes)
     const unsubscribe = listenToMessages(chatId, (newMessages) => {
+      console.log('[ChatRoom] Listener callback fired, messages count:', newMessages.length);
+
       // With includeMetadataChanges: true, this snapshot includes local pending writes.
       // Firestore `orderBy('createdAt', 'desc')` handles pending timestamps by placing them at the top (newest).
 
@@ -92,25 +110,55 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
 
       setMessages(reversed);
       setLoading(false);
+      clearTimeout(loadingTimeout);
 
-      // Updates Inbox unread state
-      if (user?.uid) {
-        markChatAsRead(user.uid, chatId).catch(e => console.error('Failed to mark chat read', e));
-      }
+      // Update read timestamp (in case new messages arrived while viewing)
+      markChatAsRead(user.uid, chatId).catch(e => console.error('Failed to mark chat read', e));
 
       // Mark unseen messages as seen/read
-      if (user?.uid) {
-        newMessages.forEach(msg => {
-          if (msg.from !== user.uid && !msg.read) {
-            setReadReceipt(chatId, msg.id, user.uid)
-              .catch(err => console.error('Failed to set read receipt:', err));
-          }
-        });
-      }
+      newMessages.forEach(msg => {
+        if (msg.from !== user.uid && !msg.read) {
+          setReadReceipt(chatId, msg.id, user.uid)
+            .catch(err => console.error('Failed to set read receipt:', err));
+        }
+      });
     });
 
-    return () => unsubscribe();
+    console.log('[ChatRoom] Listener setup complete');
+
+    return () => {
+      console.log('[ChatRoom] Cleaning up listener for chatId:', chatId);
+      clearTimeout(loadingTimeout);
+      unsubscribe();
+    };
   }, [chatId, user?.uid]);
+
+
+  // Auto-scroll to latest message when messages change
+  useEffect(() => {
+    if (messages.length > 0 && flatListRef.current && !loading) {
+      console.log('[ChatRoom] Auto-scrolling to latest message, count:', messages.length);
+      console.log('[ChatRoom] First message (latest):', messages[0]?.text?.substring(0, 50));
+
+      // For inverted FlatList, index 0 is the latest message
+      // Use a small delay to ensure FlatList has rendered
+      setTimeout(() => {
+        try {
+          console.log('[ChatRoom] Attempting scrollToIndex(0)');
+          flatListRef.current?.scrollToIndex({
+            index: 0,
+            animated: false, // Changed to false for immediate scroll
+            viewPosition: 0,
+          });
+          console.log('[ChatRoom] scrollToIndex successful');
+        } catch (error) {
+          console.log('[ChatRoom] scrollToIndex failed, using scrollToOffset');
+          // Fallback: scroll to offset 0 (top of inverted list = latest message)
+          flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+        }
+      }, 150); // Increased delay for better reliability
+    }
+  }, [messages, loading]); // Changed from messages.length to messages to fire on any change
 
   const handleSendText = useCallback(async () => {
     if (!messageText.trim() || !user?.uid || !chatId) return;
@@ -131,6 +179,11 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
     };
 
     setMessages(prev => [tempMessage, ...prev]);
+
+    // Scroll to show the new message immediately
+    setTimeout(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    }, 50);
 
     try {
       // V2 expects partial message object
@@ -194,16 +247,8 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
         title={username}
         showBack={true}
         onBack={() => navigation.goBack()}
-        actions={[
-          {
-            icon: 'call-outline',
-            onPress: () => Alert.alert('Info', 'Call feature coming soon'),
-          },
-          {
-            icon: 'videocam-outline',
-            onPress: () => Alert.alert('Info', 'Video call feature coming soon'),
-          },
-        ]}
+        // V1: No call/video icons - calling not supported
+        actions={[]}
       />
 
       <KeyboardAvoidingView
@@ -234,6 +279,13 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
             inverted={true}
             contentContainerStyle={styles.messagesList}
             showsVerticalScrollIndicator={false}
+            onScrollToIndexFailed={(info) => {
+              console.log('[ChatRoom] scrollToIndex failed, info:', info);
+              // Fallback to scrollToOffset
+              setTimeout(() => {
+                flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+              }, 100);
+            }}
           />
         )}
 
@@ -304,8 +356,8 @@ const styles = StyleSheet.create({
   },
   messagesList: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    paddingBottom: 20,
+    paddingBottom: HEADER_HEIGHT + 12, // For inverted list: paddingBottom creates space at visual TOP
+    paddingTop: 16, // Space at visual bottom (older messages)
   },
   typingContainer: {
     paddingHorizontal: 16,

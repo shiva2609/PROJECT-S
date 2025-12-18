@@ -38,7 +38,7 @@ export async function saveItineraryToFirestore(
 
     console.log('✅ Itinerary saved successfully. Document ID:', docRef.id);
 
-    // Also send to chat with Sanchari Copilot
+    // Also send to chat with Ask Sanchari
     try {
       await sendItineraryToChat(userId, itinerary, docRef.id);
       console.log('✅ Itinerary sent to chat successfully');

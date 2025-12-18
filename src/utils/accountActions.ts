@@ -28,62 +28,72 @@ export const handleLogout = (
   navigation: NavigationProp<any>,
   dispatch: AppDispatch
 ) => {
-  Alert.alert(
-    'Log Out',
-    'Are you sure you want to log out?',
-    [
-      {
-        text: 'Cancel',
-        style: 'cancel',
-      },
-      {
-        text: 'Log Out',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            // Get current user before signing out to remove push tokens
-            const currentUser = auth.currentUser;
-            const userId = currentUser?.uid;
+  console.log('🔵 [handleLogout] Function called');
 
-            // Remove push tokens before signing out (Best effort)
-            if (userId) {
-              try {
-                // Get current user's push tokens and remove all
-                const user = await UsersAPI.getUserById(userId);
-                if (user?.pushTokens && user.pushTokens.length > 0) {
-                  // Remove all push tokens for this user
-                  for (const token of user.pushTokens) {
-                    try {
-                      await UsersAPI.removePushToken(userId, token);
-                    } catch (tokenError) {
-                      console.warn('Failed to remove push token:', tokenError);
+  try {
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => console.log('🔵 [handleLogout] Cancel pressed'),
+        },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            console.log('🔵 [handleLogout] Log Out confirmed');
+            try {
+              // Get current user before signing out to remove push tokens
+              const currentUser = auth.currentUser;
+              const userId = currentUser?.uid;
+
+              // Remove push tokens before signing out (Best effort)
+              if (userId) {
+                try {
+                  // Get current user's push tokens and remove all
+                  const user = await UsersAPI.getUserById(userId);
+                  if (user?.pushTokens && user.pushTokens.length > 0) {
+                    // Remove all push tokens for this user
+                    for (const token of user.pushTokens) {
+                      try {
+                        await UsersAPI.removePushToken(userId, token);
+                      } catch (tokenError) {
+                        console.warn('Failed to remove push token:', tokenError);
+                      }
                     }
                   }
+                  console.log('✅ Removed push tokens');
+                } catch (pushTokenError: any) {
+                  console.error('❌ Push Token Error:', pushTokenError?.message);
+                  // Non-critical, continue with logout
                 }
-                console.log('✅ Removed push tokens');
-              } catch (pushTokenError: any) {
-                console.error('❌ Push Token Error:', pushTokenError?.message);
-                // Non-critical, continue with logout
               }
+
+              // Sign out from Firebase Auth - This triggers AuthProvider state change
+              await signOut();
+              console.log('✅ Signed out from Firebase Auth');
+
+              // NO manual navigation
+              // NO manual state clearing
+              // AuthProvider -> AppNavigator handles the transition
+
+            } catch (error: any) {
+              console.error('❌ Logout error:', error);
+              // Only show alert if something truly failed in the synchronous part
+              // But signOut is async, so we might not want to alert if UI already unmounted
             }
-
-            // Sign out from Firebase Auth - This triggers AuthProvider state change
-            await signOut();
-            console.log('✅ Signed out from Firebase Auth');
-
-            // NO manual navigation
-            // NO manual state clearing
-            // AuthProvider -> AppNavigator handles the transition
-
-          } catch (error: any) {
-            console.error('❌ Logout error:', error);
-            // Only show alert if something truly failed in the synchronous part
-            // But signOut is async, so we might not want to alert if UI already unmounted
-          }
+          },
         },
-      },
-    ]
-  );
+      ],
+      { cancelable: false } // Add options object for Android compatibility
+    );
+    console.log('🔵 [handleLogout] Alert.alert called successfully');
+  } catch (error) {
+    console.error('❌ [handleLogout] Error calling Alert.alert:', error);
+  }
 };
 
 /**
