@@ -196,13 +196,35 @@ export function useSuggestions(): UseSuggestionsReturn {
         setContactsProcessed(hasUploaded);
 
         if (hasPermission && hasUploaded) {
-          // Placeholder: In a real app, query backend for matches.
-          // For V1 UI verification, we keep it empty or could simulate if needed.
-          fetchedContacts = [];
+          console.log('📞 Fetching contact matches...');
+
+          // Get following IDs to exclude
+          const followingIds = await FollowService.getFollowingIds(user.uid);
+
+          // Find users who match contacts
+          const matches = await contactsService.findContactMatches(user.uid, followingIds);
+
+          // Transform to SuggestionUser format
+          fetchedContacts = matches.map((match): SuggestionUser => ({
+            id: match.id,
+            username: match.username || '',
+            displayName: match.displayName || match.username || '',
+            name: match.displayName || match.username || '',
+            avatarUri: match.photoURL || undefined,
+            profilePic: match.photoURL || undefined,
+            profilePhoto: match.photoURL || undefined,
+            isVerified: match.verified || false,
+            followerCount: match.followersCount || 0,
+            mutualFollowers: 0,
+            reason: 'mutual' as const,
+          }));
+
+          console.log(`✅ Found ${fetchedContacts.length} contact suggestions`);
         }
         setContactSuggestions(fetchedContacts);
       } catch (err) {
-        console.warn('Error fetching contact suggestions:', err);
+        console.warn('⚠️ Error fetching contact suggestions:', err);
+        setContactSuggestions([]);
       }
 
       // STEP 1: Fetch raw data in parallel

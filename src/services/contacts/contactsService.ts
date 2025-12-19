@@ -5,8 +5,8 @@
  */
 
 import { Platform, PermissionsAndroid, Alert } from 'react-native';
-import { db } from '../auth/authService';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { db } from '../../core/firebase';
+import { doc, updateDoc, getDoc } from '../../core/firebase/compat';
 
 // Use crypto-js for React Native compatibility
 let CryptoJS: any = null;
@@ -211,14 +211,27 @@ export async function readAndHashContacts(): Promise<string[]> {
  */
 export async function uploadContactsHashes(userId: string, hashedPhones: string[]): Promise<void> {
   try {
+    // Fail-fast guard: Validate userId
+    if (!userId || typeof userId !== 'string') {
+      throw new Error('AUTH_REQUIRED: Invalid user ID');
+    }
+
+    // Fail-fast guard: Validate hashes array
+    if (!Array.isArray(hashedPhones) || hashedPhones.length === 0) {
+      throw new Error('INVALID_DATA: Hashed contacts array is empty or invalid');
+    }
+
+    console.log(`📤 Uploading ${hashedPhones.length} hashed contacts for user ${userId}`);
+
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, {
       contactsHash: hashedPhones,
       contactsHashUpdatedAt: Date.now(),
     });
+
     console.log(`✅ Uploaded ${hashedPhones.length} hashed contacts for user ${userId}`);
   } catch (error) {
-    console.error('Error uploading contacts hashes:', error);
+    console.error('❌ Error uploading contacts hashes:', error);
     throw error;
   }
 }
@@ -228,6 +241,11 @@ export async function uploadContactsHashes(userId: string, hashedPhones: string[
  */
 export async function removeContactsHashes(userId: string): Promise<void> {
   try {
+    // Fail-fast guard: Validate userId
+    if (!userId || typeof userId !== 'string') {
+      throw new Error('AUTH_REQUIRED: Invalid user ID');
+    }
+
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, {
       contactsHash: [],
@@ -235,7 +253,7 @@ export async function removeContactsHashes(userId: string): Promise<void> {
     });
     console.log(`✅ Removed contacts hashes for user ${userId}`);
   } catch (error) {
-    console.error('Error removing contacts hashes:', error);
+    console.error('❌ Error removing contacts hashes:', error);
     throw error;
   }
 }
@@ -245,15 +263,106 @@ export async function removeContactsHashes(userId: string): Promise<void> {
  */
 export async function hasUploadedContacts(userId: string): Promise<boolean> {
   try {
+    // Fail-fast guard: Validate userId
+    if (!userId || typeof userId !== 'string') {
+      console.warn('⚠️ Invalid user ID provided to hasUploadedContacts');
+      return false;
+    }
+
     const userRef = doc(db, 'users', userId);
     const userDoc = await getDoc(userRef);
     if (!userDoc.exists()) return false;
 
     const data = userDoc.data();
     return Array.isArray(data.contactsHash) && data.contactsHash.length > 0;
-  } catch (error) {
-    console.error('Error checking uploaded contacts:', error);
+  } catch (error: any) {
+    console.error('❌ Error checking uploaded contacts:', error);
     return false;
+  }
+}
+
+/**
+ * Find users who match the current user's contacts
+ * Queries users collection for matching hashed phone numbers
+ */
+export async function findContactMatches(
+  userId: string,
+  excludeUserIds: string[] = []
+): Promise<any[]> {
+  try {
+    // Fail-fast guard: Validate userId
+    if (!userId || typeof userId !== 'string') {
+      console.warn('⚠️ Invalid user ID provided to findContactMatches');
+      return [];
+    }
+
+    // Get current user's hashed contacts
+    const userRef = doc(db, 'users', userId);
+    const userDoc = await getDoc(userRef);
+
+    if (!userDoc.exists()) {
+      console.warn('⚠️ User document not found');
+      return [];
+    }
+
+    const userData = userDoc.data();
+    const userHashes = userData.contactsHash;
+
+    // Validate hashes array
+    if (!Array.isArray(userHashes) || userHashes.length === 0) {
+      console.log('ℹ️ No contact hashes to match');
+      return [];
+    }
+
+    console.log(`🔍 Searching for matches among ${userHashes.length} hashed contacts`);
+
+    // Import query and where from compat layer
+    const { collection: firestoreCollection, query, where, getDocs } = await import('../../core/firebase/compat');
+
+    // Query users whose contactsHash contains any of the user's hashes
+    // Note: Firestore 'array-contains-any' supports up to 10 values
+    // We'll batch if needed
+    const batchSize = 10;
+    const allMatches: any[] = [];
+    const seenUserIds = new Set<string>();
+
+    for (let i = 0; i < userHashes.length; i += batchSize) {
+      const hashBatch = userHashes.slice(i, i + batchSize);
+
+      const usersRef = firestoreCollection(db, 'users');
+      const q = query(
+        usersRef,
+        where('contactsHash', 'array-contains-any', hashBatch)
+      );
+
+      const querySnapshot = await getDocs(q);
+
+      querySnapshot.forEach((doc: any) => {
+        const matchedUserId = doc.id;
+
+        // Exclude current user and already seen users
+        if (matchedUserId === userId || seenUserIds.has(matchedUserId)) {
+          return;
+        }
+
+        // Exclude users in excludeUserIds list
+        if (excludeUserIds.includes(matchedUserId)) {
+          return;
+        }
+
+        seenUserIds.add(matchedUserId);
+        allMatches.push({
+          id: matchedUserId,
+          ...doc.data(),
+        });
+      });
+    }
+
+    console.log(`✅ Found ${allMatches.length} contact matches`);
+    return allMatches;
+  } catch (error: any) {
+    console.error('❌ Error finding contact matches:', error);
+    return [];
   }
 }
 
