@@ -19,10 +19,9 @@ import {
 import { launchImageLibrary, launchCamera, MediaType } from 'react-native-image-picker';
 import { colors } from '../../utils/colors';
 import { uploadImageAsync, createPost, createReel } from '../../services/api/firebaseService';
-import { db } from '../../services/auth/authService';
-import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../core/firebase';
+import { doc, getDoc } from '../../core/firebase/compat';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { requireAuth } from '../../utils/authUtils';
 import { useAuth } from '../../providers/AuthProvider';
 import { useNavigation } from '@react-navigation/native';
 import { navigateToScreen } from '../../utils/navigationHelpers';
@@ -41,7 +40,7 @@ export default function PostAndReelCreator({ accountType, onClose, navigation: n
   const [caption, setCaption] = useState('');
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  
+
   // Wait for auth initialization
   if (!initialized || !user) {
     return null;
@@ -119,16 +118,23 @@ export default function PostAndReelCreator({ accountType, onClose, navigation: n
 
     setUploading(true);
     try {
-      // Upload media
-      const mediaPath = `${mode}s/${user.uid}/${Date.now()}.${mode === 'post' ? 'jpg' : 'mp4'}`;
-      const mediaUrl = await uploadImageAsync({ uri: mediaUri, path: mediaPath });
+      // Upload media with strict strict contract: ({ uri }, userId, folder)
+      // folder will be 'posts' or 'reels' based on mode
+      const mediaUrl = await uploadImageAsync(
+        { uri: mediaUri },
+        user.uid,
+        `${mode}s`
+      );
 
-      // Get username from Firestore
+      // Get user details
       let username = 'user';
+      let userAvatar = null;
       try {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (userDoc.exists()) {
-          username = userDoc.data().username || user.email?.split('@')[0] || 'user';
+          const data = userDoc.data();
+          username = data.username || user.email?.split('@')[0] || 'user';
+          userAvatar = data.profilePhoto || data.photoURL || null;
         }
       } catch (e) {
         // Fallback to email
@@ -140,6 +146,7 @@ export default function PostAndReelCreator({ accountType, onClose, navigation: n
         await createPost({
           userId: user.uid,
           username,
+          userAvatar,
           imageUrl: mediaUrl,
           caption: caption.trim(),
         });
@@ -148,6 +155,7 @@ export default function PostAndReelCreator({ accountType, onClose, navigation: n
         await createReel({
           userId: user.uid,
           username,
+          userAvatar,
           videoUrl: mediaUrl,
           caption: caption.trim(),
         });
@@ -156,7 +164,7 @@ export default function PostAndReelCreator({ accountType, onClose, navigation: n
       Alert.alert('Success', `${mode === 'post' ? 'Post' : 'Reel'} created successfully!`, [
         { text: 'OK', onPress: onClose },
       ]);
-      
+
       // Reset form
       setCaption('');
       setMediaUri(null);

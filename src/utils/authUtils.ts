@@ -8,7 +8,7 @@
 
 import { Alert } from 'react-native';
 import { auth } from '../services/auth/authService';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged } from '../core/firebase/compat';
 
 /**
  * Wait for Firebase Auth to initialize
@@ -17,7 +17,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 function waitForAuthInitialization(): Promise<boolean> {
   return new Promise((resolve) => {
     console.log('⏳ Waiting for auth initialization...');
-    
+
     // If auth is already initialized and user exists, resolve immediately
     if (auth.currentUser) {
       console.log('✅ Auth already initialized with user:', auth.currentUser.uid);
@@ -105,19 +105,19 @@ export async function requireAuth(action: string, contextUser?: any): Promise<bo
     console.log('✅ User verified from AuthContext:', contextUser.uid);
     return true;
   }
-  
+
   // Fallback: Wait for auth to initialize and check web SDK
   await waitForAuthInitialization();
-  
+
   // Small delay to ensure auth state is stable
   await new Promise(resolve => setTimeout(resolve, 200));
-  
+
   const user = auth.currentUser;
-  
+
   console.log('🔑 Current User (web SDK):', user?.uid || 'None');
   console.log('🔑 Auth state check - User exists:', !!user);
   console.log('🔑 Context User exists:', contextUser !== null && contextUser !== undefined);
-  
+
   if (!user) {
     console.error('❌ Auth check failed - No user found');
     console.error('   - auth.currentUser:', auth.currentUser);
@@ -129,7 +129,7 @@ export async function requireAuth(action: string, contextUser?: any): Promise<bo
     );
     return false;
   }
-  
+
   console.log('✅ User verified:', user.uid);
   return true;
 }

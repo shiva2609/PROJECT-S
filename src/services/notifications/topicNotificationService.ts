@@ -16,8 +16,9 @@ import {
   getDocs,
   serverTimestamp,
   Timestamp,
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
+  writeBatch
+} from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { incrementNotificationCount } from './notificationService';
 
 // Notification types
@@ -39,7 +40,7 @@ export async function createTopicReminderNotification(
 ): Promise<string> {
   try {
     const notificationsRef = collection(db, 'notifications');
-    
+
     const notificationData = {
       userId,
       type: NOTIFICATION_TYPE_TOPIC_REMINDER,
@@ -84,7 +85,7 @@ export async function markTopicReminderAsRead(
 ): Promise<void> {
   try {
     const notificationsRef = collection(db, 'notifications');
-    
+
     if (notificationId) {
       // Mark specific notification
       const notificationRef = doc(notificationsRef, notificationId);
@@ -100,17 +101,17 @@ export async function markTopicReminderAsRead(
         where('type', '==', NOTIFICATION_TYPE_TOPIC_REMINDER),
         where('read', '==', false)
       );
-      
+
       const snapshot = await getDocs(q);
-      const batch = await import('firebase/firestore').then(m => m.writeBatch(db));
-      
+      const batch = writeBatch(db);
+
       snapshot.forEach((doc) => {
         batch.update(doc.ref, {
           read: true,
           readAt: serverTimestamp(),
         });
       });
-      
+
       await batch.commit();
     }
 
@@ -134,14 +135,14 @@ export async function removeTopicReminderNotification(userId: string): Promise<v
       where('userId', '==', userId),
       where('type', '==', NOTIFICATION_TYPE_TOPIC_REMINDER)
     );
-    
+
     const snapshot = await getDocs(q);
-    const batch = await import('firebase/firestore').then(m => m.writeBatch(db));
-    
+    const batch = writeBatch(db);
+
     snapshot.forEach((doc) => {
       batch.delete(doc.ref);
     });
-    
+
     await batch.commit();
     console.log('✅ Topic reminder notification(s) removed');
   } catch (error: any) {
@@ -165,20 +166,20 @@ export async function getPendingActionNotifications(userId: string): Promise<any
       where('category', '==', NOTIFICATION_CATEGORY_PENDING_ACTIONS),
       where('read', '==', false)
     );
-    
+
     const snapshot = await getDocs(q);
     const notifications = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
-    
+
     // Sort by timestamp (newest first)
     notifications.sort((a, b) => {
       const timeA = a.timestamp || a.createdAt?.toMillis?.() || 0;
       const timeB = b.timestamp || b.createdAt?.toMillis?.() || 0;
       return timeB - timeA;
     });
-    
+
     return notifications;
   } catch (error: any) {
     console.error('❌ Error getting pending action notifications:', error);
@@ -204,15 +205,15 @@ async function triggerTopicReminderPushNotification(
     try {
       // Check if @react-native-firebase/messaging is available
       const messaging = require('@react-native-firebase/messaging').default;
-      
+
       // Get FCM token for user (you may need to store this in Firestore)
       const userDocRef = doc(db, 'users', userId);
       const userDoc = await getDoc(userDocRef);
-      
+
       if (userDoc.exists()) {
         const userData = userDoc.data();
         const fcmToken = userData.fcmToken;
-        
+
         if (fcmToken) {
           // Send via FCM (requires backend or Cloud Functions)
           // For now, we'll use local notifications as fallback
@@ -228,7 +229,7 @@ async function triggerTopicReminderPushNotification(
     try {
       // Try Expo Notifications
       const Notifications = require('expo-notifications');
-      
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title,
@@ -243,7 +244,7 @@ async function triggerTopicReminderPushNotification(
         },
         trigger: null, // Show immediately
       });
-      
+
       console.log('✅ Local notification scheduled (Expo)');
     } catch (expoError) {
       // Expo Notifications not available, try React Native's Alert

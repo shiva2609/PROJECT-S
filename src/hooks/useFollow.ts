@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { db } from '../services/auth/authService';
+import { db } from '../core/firebase';
 import {
   collection,
   doc,
@@ -17,10 +17,10 @@ import {
   updateDoc,
   increment,
   onSnapshot,
-} from 'firebase/firestore';
+  serverTimestamp,
+} from '../core/firebase/compat';
 import { useAuth } from '../providers/AuthProvider';
 import { Alert } from 'react-native';
-import { serverTimestamp } from 'firebase/firestore';
 
 export interface FollowState {
   isFollowing: boolean;
@@ -96,11 +96,11 @@ export function useFollow(targetUserId: string) {
       await runTransaction(db, async (transaction) => {
         const currentUserRef = doc(db, 'users', user.uid);
         const targetUserRef = doc(db, 'users', targetUserId);
-        
+
         transaction.update(currentUserRef, {
           followingCount: increment(1),
         });
-        
+
         transaction.update(targetUserRef, {
           followersCount: increment(1),
         });
@@ -140,10 +140,10 @@ export function useFollow(targetUserId: string) {
       await runTransaction(db, async (transaction) => {
         const currentUserRef = doc(db, 'users', user.uid);
         const targetUserRef = doc(db, 'users', targetUserId);
-        
+
         const currentUserDoc = await transaction.get(currentUserRef);
         const targetUserDoc = await transaction.get(targetUserRef);
-        
+
         if (currentUserDoc.exists()) {
           const currentCount = currentUserDoc.data().followingCount || 0;
           transaction.update(currentUserRef, {

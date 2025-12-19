@@ -17,9 +17,9 @@ import {
   serverTimestamp,
   onSnapshot,
   Unsubscribe,
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../services/auth/authService';
+} from '../core/firebase/compat';
+import { ref, uploadBytes, getDownloadURL } from '../core/firebase/compat';
+import { db, storage } from '../core/firebase';
 import { AccountType } from '../types/account';
 import {
   PendingAccountChange,
@@ -50,11 +50,11 @@ export interface UseKYCManagerReturn {
   submitAccountChange: (uid: string, requestId: string) => Promise<void>;
   abortPendingChange: (uid: string) => Promise<void>;
   listenToRequestStatus: (requestId: string, callback: (status: PendingStatus) => void) => Unsubscribe;
-  
+
   // Validation
   validateStep: (step: VerificationStep, formData: Record<string, any>, uploadedDoc?: UploadedDoc) => ValidationResult;
   canSubmit: (uid: string) => Promise<{ canSubmit: boolean; missingSteps: string[] }>;
-  
+
   // Status checks
   getPendingChange: (uid: string) => Promise<PendingAccountChange | null>;
   hasPendingChange: (uid: string) => Promise<boolean>;
@@ -98,9 +98,9 @@ export function useKYCManager(): UseKYCManagerReturn {
 
       // Check if there's already a pending change (safely handle missing property)
       const existingPendingChange = userData.pendingAccountChange;
-      if (existingPendingChange && 
-          (existingPendingChange.status === 'in_progress' || 
-           existingPendingChange.status === 'submitted')) {
+      if (existingPendingChange &&
+        (existingPendingChange.status === 'in_progress' ||
+          existingPendingChange.status === 'submitted')) {
         const existingRequestId = existingPendingChange.requestId;
         if (existingRequestId) {
           Alert.alert(
@@ -148,23 +148,23 @@ export function useKYCManager(): UseKYCManagerReturn {
       }
     } catch (error: any) {
       console.error('❌ Error starting pending account change:', error);
-      
+
       // Provide user-friendly error messages
       let errorMessage = 'Failed to start account change process. Please try again.';
-      
+
       if (error.code === 'permission-denied') {
         errorMessage = 'You do not have permission to change your account type. Please contact support.';
       } else if (error.code === 'unavailable') {
         errorMessage = 'Service is temporarily unavailable. Please check your connection and try again.';
       } else if (error.message) {
         // Only show technical error if it's user-friendly
-        if (error.message.includes('not found') || 
-            error.message.includes('network') ||
-            error.message.includes('connection')) {
+        if (error.message.includes('not found') ||
+          error.message.includes('network') ||
+          error.message.includes('connection')) {
           errorMessage = error.message;
         }
       }
-      
+
       Alert.alert('Error', errorMessage, [{ text: 'OK' }]);
       return null;
     } finally {
@@ -329,7 +329,7 @@ export function useKYCManager(): UseKYCManagerReturn {
       // Mark step as completed if it has all required form data (files are optional)
       const step = pendingChange.requiredSteps.find(s => s.key === stepKey);
       const stepData = pendingChange.stepData[stepKey] || { stepKey, completed: false };
-      
+
       const isStepComplete = step
         ? (!step.fields || step.fields.every(f => !f.required || stepData.formData?.[f.key]))
         : true;
@@ -354,9 +354,9 @@ export function useKYCManager(): UseKYCManagerReturn {
       return downloadURL;
     } catch (error: any) {
       console.error('❌ Error uploading document:', error);
-      
+
       let errorMessage = 'Failed to upload document. Please try again.';
-      
+
       if (error.message?.includes('size')) {
         errorMessage = 'File size exceeds the 10MB limit. Please choose a smaller file.';
       } else if (error.message?.includes('type') || error.message?.includes('format')) {
@@ -367,13 +367,13 @@ export function useKYCManager(): UseKYCManagerReturn {
         errorMessage = 'Upload was canceled. Please try again.';
       } else if (error.message) {
         // Only show technical message if it's user-friendly
-        if (error.message.includes('network') || 
-            error.message.includes('connection') ||
-            error.message.includes('offline')) {
+        if (error.message.includes('network') ||
+          error.message.includes('connection') ||
+          error.message.includes('offline')) {
           errorMessage = 'Please check your internet connection and try again.';
         }
       }
-      
+
       Alert.alert('Upload Error', errorMessage, [{ text: 'OK' }]);
       throw error;
     } finally {
@@ -482,9 +482,9 @@ export function useKYCManager(): UseKYCManagerReturn {
       };
     } catch (error: any) {
       console.error('❌ Error checking submit status:', error);
-      return { 
-        canSubmit: false, 
-        missingSteps: ['Unable to verify submission status. Please try again.'] 
+      return {
+        canSubmit: false,
+        missingSteps: ['Unable to verify submission status. Please try again.']
       };
     }
   }, [validateStep]);
@@ -582,9 +582,9 @@ export function useKYCManager(): UseKYCManagerReturn {
       );
     } catch (error: any) {
       console.error('❌ Error submitting account change:', error);
-      
+
       let errorMessage = 'Failed to submit account change. Please try again.';
-      
+
       if (error.message?.includes('incomplete')) {
         errorMessage = error.message; // Use the validation message
       } else if (error.code === 'permission-denied') {
@@ -598,7 +598,7 @@ export function useKYCManager(): UseKYCManagerReturn {
       )) {
         errorMessage = 'Please check your internet connection and try again.';
       }
-      
+
       Alert.alert('Error', errorMessage, [{ text: 'OK' }]);
       throw error;
     } finally {
@@ -638,18 +638,18 @@ export function useKYCManager(): UseKYCManagerReturn {
     callback: (status: PendingStatus) => void
   ): Unsubscribe => {
     const requestRef = doc(db, 'upgrade_requests', requestId);
-    
+
     return onSnapshot(requestRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
         const status = data.status as 'pending' | 'approved' | 'rejected';
-        
+
         // Map upgrade_requests status to pending status
-        const pendingStatus: PendingStatus = 
+        const pendingStatus: PendingStatus =
           status === 'approved' ? 'approved' :
-          status === 'rejected' ? 'rejected' :
-          'submitted';
-        
+            status === 'rejected' ? 'rejected' :
+              'submitted';
+
         callback(pendingStatus);
       }
     });
@@ -688,10 +688,10 @@ export function useKYCManager(): UseKYCManagerReturn {
    */
   const hasPendingChange = useCallback(async (uid: string): Promise<boolean> => {
     const pending = await getPendingChange(uid);
-    return pending !== null && 
-           (pending.status === 'in_progress' || 
-            pending.status === 'submitted' || 
-            pending.status === 'incomplete');
+    return pending !== null &&
+      (pending.status === 'in_progress' ||
+        pending.status === 'submitted' ||
+        pending.status === 'incomplete');
   }, [getPendingChange]);
 
   return {

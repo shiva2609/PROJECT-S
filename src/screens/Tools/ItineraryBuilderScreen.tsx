@@ -1,5 +1,5 @@
 /**
- * Sanchari Copilot - Itinerary Builder Screen
+ * Ask Sanchari - Itinerary Builder Screen
  * 
  * Complete AI-powered itinerary planning interface with chat UI
  * UI/UX polish only. No logic modified.

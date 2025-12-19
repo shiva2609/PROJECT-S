@@ -229,25 +229,25 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
       console.log('✅ [ProfilePhotoCropScreen] Profile photo bitmap generated:', finalImageUri.substring(0, 50) + '...');
 
       // Return final image to EditProfileScreen
-      // Navigate back and pass the final image URI
-      navigation.navigate('EditProfile', {
+      // Use replace() to remove this crop screen from stack
+      navigation.replace('EditProfile', {
         finalProfilePhoto: finalImageUri,
       });
     } catch (error: any) {
       setCropping(false);
       console.error('❌ [ProfilePhotoCropScreen] Error generating bitmap:', error);
-      
+
       // If user cancelled, just go back
       if (error.message?.includes('cancelled') || error.message?.includes('cancel')) {
         navigation.goBack();
         return;
       }
-      
+
       // Even if cropping fails, try to upload the original image
       console.log('⚠️ [ProfilePhotoCropScreen] Cropping failed, using original image for upload');
       try {
-        navigation.navigate('EditProfile', {
-          finalProfilePhoto: imageUri, // Use original image if cropping fails
+        navigation.replace('EditProfile', {
+          finalProfilePhoto: imageUri,
         });
       } catch (navError) {
         Alert.alert('Error', error.message || 'Failed to process profile photo', [

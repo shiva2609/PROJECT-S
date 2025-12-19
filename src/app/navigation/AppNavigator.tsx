@@ -53,7 +53,6 @@ import CropAdjustScreen from '../../screens/Create/CropAdjustScreen';
 import ProfilePhotoCropScreen from '../../screens/Account/ProfilePhotoCropScreen';
 import FollowersScreen from '../../screens/Account/FollowersScreen';
 import BlockedUsersScreen from '../../screens/Account/BlockedUsersScreen'; // V1 MODERATION
-import AddPostDetailsScreen from '../../screens/Create/AddPostDetailsScreen';
 import PostPreviewScreen from '../../screens/Create/PostPreviewScreen';
 import CreatePostScreen from '../../screens/Create/CreatePostScreen';
 import CreateReelScreen from '../../screens/Create/CreateReelScreen';
@@ -102,62 +101,20 @@ export function Tabs() {
   );
 }
 
+import { useBootGate } from '../../providers/BootGate';
+
+// ... imports
+
 export default function AppNavigator() {
-  const { user, initialized, loading, userProfile } = useAuth();
+  const { user } = useAuth();
+  const { isAppReady } = useBootGate();
 
-  // Wait for Firebase Auth to initialize before rendering routes
-  // Wait for Firebase Auth to initialize AND user profile to load
-  // Determine if we are in a loading state
-  const isGlobalLoading = !initialized || loading || (user && !userProfile);
-  const [isSlowConnection, setIsSlowConnection] = React.useState(false);
+  // Legacy loading logic removed as BootGate handles global loading state.
+  // The navigator is only mounted when BootGate allows it (APP_READY or NEW_USER).
 
-  // Safety Timeout: If loading takes too long (> 8s), warn the user and offer logout
-  React.useEffect(() => {
-    let timeout: NodeJS.Timeout;
-    if (isGlobalLoading) {
-      timeout = setTimeout(() => {
-        setIsSlowConnection(true);
-      }, 8000); // 8 seconds timeout
-    } else {
-      setIsSlowConnection(false);
-    }
-    return () => clearTimeout(timeout);
-  }, [isGlobalLoading]);
-
-  // Wait for Firebase Auth to initialize AND user profile to load
-  if (isGlobalLoading) {
-    if (isSlowConnection) {
-      return (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background, padding: 20 }}>
-          <Icon name="alert-circle-outline" size={48} color={colors.danger || '#ff0000'} />
-          <Text style={{ marginTop: 16, fontSize: 16, textAlign: 'center', color: colors.text }}>
-            Taking longer than usual to load your profile...
-          </Text>
-          <TouchableOpacity
-            style={{ marginTop: 20, padding: 12, backgroundColor: colors.primary, borderRadius: 8 }}
-            onPress={() => auth.signOut()}
-          >
-            <Text style={{ color: 'white', fontWeight: 'bold' }}>Log Out & Retry</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
-
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
-
-  // Determine initial route based on user profile
-  // If user has a travel plan or completed onboarding, go to MainTabs
-  // Otherwise, go to TravelPlanSelect (Onboarding)
-  const initialRouteName = !user
-    ? "Splash"
-    : ((userProfile?.travelPlan?.length ?? 0) > 0 || userProfile?.onboardingComplete)
-      ? "MainTabs"
-      : "TravelPlanSelect";
+  // Determine initial route based on explicit user state
+  // Route all users (new or existing) to MainTabs
+  const initialRouteName = !user ? "Splash" : "MainTabs";
 
   return (
     <CreateFlowProvider>
@@ -203,10 +160,8 @@ export default function AppNavigator() {
               <Stack.Screen name="AuthPasswordChanged" component={PasswordChangedScreen} />
             </>
           ) : (
+            // Authenticated User - Main App
             <>
-              {/* Travel Select */}
-              <Stack.Screen name="TravelPlanSelect" component={TravelPlanSelectScreen} />
-
               {/* Main Tabs - wrapped with Drawer */}
               <Stack.Screen name="MainTabs" component={DrawerNavigator} />
               <Stack.Screen name="Home" component={HomeScreen} />
@@ -246,7 +201,6 @@ export default function AppNavigator() {
                   gestureEnabled: true,
                 }}
               />
-
               {/* KYC Verification Screens */}
               <Stack.Screen
                 name="HostVerification"
@@ -353,14 +307,6 @@ export default function AppNavigator() {
                 }}
               />
               <Stack.Screen
-                name="AddPostDetails"
-                component={AddPostDetailsScreen}
-                options={{
-                  headerShown: false,
-                  gestureEnabled: true,
-                }}
-              />
-              <Stack.Screen
                 name="PhotoSelect"
                 component={PhotoSelectScreen}
                 options={{
@@ -368,7 +314,6 @@ export default function AppNavigator() {
                   gestureEnabled: true,
                 }}
               />
-              {/* PostPreview kept for manual preview only - not used in create flow */}
               <Stack.Screen
                 name="PostPreview"
                 component={PostPreviewScreen}
@@ -377,7 +322,6 @@ export default function AppNavigator() {
                   gestureEnabled: true,
                 }}
               />
-              {/* New Create Post Flow */}
               <Stack.Screen
                 name="CreatePost"
                 component={CreatePostScreen}

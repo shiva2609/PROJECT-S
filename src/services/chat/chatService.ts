@@ -4,16 +4,19 @@
  * Handles sending itineraries to user's chat with Sanchari Copilot
  */
 
-import { 
-  collection, 
-  doc, 
-  setDoc, 
-  addDoc, 
+import {
+  collection,
+  doc,
+  setDoc,
+  addDoc,
   serverTimestamp,
-  getDoc 
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
-import { ItineraryResponse } from './generateItinerary';
+  getDoc,
+  getDocs,
+  query,
+  orderBy
+} from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
+import { ItineraryResponse } from '../itinerary/generateItinerary';
 
 const COPILOT_ID = 'sanchari-copilot';
 const COPILOT_NAME = 'Sanchari Copilot';
@@ -23,22 +26,23 @@ const COPILOT_NAME = 'Sanchari Copilot';
  */
 function formatItineraryMessage(itinerary: ItineraryResponse): string {
   let message = `📍 *${itinerary.title}*\n\n`;
-  
+
   if (itinerary.summary) {
     message += `${itinerary.summary}\n\n`;
   }
-  
+
   const days = Object.keys(itinerary.itinerary).sort();
-  
+
   for (const dayKey of days) {
     const day = itinerary.itinerary[dayKey];
+    if (!day) continue;
     message += `🗓️ ${day.title}\n`;
     if (day.morning) message += `☀️ Morning: ${day.morning}\n`;
     if (day.afternoon) message += `🌇 Afternoon: ${day.afternoon}\n`;
     if (day.evening) message += `🌙 Evening: ${day.evening}\n`;
     message += `\n`;
   }
-  
+
   return message.trim();
 }
 
@@ -48,7 +52,7 @@ function formatItineraryMessage(itinerary: ItineraryResponse): string {
 async function ensureCopilotChat(userId: string): Promise<void> {
   const chatRef = doc(db, 'users', userId, 'chats', COPILOT_ID);
   const chatDoc = await getDoc(chatRef);
-  
+
   if (!chatDoc.exists()) {
     await setDoc(chatRef, {
       chatWith: COPILOT_NAME,
@@ -117,12 +121,12 @@ export async function sendItineraryToChat(
  */
 export async function getCopilotChatMessages(userId: string) {
   try {
-    const { getDocs, query, orderBy } = await import('firebase/firestore');
+    // const { getDocs, query, orderBy } = await import('firebase/firestore'); // Removed dynamic import
     const messagesRef = collection(db, 'users', userId, 'chats', COPILOT_ID, 'messages');
     const q = query(messagesRef, orderBy('timestamp', 'desc'));
     const snapshot = await getDocs(q);
-    
-    return snapshot.docs.map((doc) => ({
+
+    return snapshot.docs.map((doc: any) => ({
       id: doc.id,
       ...doc.data(),
     }));

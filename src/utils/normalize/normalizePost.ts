@@ -6,7 +6,7 @@
  * CRITICAL: Always ensures createdAt exists to prevent orderBy errors
  */
 
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '../../core/firebase/compat';
 import { Post } from '../../types/firestore';
 
 /**
@@ -69,12 +69,12 @@ export function normalizePost(raw: any): Post {
   const createdAt = raw.createdAt ? toTimestamp(raw.createdAt) : Timestamp.now();
 
   // Extract media URL
-  const imageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || 
-                   raw.coverImage || 
-                   (Array.isArray(raw.media) && raw.media[0]) ||
-                   (Array.isArray(raw.mediaUrls) && raw.mediaUrls[0]) ||
-                   (Array.isArray(raw.gallery) && raw.gallery[0]) ||
-                   null;
+  const imageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl ||
+    raw.coverImage ||
+    (Array.isArray(raw.media) && raw.media[0]) ||
+    (Array.isArray(raw.mediaUrls) && raw.mediaUrls[0]) ||
+    (Array.isArray(raw.gallery) && raw.gallery[0]) ||
+    null;
 
   // Extract gallery
   let gallery: string[] = [];
@@ -98,14 +98,14 @@ export function normalizePost(raw: any): Post {
     gallery: gallery.length > 0 ? gallery : undefined,
     media: Array.isArray(raw.media) ? raw.media : undefined,
     mediaUrls: Array.isArray(raw.mediaUrls) ? raw.mediaUrls : undefined,
-    likeCount: typeof raw.likeCount === 'number' ? Math.max(0, raw.likeCount) : 
-               (typeof raw.likesCount === 'number' ? Math.max(0, raw.likesCount) : 0),
-    likesCount: typeof raw.likesCount === 'number' ? Math.max(0, raw.likesCount) : 
-                (typeof raw.likeCount === 'number' ? Math.max(0, raw.likeCount) : 0),
-    commentCount: typeof raw.commentCount === 'number' ? Math.max(0, raw.commentCount) : 
-                  (typeof raw.commentsCount === 'number' ? Math.max(0, raw.commentsCount) : 0),
-    commentsCount: typeof raw.commentsCount === 'number' ? Math.max(0, raw.commentsCount) : 
-                   (typeof raw.commentCount === 'number' ? Math.max(0, raw.commentCount) : 0),
+    likeCount: typeof raw.likeCount === 'number' ? Math.max(0, raw.likeCount) :
+      (typeof raw.likesCount === 'number' ? Math.max(0, raw.likesCount) : 0),
+    likesCount: typeof raw.likesCount === 'number' ? Math.max(0, raw.likesCount) :
+      (typeof raw.likeCount === 'number' ? Math.max(0, raw.likeCount) : 0),
+    commentCount: typeof raw.commentCount === 'number' ? Math.max(0, raw.commentCount) :
+      (typeof raw.commentsCount === 'number' ? Math.max(0, raw.commentsCount) : 0),
+    commentsCount: typeof raw.commentsCount === 'number' ? Math.max(0, raw.commentsCount) :
+      (typeof raw.commentCount === 'number' ? Math.max(0, raw.commentCount) : 0),
     savedCount: typeof raw.savedCount === 'number' ? Math.max(0, raw.savedCount) : undefined,
     caption: raw.caption || raw.content || '',
     content: raw.content || raw.caption || undefined,

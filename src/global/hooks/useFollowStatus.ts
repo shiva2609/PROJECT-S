@@ -8,8 +8,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as FollowService from '../services/follow/follow.service';
 import { sendNotification, sendFollowNotification, removeFollowNotification } from '../../services/notifications/NotificationAPI';
-import { db } from '../../services/auth/authService';
-import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../core/firebase';
+import { doc, getDoc } from '../../core/firebase/compat';
 
 interface UseFollowStatusReturn {
   isFollowing: boolean;

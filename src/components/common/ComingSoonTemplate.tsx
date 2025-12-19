@@ -11,14 +11,27 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 
+import { useNavigation } from '@react-navigation/native';
+import { TouchableOpacity } from 'react-native';
+
 interface ComingSoonTemplateProps {
   title: string;
   subtitle?: string;
+  showBackButton?: boolean;
 }
 
-export function ComingSoonTemplate({ title, subtitle }: ComingSoonTemplateProps) {
+export function ComingSoonTemplate({ title, subtitle, showBackButton }: ComingSoonTemplateProps) {
+  const navigation = useNavigation<any>();
+
   return (
     <SafeAreaView style={styles.container}>
+      {showBackButton && (
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-back" size={24} color={Colors.black.primary} />
+          </TouchableOpacity>
+        </View>
+      )}
       <View style={styles.content}>
         <Icon name="construct-outline" size={80} color={Colors.brand.primary} />
         <Text style={styles.title}>{title}</Text>
@@ -38,11 +51,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.white.primary,
   },
+  header: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  backButton: {
+    width: 40,
+    justifyContent: 'center',
+  },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    marginTop: -60, // visual offset to center content nicely despite header
   },
   title: {
     fontSize: 24,

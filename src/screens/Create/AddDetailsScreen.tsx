@@ -15,29 +15,30 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
-import { useAuth } from '../../providers/AuthProvider';
 import storage from '@react-native-firebase/storage';
-import auth from '@react-native-firebase/auth';
 import { Platform, InteractionManager } from 'react-native';
 import { useCreateFlowStore } from '../../store/stores/useCreateFlowStore';
 import { processFinalCrops } from '../../utils/finalCropProcessor';
 import { getCropBoxDimensions, getImageTransform } from '../../utils/cropMath';
-import { db } from '../../services/auth/authService';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../../core/firebase';
+import { collection, addDoc, serverTimestamp, doc, setDoc } from '../../core/firebase/compat';
+import { useAuth } from '../../providers/AuthProvider';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function AddDetailsScreen({ navigation }: any) {
+  console.log('🔥🔥🔥 MOUNTED: AddDetailsScreen — src/screens/Create/AddDetailsScreen.tsx 🔥🔥🔥');
   console.log('🟢 [AddDetailsScreen] Component mounted/rendered');
-  
+
+  const { authReady, user } = useAuth();
+
   useEffect(() => {
     console.log('🟢 [AddDetailsScreen] useEffect - Component mounted');
     return () => {
       console.log('🔴 [AddDetailsScreen] useEffect cleanup - Component unmounting');
     };
   }, []);
-  
-  const { user } = useAuth();
+
   const {
     selectedImages,
     globalRatio,
@@ -61,7 +62,7 @@ export default function AddDetailsScreen({ navigation }: any) {
   const previewDimensions = useMemo(() => {
     const previewWidth = SCREEN_WIDTH;
     let previewHeight: number;
-    
+
     switch (globalRatio) {
       case '1:1':
         previewHeight = previewWidth;
@@ -75,7 +76,7 @@ export default function AddDetailsScreen({ navigation }: any) {
       default:
         previewHeight = previewWidth;
     }
-    
+
     return { width: previewWidth, height: previewHeight };
   }, [globalRatio]);
 
@@ -91,7 +92,7 @@ export default function AddDetailsScreen({ navigation }: any) {
   useEffect(() => {
     const loadSizes = async () => {
       const sizes: { [id: string]: { width: number; height: number } } = {};
-      
+
       for (const asset of selectedImages) {
         try {
           await new Promise<void>((resolve) => {
@@ -128,11 +129,6 @@ export default function AddDetailsScreen({ navigation }: any) {
     }
   }, [selectedImages, isMounted]);
 
-  // LEGACY SCREEN: This screen is used by UnifiedEditScreen (legacy flow)
-  // NEW FLOW: PhotoSelect → CropAdjust → AddPostDetails (uses final bitmaps, no transform re-application)
-  // 
-  // For legacy compatibility, we still support transform preview, but the NEW flow should
-  // use AddPostDetailsScreen which uses final rendered bitmaps directly.
   const renderPreview = useMemo(() => {
     if (selectedImages.length === 0) return null;
 
@@ -148,8 +144,6 @@ export default function AddDetailsScreen({ navigation }: any) {
       );
     }
 
-    // LEGACY: Apply transform for preview (only used by legacy UnifiedEditScreen flow)
-    // NEW FLOW: AddPostDetailsScreen uses final rendered bitmaps (no transform needed)
     const transform = getImageTransform(
       params,
       size.width,
@@ -177,98 +171,28 @@ export default function AddDetailsScreen({ navigation }: any) {
     );
   }, [selectedImages, previewIndex, cropParams, imageSizes, previewDimensions]);
 
-  const uploadImage = async (imageUri: string): Promise<string> => {
-    const fileName = `post_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    const reference = storage().ref(`/posts/${user?.uid}/${fileName}`);
-
-    let uploadUri = imageUri;
-    if (Platform.OS === 'ios' && uploadUri.startsWith('file://')) {
-      uploadUri = uploadUri.replace('file://', '');
-    }
-
-    const task = reference.putFile(uploadUri);
-
-    return new Promise((resolve, reject) => {
-      task.on(
-        'state_changed',
-        (taskSnapshot) => {
-          const percent = Math.round(
-            (taskSnapshot.bytesTransferred / taskSnapshot.totalBytes) * 100
-          );
-          setProgress(percent);
-        },
-        (error) => {
-          reject(error);
-        },
-        async () => {
-          try {
-            const url = await reference.getDownloadURL();
-            resolve(url);
-          } catch (urlError: any) {
-            reject(urlError);
-          }
-        }
-      );
-    });
-  };
-
   const handlePost = async () => {
-    console.log('🟢 [AddDetailsScreen] POST button clicked - START');
-    console.log('🟢 [AddDetailsScreen] Current screen state:', {
-      selectedImagesCount: selectedImages.length,
-      hasUser: !!user,
-      isMounted,
-      isPosting,
-      currentScreen: 'AddDetailsScreen',
-    });
-    
-    // CRITICAL: Prevent duplicate posts from multiple button presses
-    if (isPosting) {
-      console.log('🟢 [AddDetailsScreen] Post already in progress, ignoring duplicate request');
+    if (!authReady || !user) {
+      Alert.alert('Error', 'Authentication not ready.');
       return;
     }
 
-    if (!isMounted) {
-      console.log('🟢 [AddDetailsScreen] Component not mounted, aborting');
-      return;
-    }
-
-    if (!user) {
-      console.log('❌ [AddDetailsScreen] No user, aborting');
-      if (isMounted) {
-        InteractionManager.runAfterInteractions(() => {
-          Alert.alert('Error', 'Please log in to create a post');
-        });
-      }
-      return;
-    }
+    if (isPosting) return;
 
     if (selectedImages.length === 0) {
-      console.log('❌ [AddDetailsScreen] No images, aborting');
-      if (isMounted) {
-        InteractionManager.runAfterInteractions(() => {
-          Alert.alert('Error', 'No images to post');
-        });
-      }
+      Alert.alert('Error', 'No images to post');
       return;
     }
 
-    // Set posting flag immediately to prevent duplicates
-    console.log('🟢 [AddDetailsScreen] Setting posting/uploading/processing states to true');
     setIsPosting(true);
     setUploading(true);
     setProcessing(true);
     setProgress(0);
 
     try {
-      console.log('🟢 [AddDetailsScreen] Starting post creation process...');
-      console.log('🟢 [AddDetailsScreen] Step 1: Processing final crops...');
-      
-      // LEGACY FLOW: Process final crops (this screen is used by UnifiedEditScreen)
-      // NEW FLOW: PhotoSelect → CropAdjust → AddPostDetails (final bitmaps generated in CropAdjustScreen)
-      // 
-      // For legacy compatibility, we still process crops here, but the NEW flow should
-      // use AddPostDetailsScreen which receives final rendered bitmaps from CropAdjustScreen
+      const uid = user.uid;
+
+      // STEP 1 — PROCESS FINAL CROPS
       const finalImageUris = await processFinalCrops(
         selectedImages,
         cropParams,
@@ -276,179 +200,121 @@ export default function AddDetailsScreen({ navigation }: any) {
         cropBoxDimensions.width,
         cropBoxDimensions.height
       );
-      
-      console.log('✅ [AddDetailsScreen] Step 1 complete - Final image URIs:', finalImageUris.length);
 
-      if (finalImageUris.length === 0) {
-        throw new Error('No images processed');
-      }
+      if (finalImageUris.length === 0) throw new Error('No images processed');
 
-      // Step 2: Upload all cropped images
-      console.log('🟢 [AddDetailsScreen] Step 2: Uploading images...');
+      // STEP 2 — GENERATE POST ID UPFRONT
+      const postId = `post_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+      // STEP 3 — UPLOAD IMAGES
       const uploadedUrls: string[] = [];
+      const uploadedMedia: Array<{ url: string; storagePath: string; type: 'image' }> = [];
+
       for (let i = 0; i < finalImageUris.length; i++) {
-        console.log(`🟢 [AddDetailsScreen] Uploading image ${i + 1}/${finalImageUris.length}...`);
-        const uploadedUrl = await uploadImage(finalImageUris[i]);
-        uploadedUrls.push(uploadedUrl);
-        console.log(`✅ [AddDetailsScreen] Image ${i + 1} uploaded:`, uploadedUrl.substring(0, 50) + '...');
-        // Update progress for each image
-        setProgress(Math.round(((i + 1) / finalImageUris.length) * 50)); // 50% for uploads
+        const fileName = `media_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+        const storagePath = `users/${uid}/posts/${postId}/${fileName}`;
+
+        const reference = storage().ref(storagePath);
+
+        let uploadUri = finalImageUris[i];
+        if (!uploadUri) continue;
+
+        if (Platform.OS === 'ios' && uploadUri.startsWith('file://')) {
+          uploadUri = uploadUri.replace('file://', '');
+        }
+
+        try {
+          await reference.putFile(uploadUri);
+        } catch (uploadError: any) {
+          console.error('Upload Error:', uploadError);
+          throw new Error(`Storage upload failed: ${uploadError.message}`);
+        }
+
+        const downloadUrl = await reference.getDownloadURL();
+        uploadedUrls.push(downloadUrl);
+        uploadedMedia.push({
+          url: downloadUrl,
+          storagePath: storagePath,
+          type: 'image',
+        });
+        setProgress(Math.round(((i + 1) / finalImageUris.length) * 50));
       }
-      console.log('✅ [AddDetailsScreen] Step 2 complete - All images uploaded');
 
-      const imageUrl = uploadedUrls[0]; // Primary image for backward compatibility
+      if (uploadedUrls.length === 0) throw new Error('Failed to upload any images');
 
-      // Step 3: Get current user
-      const currentUser = auth().currentUser;
-      if (!currentUser) {
-        throw new Error('User not authenticated');
-      }
-
-      // Step 4: Parse tags/hashtags
+      // STEP 4 — PREPARE POST DATA
       const tagArray = tags
         .split(/[,\s]+/)
         .map((tag) => tag.trim())
         .filter((tag) => tag.length > 0)
         .map((tag) => (tag.startsWith('#') ? tag : `#${tag}`));
 
-      // Step 5: Determine if post has details
       const hasDetails = !!(description.trim() || location.trim() || tagArray.length > 0);
+      const firstImageUrl = uploadedUrls[0];
 
-      // Step 6: Create post document using modular Firestore SDK
-      // Helper function to detect media type from URI
-      const detectMediaType = (uri: string): 'image' | 'video' => {
-        const ext = uri.split('.').pop()?.toLowerCase() || '';
-        const videoExtensions = ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'];
-        return videoExtensions.includes(ext) ? 'video' : 'image';
-      };
-
-      // Build media array for multi-image support - ALWAYS ARRAY, NEVER SINGLE STRING
-      const mediaArray = uploadedUrls.map((url, index) => ({
-        type: detectMediaType(url),
-        url: url, // Use 'url' field consistently - this is the FINAL cropped image
-        uri: url, // Also include 'uri' for backward compatibility with PostCarousel
+      const mediaArray = uploadedMedia.map((item, index) => ({
+        type: 'image' as const,
+        url: item.url,
+        uri: item.url,
+        storagePath: item.storagePath, // CRITICAL: Store storagePath for deletion
         id: `media-${index}`,
       }));
 
-      // CRITICAL: Store media as array, never as single string
-      // Build postData object, excluding undefined values (Firestore doesn't allow undefined)
-      const locationValue = location.trim();
-      const captionValue = description.trim();
-      const detailsValue = hasDetails ? description.trim() : null;
-      
-      const firstImageUrl = uploadedUrls[0] || '';
-      
       const postData: any = {
         type: 'post',
-        createdBy: currentUser.uid,
-        userId: currentUser.uid,
-        username: currentUser.displayName || currentUser.email || 'User',
-        // PRIMARY: mediaUrls array contains FINAL cropped bitmap URLs (for PostCard compatibility)
-        mediaUrls: uploadedUrls, // Array of all uploaded FINAL cropped bitmap URLs
-        // CRITICAL: finalCroppedUrl is the PRIMARY field for single image posts (REAL cropped bitmap)
-        finalCroppedUrl: firstImageUrl, // FINAL cropped bitmap URL (exact adjusted frame)
-        // Legacy field for backward compatibility (old posts)
+        postId: postId,
+        id: postId,
+        createdBy: uid,
+        userId: uid,
+        username: user.displayName || user.email || 'User',
+        mediaUrls: uploadedUrls,
+        finalCroppedUrl: firstImageUrl,
         imageUrl: firstImageUrl,
-        // ALWAYS store media as array - this is the primary field
-        // media[].url contains the FINAL cropped image
         media: mediaArray,
         likeCount: 0,
         commentCount: 0,
         shareCount: 0,
         likedBy: [],
         savedBy: [],
-        // Store ratio as string for proper aspect ratio handling
         ratio: globalRatio as '1:1' | '4:5' | '16:9',
-        // CRITICAL: aspectRatio must be stored for PostCard to render correctly
-        // This ensures consistent aspect ratio rendering across all sections
         aspectRatio: globalRatio === '1:1' ? 1 : globalRatio === '4:5' ? 0.8 : 16 / 9,
         createdAt: serverTimestamp(),
       };
 
-      // Only add optional fields if they have values (avoid undefined)
-      if (captionValue) {
-        postData.caption = captionValue;
+      if (description.trim()) postData.caption = description.trim();
+      if (location.trim()) {
+        postData.location = location.trim();
+        postData.placeName = location.trim();
       }
-      if (locationValue) {
-        postData.location = locationValue;
-        postData.placeName = locationValue;
-      }
-      if (detailsValue) {
-        postData.details = detailsValue;
-      }
-      if (tagArray.length > 0) {
-        postData.tags = tagArray;
-      }
+      if (hasDetails) postData.details = description.trim();
+      if (tagArray.length > 0) postData.tags = tagArray;
 
-      console.log('🟢 [AddDetailsScreen] Step 3: Creating Firestore document...');
-      await addDoc(collection(db, 'posts'), postData);
-      console.log('✅ [AddDetailsScreen] Post document created successfully');
+      // STEP 5 — CREATE FIRESTORE DOCUMENT
+      await setDoc(doc(db, 'posts', postId), postData);
 
-      // Navigate back to home immediately (no alert to avoid Activity error)
-      if (isMounted) {
-        console.log('🟢 [AddDetailsScreen] Preparing navigation to Home...');
-        console.log('🟢 [AddDetailsScreen] Current navigation state:', {
-          canGoBack: navigation.canGoBack?.(),
-          getState: navigation.getState?.(),
-        });
-        
-        // Use setTimeout to ensure navigation happens after state updates
-        setTimeout(() => {
-          if (isMounted) {
-            try {
-              console.log('🟢 [AddDetailsScreen] Executing navigation reset...');
-              const rootNav = (navigation as any).getParent?.() || (navigation as any).getParent?.('Stack') || navigation;
-              console.log('🟢 [AddDetailsScreen] Root navigator obtained:', {
-                hasReset: typeof rootNav.reset === 'function',
-                navigatorType: rootNav.constructor?.name,
-              });
-              
-              rootNav.reset({
-                index: 0,
-                routes: [{ name: 'MainTabs', params: { screen: 'Home' } }],
-              });
-              
-              console.log('✅ [AddDetailsScreen] Navigation reset completed - should be on Home now');
-            } catch (navError) {
-              console.error('❌ [AddDetailsScreen] Navigation error:', navError);
-            }
-          }
-        }, 100);
-      }
+      // STEP 6 — NAVIGATE TO HOME
+      setTimeout(() => {
+        try {
+          const rootNav = (navigation as any).getParent?.() || (navigation as any).getParent?.('Stack') || navigation;
+          rootNav.reset({
+            index: 0,
+            routes: [{ name: 'MainTabs', params: { screen: 'Home' } }],
+          });
+        } catch (navError) {
+          console.error('❌ [AddDetailsScreen] Navigation error:', navError);
+        }
+      }, 100);
+
     } catch (error: any) {
       console.error('❌ [AddDetailsScreen] Error creating post:', error);
-      console.error('❌ [AddDetailsScreen] Error details:', {
-        message: error.message,
-        code: error.code,
-        stack: error.stack?.substring(0, 200),
-      });
-      
-      // Don't show alert if component is unmounted or Activity unavailable
-      // Just log the error and reset posting state
-      if (isMounted) {
-        // Try to show error after a delay, but don't fail if Activity is unavailable
-        setTimeout(() => {
-          if (isMounted) {
-            try {
-              Alert.alert('Error', error.message || 'Failed to create post');
-            } catch (alertError) {
-              // Alert failed (Activity not available) - just log
-              console.error('❌ [AddDetailsScreen] Could not show alert:', alertError);
-            }
-          }
-        }, 500);
-      }
+      setTimeout(() => {
+        Alert.alert('Error', error.message || 'Failed to create post');
+      }, 500);
     } finally {
-      console.log('🟢 [AddDetailsScreen] Finally block - resetting upload state');
-      if (isMounted) {
-        setUploading(false);
-        setProcessing(false);
-        setProgress(0);
-        // Only reset isPosting if we're still on this screen (not navigated away)
-        // Navigation will unmount the component anyway
-        setIsPosting(false);
-      }
-      console.log('✅ [AddDetailsScreen] POST flow completed');
+      setUploading(false);
+      setProcessing(false);
+      setProgress(0);
+      setIsPosting(false);
     }
   };
 
@@ -464,13 +330,15 @@ export default function AddDetailsScreen({ navigation }: any) {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Add Details</Text>
         <TouchableOpacity
-          style={[styles.headerButton, (isPosting || uploading || processing) && styles.headerButtonDisabled]}
+          style={[styles.headerButton, (isPosting || uploading || processing || !authReady) && styles.headerButtonDisabled]}
           onPress={handlePost}
-          disabled={isPosting || uploading || processing}
+          disabled={isPosting || uploading || processing || !authReady || !user}
           activeOpacity={0.7}
         >
           {isPosting || uploading || processing ? (
             <ActivityIndicator size="small" color={Colors.brand.primary} />
+          ) : !authReady ? (
+            <Text style={[styles.postButton, { opacity: 0.6 }]}>Initializing…</Text>
           ) : (
             <Text style={styles.postButton}>Post</Text>
           )}
@@ -491,12 +359,12 @@ export default function AddDetailsScreen({ navigation }: any) {
                   {selectedImages.map((asset, index) => {
                     const size = imageSizes[asset.id] || { width: 0, height: 0 };
                     const params = cropParams[asset.id] || { zoom: 1, offsetX: 0, offsetY: 0 };
-                    
+
                     // Calculate thumbnail dimensions maintaining aspect ratio
                     const thumbnailSize = 60;
                     let thumbnailWidth: number;
                     let thumbnailHeight: number;
-                    
+
                     switch (globalRatio) {
                       case '1:1':
                         thumbnailWidth = thumbnailSize;

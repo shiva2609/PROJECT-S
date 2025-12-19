@@ -11,9 +11,9 @@ import {
   getDocs,
   onSnapshot,
   Unsubscribe,
-} from 'firebase/firestore';
-import { ref, getDownloadURL } from 'firebase/storage';
-import { storage } from '../services/auth/authService';
+} from '../core/firebase/compat';
+import { ref, getDownloadURL } from '../core/firebase/compat';
+import { storage } from '../core/firebase';
 
 // Cache resolved storage URLs
 const mediaUrlCache = new Map<string, string>();
@@ -38,11 +38,11 @@ export async function safeGetDocs(
   } catch (error: any) {
     // Suppress all Firestore errors - return empty array instead of crashing
     // This includes: INTERNAL ASSERTION FAILED, index errors, failed-precondition
-    if (error?.code === 'failed-precondition' || 
-        error?.message?.includes('INTERNAL ASSERTION FAILED') || 
-        error?.message?.includes('Unexpected state') ||
-        error?.message?.includes('index') ||
-        error?.message?.includes('requires an index')) {
+    if (error?.code === 'failed-precondition' ||
+      error?.message?.includes('INTERNAL ASSERTION FAILED') ||
+      error?.message?.includes('Unexpected state') ||
+      error?.message?.includes('index') ||
+      error?.message?.includes('requires an index')) {
       console.warn('[safeGetDocs] Firestore query error (non-fatal, returning empty):', error?.code || error?.message?.substring(0, 150));
       return [];
     }
@@ -69,9 +69,9 @@ export function safeOnSnapshot(
           onUpdate(snapshot.docs || []);
         } catch (snapshotErr: any) {
           // Catch errors during snapshot processing
-          if (snapshotErr?.message?.includes('INTERNAL ASSERTION FAILED') || 
-              snapshotErr?.message?.includes('Unexpected state') ||
-              snapshotErr?.message?.includes('AsyncQueue')) {
+          if (snapshotErr?.message?.includes('INTERNAL ASSERTION FAILED') ||
+            snapshotErr?.message?.includes('Unexpected state') ||
+            snapshotErr?.message?.includes('AsyncQueue')) {
             console.warn('[safeOnSnapshot] Error processing snapshot (non-fatal):', snapshotErr?.message?.substring(0, 150));
             onUpdate([]);
             return;
@@ -82,9 +82,9 @@ export function safeOnSnapshot(
       },
       (error: any) => {
         // CRITICAL: Suppress INTERNAL ASSERTION FAILED errors
-        if (error?.message?.includes('INTERNAL ASSERTION FAILED') || 
-            error?.message?.includes('Unexpected state') ||
-            error?.message?.includes('AsyncQueue')) {
+        if (error?.message?.includes('INTERNAL ASSERTION FAILED') ||
+          error?.message?.includes('Unexpected state') ||
+          error?.message?.includes('AsyncQueue')) {
           console.warn('[safeOnSnapshot] Firestore internal error (non-fatal):', error?.message?.substring(0, 150));
           onUpdate([]); // Return empty array instead of crashing
           return;
@@ -99,17 +99,17 @@ export function safeOnSnapshot(
     );
   } catch (error: any) {
     // Catch errors during query setup
-    if (error?.message?.includes('INTERNAL ASSERTION FAILED') || 
-        error?.message?.includes('Unexpected state') ||
-        error?.message?.includes('AsyncQueue')) {
+    if (error?.message?.includes('INTERNAL ASSERTION FAILED') ||
+      error?.message?.includes('Unexpected state') ||
+      error?.message?.includes('AsyncQueue')) {
       console.warn('[safeOnSnapshot] Setup error (non-fatal):', error?.message?.substring(0, 150));
       onUpdate([]);
-      return () => {}; // Return no-op unsubscribe
+      return () => { }; // Return no-op unsubscribe
     }
     console.error('[safeOnSnapshot] Setup error:', error);
     onUpdate([]);
     // Return no-op unsubscribe
-    return () => {};
+    return () => { };
   }
 }
 
@@ -118,7 +118,7 @@ export function safeOnSnapshot(
  */
 export function extractCreatedAt(data: any): number {
   if (!data || typeof data !== 'object') return 0;
-  
+
   try {
     if (data.createdAt?.toMillis && typeof data.createdAt.toMillis === 'function') {
       return data.createdAt.toMillis();
@@ -132,7 +132,7 @@ export function extractCreatedAt(data: any): number {
   } catch (err) {
     // Ignore
   }
-  
+
   return 0;
 }
 
@@ -141,7 +141,7 @@ export function extractCreatedAt(data: any): number {
  */
 export function extractMediaUrl(data: any): string | null {
   if (!data || typeof data !== 'object') return null;
-  
+
   try {
     // Priority order for media extraction
     if (Array.isArray(data.mediaUrls) && data.mediaUrls.length > 0 && data.mediaUrls[0]) {
@@ -186,7 +186,7 @@ export function extractMediaUrl(data: any): string | null {
   } catch (err) {
     console.warn('[extractMediaUrl] Error extracting media:', err);
   }
-  
+
   return null;
 }
 
@@ -195,17 +195,17 @@ export function extractMediaUrl(data: any): string | null {
  */
 export async function resolveMediaUrlIfNeeded(path: string | null): Promise<string | null> {
   if (!path || typeof path !== 'string') return null;
-  
+
   // If already a full URL, return as-is
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
   }
-  
+
   // Check cache
   if (mediaUrlCache.has(path)) {
     return mediaUrlCache.get(path)!;
   }
-  
+
   // Try to resolve from storage
   try {
     const url = await getDownloadURL(ref(storage, path));
@@ -236,16 +236,16 @@ export function normalizePostDocument(
   if (!docSnap || !docSnap.id) {
     return null;
   }
-  
+
   const data = docSnap.data();
   if (!data || typeof data !== 'object') {
     return null;
   }
-  
+
   const ownerId = data.ownerId || data.userId || data.createdBy || data.authorId || null;
   const createdAt = extractCreatedAt(data);
   const mediaUrl = extractMediaUrl(data);
-  
+
   return {
     id: docSnap.id,
     ownerId: ownerId ? String(ownerId) : null,
@@ -274,22 +274,22 @@ export function normalizeRelationDocument(
   if (!docSnap || !docSnap.id) {
     return null;
   }
-  
+
   const data = docSnap.data();
   if (!data || typeof data !== 'object') {
     return null;
   }
-  
+
   const followerId = data.followerId || null;
   const followedId = data.followedId || null;
   const followingId = data.followingId || null;
   const createdAt = extractCreatedAt(data);
-  
+
   // If both followerId and followedId are null, skip this record
   if (!followerId && !followedId && !followingId) {
     return null;
   }
-  
+
   return {
     followerId: followerId ? String(followerId) : null,
     followedId: followedId ? String(followedId) : null,
@@ -312,10 +312,10 @@ export function buildSafeQuery(
     return withOrderBy(baseQuery);
   } catch (err: any) {
     // If orderBy fails, fallback without orderBy
-    if (err?.code === 'failed-precondition' || 
-        err?.message?.includes('INTERNAL ASSERTION') ||
-        err?.message?.includes('index') ||
-        err?.message?.includes('createdAt')) {
+    if (err?.code === 'failed-precondition' ||
+      err?.message?.includes('INTERNAL ASSERTION') ||
+      err?.message?.includes('index') ||
+      err?.message?.includes('createdAt')) {
       console.warn('[buildSafeQuery] orderBy failed, using fallback:', err?.message?.substring(0, 100));
       return withoutOrderBy(baseQuery);
     }

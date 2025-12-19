@@ -31,7 +31,7 @@ import {
     arrayUnion,
     Unsubscribe,
     Timestamp,
-} from 'firebase/firestore';
+} from '../../../core/firebase/compat';
 import { db } from '../../../core/firebase';
 import { buildChatId } from './chatIdentity';
 
@@ -227,10 +227,10 @@ export function listenToChat(
 
     return onSnapshot(
         q,
-        (snapshot) => {
+        (snapshot: any) => {
             const messages: Message[] = [];
 
-            snapshot.forEach((docSnap) => {
+            snapshot.forEach((docSnap: any) => {
                 const data = docSnap.data();
                 messages.push({
                     id: docSnap.id,
@@ -243,7 +243,7 @@ export function listenToChat(
 
             callback(messages);
         },
-        (error) => {
+        (error: any) => {
             console.error('[listenToChat] Error:', error);
             // Call callback with empty array on error
             callback([]);
@@ -282,10 +282,10 @@ export function listenToUserChats(
 
     return onSnapshot(
         q,
-        (snapshot) => {
+        (snapshot: any) => {
             const chats: Chat[] = [];
 
-            snapshot.forEach((docSnap) => {
+            snapshot.forEach((docSnap: any) => {
                 const data = docSnap.data();
 
                 // Filter: only include chats where user is a member
@@ -302,7 +302,7 @@ export function listenToUserChats(
 
             callback(chats);
         },
-        (error) => {
+        (error: any) => {
             console.error('[listenToUserChats] Error:', error);
             // Call callback with empty array on error
             callback([]);

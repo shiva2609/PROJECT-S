@@ -23,9 +23,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { doc, getDoc, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, runTransaction } from '../core/firebase/compat';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { db } from '../services/auth/authService';
+import { db } from '../core/firebase';
 import {
   createRewardNotification,
   checkUnclaimedRewards,
@@ -114,7 +114,7 @@ export function useRewardOnboarding(
 
       // FIRST: Check AsyncStorage (fast local check)
       const claimedLocal = await checkRewardClaimedLocal(userId);
-      
+
       if (claimedLocal) {
         // Already claimed locally, skip Firestore check
         console.log('✅ Reward already claimed (AsyncStorage), skipping popup');
@@ -149,7 +149,7 @@ export function useRewardOnboarding(
       if (!rewardClaimed && !claimedLocal) {
         console.log('🎉 Reward not claimed, showing popup for first time');
         setVisible(true);
-        
+
         // Create notification for unclaimed reward
         // This ensures notification appears even if user dismisses the modal
         console.log('📝 Creating notification for unclaimed reward...');
@@ -159,7 +159,7 @@ export function useRewardOnboarding(
         if (rewardClaimed && !claimedLocal) {
           await saveRewardClaimedLocal(userId);
         }
-        
+
         // If reward is claimed, ensure notification is marked as claimed
         await checkUnclaimedRewards(userId, rewardClaimed);
         setVisible(false); // Ensure popup is hidden
@@ -254,7 +254,7 @@ export function useRewardOnboarding(
         const userData = userDoc.data();
         setPoints(userData.explorerPoints ?? 0);
       }
-      
+
       setClaimed(true);
       setVisible(false); // Close modal only after successful claim
 
@@ -273,11 +273,11 @@ export function useRewardOnboarding(
       await checkRewardStatus();
 
       const errorMessage =
-        err instanceof Error
-          ? err
+        error instanceof Error
+          ? error
           : new Error('Failed to grant reward. Please try again.');
       setError(errorMessage);
-      
+
       // Keep modal open on error so user can retry
       // Don't set visible to false
     } finally {
@@ -295,7 +295,7 @@ export function useRewardOnboarding(
     // Note: rewardClaimed remains false, so user can claim later
     // The card will show again on next check if still not claimed
     // Notification will remain in notifications list for user to claim later
-    
+
     // Ensure notification exists when user dismisses
     if (userId && !claimed) {
       console.log('📝 Ensuring notification exists after dismiss...');
@@ -310,7 +310,7 @@ export function useRewardOnboarding(
    */
   const showReward = useCallback(async () => {
     if (!userId) return;
-    
+
     // Check AsyncStorage first to prevent showing if already claimed
     const claimedLocal = await checkRewardClaimedLocal(userId);
     if (claimedLocal) {
@@ -319,7 +319,7 @@ export function useRewardOnboarding(
       setVisible(false);
       return;
     }
-    
+
     if (!claimed) {
       console.log('📝 Manually showing reward modal...');
       setVisible(true);

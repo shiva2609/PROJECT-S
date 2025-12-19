@@ -1,51 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
-import { useAuth } from '../../providers/AuthProvider';
-import { listenToSavedPosts, Post } from '../../services/api/firebaseService';
 import { formatTimestamp } from '../../utils/postHelpers';
 import { normalizePost } from '../../utils/postUtils';
+import { useSavedPostsList } from '../../hooks/useSavedPostsList';
+import { PostWithAuthor } from '../../global/services/posts/post.service';
 
 export default function AccountScreen({ navigation }: any) {
-  const { user } = useAuth();
-  const [savedPosts, setSavedPosts] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { posts: savedPosts, loading } = useSavedPostsList();
 
-  useEffect(() => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
-    const unsubscribe = listenToSavedPosts(user.uid, (posts) => {
-      setSavedPosts(posts);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  const renderPost = ({ item }: { item: Post }) => {
+  const renderPost = ({ item }: { item: PostWithAuthor }) => {
     // CRITICAL: Use ONLY final cropped bitmaps - NO fallback to original images
     // Normalize post to get mediaUrls (contains final rendered bitmap URLs)
     const normalizedPost = normalizePost(item as any);
     const mediaUrls = normalizedPost.mediaUrls || [];
-    
+
     // Use first image from mediaUrls (final cropped bitmap) or finalCroppedUrl
     // DO NOT fallback to imageUrl or coverImage - those might be original images
     const imageUrl = mediaUrls[0] || (item as any).finalCroppedUrl || '';
     const username = item.username || 'User';
-    const location = item.location || item.placeName || '';
+    const location = item.location || (item as any).placeName || '';
     const timestamp = formatTimestamp(item.createdAt);
 
     return (
       <TouchableOpacity
         style={styles.postCard}
         activeOpacity={0.8}
-        onPress={() => navigation?.navigate('PostDetail', { postId: item.id })}
+        onPress={() => navigation?.navigate('PostDetail', { postId: item.id, posts: savedPosts, index: savedPosts.indexOf(item) })}
       >
         {imageUrl ? (
           <Image source={{ uri: imageUrl }} style={styles.postImage} resizeMode="cover" />
@@ -75,8 +59,14 @@ export default function AccountScreen({ navigation }: any) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Account</Text>
-        <Text style={styles.subtitle}>Saved Posts</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Icon name="arrow-back" size={24} color={Colors.black.primary} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.headerTextContainer} activeOpacity={1}>
+          <Text style={styles.title}>Account</Text>
+          <Text style={styles.subtitle}>Saved Posts</Text>
+        </TouchableOpacity>
+        <View style={styles.backButton} />
       </View>
 
       {loading ? (
@@ -131,6 +121,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  backButton: {
+    width: 40,
+    justifyContent: 'center',
+  },
+  headerTextContainer: {
+    alignItems: 'center',
   },
   title: {
     fontSize: 24,

@@ -8,19 +8,29 @@ import { useAuth } from '../../providers/AuthProvider';
 
 export default function TravelPlanSelectScreen() {
   const navigation = useNavigation();
-  const { user, userProfile } = useAuth();
+  const { user } = useAuth();
+  const [loading, setLoading] = React.useState(false);
 
-  useEffect(() => {
-    // Safety Net: Automatic redirect for users who already have a plan or completed onboarding,
-    // in case they land here by mistake (AppNavigator should handle this, but this is a fail-safe).
-    const hasPlan = userProfile?.travelPlan && Array.isArray(userProfile.travelPlan) && userProfile.travelPlan.length > 0;
-    const completedOnboarding = userProfile?.onboardingComplete;
+  const handleComplete = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const { updateDoc, doc } = await import('firebase/firestore');
+      const { db } = await import('../../core/firebase');
 
-    if (hasPlan || completedOnboarding) {
-      // Use replace to ensure back button doesn't come here
-      navigation.replace('MainTabs');
+      await updateDoc(doc(db, 'users', user.uid), {
+        isNewUser: false,
+        onboardingComplete: true,
+        updatedAt: Date.now(),
+      });
+
+      // BootGate will automatically detect the change via the real-time listener in userStore
+      // and update the bootState to APP_READY, which will cause AppNavigator to switch to MainTabs.
+    } catch (error) {
+      console.error('Failed to complete onboarding:', error);
+      setLoading(false);
     }
-  }, [user, userProfile, navigation]);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -29,7 +39,23 @@ export default function TravelPlanSelectScreen() {
         <Text style={styles.subtitle}>
           This screen is a placeholder. Travel plan selection functionality will be implemented here.
         </Text>
-        {/* Skip button removed to enforce flow for new users */}
+
+        <View style={{ width: '100%', paddingHorizontal: 20 }}>
+          <View style={{ backgroundColor: Colors.brand.primary, borderRadius: 12, overflow: 'hidden' }}>
+            <Text
+              onPress={handleComplete}
+              style={{
+                color: Colors.white.primary,
+                fontFamily: Fonts.bold,
+                fontSize: 16,
+                paddingVertical: 16,
+                textAlign: 'center',
+              }}
+            >
+              {loading ? 'Setting up...' : 'Get Started'}
+            </Text>
+          </View>
+        </View>
       </View>
     </SafeAreaView>
   );

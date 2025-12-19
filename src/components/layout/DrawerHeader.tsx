@@ -4,8 +4,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { useAuth } from '../../providers/AuthProvider';
-import { db } from '../../services/auth/authService';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../core/firebase';
+import { doc, onSnapshot } from '../../core/firebase/compat';
 import { AccountType, getAccountTypeMetadata } from '../../types/account';
 
 interface UserData {

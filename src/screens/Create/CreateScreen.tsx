@@ -20,8 +20,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { colors } from '../../utils/colors';
-import { db } from '../../services/auth/authService';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../core/firebase';
+import { doc, onSnapshot } from '../../core/firebase/compat';
 import { AccountType, getAccountTypeMetadata, CreateOption, VerificationStatus } from '../../types/account';
 import { useAuth } from '../../providers/AuthProvider';
 
@@ -65,17 +65,17 @@ export default function CreateScreen({ navigation }: any) {
           const userData = snap.data();
           const accType = (userData.accountType || userData.role || 'Traveler') as AccountType;
           const verStatus = (userData.verificationStatus || 'none') as VerificationStatus;
-          
+
           console.log('📊 CreateScreen - AccountType updated:', {
             accountType: accType,
             verificationStatus: verStatus,
             uid: user.uid,
             createOptions: getAccountTypeMetadata(accType).createOptions,
           });
-          
+
           setAccountType(accType);
           setVerificationStatus(verStatus);
-          
+
           // Reset createMode if current mode is not available for new accountType
           const metadata = getAccountTypeMetadata(accType);
           setCreateMode((currentMode) => {
@@ -115,7 +115,7 @@ export default function CreateScreen({ navigation }: any) {
   );
 
   const accountMetadata = getAccountTypeMetadata(accountType);
-  
+
   // Debug logging
   console.log('📊 CreateScreen - Render state:', {
     accountType,

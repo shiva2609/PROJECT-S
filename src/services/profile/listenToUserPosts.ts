@@ -6,8 +6,9 @@
  * Returns normalized Post array
  */
 
-import { collection, query, where, orderBy, onSnapshot, Unsubscribe, QuerySnapshot } from 'firebase/firestore';
-import { db } from '../auth/authService';
+import { collection, query, where, orderBy, onSnapshot, Unsubscribe } from '../../core/firebase/compat';
+import { QuerySnapshot } from 'firebase/firestore'; // Types can stay if compatible, or use Compat types
+import { db } from '../../core/firebase';
 import { Post } from '../../types/firestore';
 import { normalizePost } from '../../utils/normalize/normalizePost';
 
@@ -27,11 +28,11 @@ export function listenToUserPosts(
     console.warn('[listenToUserPosts] Invalid userId');
     if (onError) onError(new Error('Invalid userId'));
     callback([]);
-    return () => {};
+    return () => { };
   }
 
   const postsCol = collection(db, 'posts');
-  
+
   // Build query with orderBy - if this fails, we'll catch it
   let q;
   try {
@@ -82,11 +83,11 @@ export function listenToUserPosts(
       },
       (error: any) => {
         // If orderBy fails, try fallback query without orderBy
-        if (error?.code === 'failed-precondition' || 
-            error?.message?.includes('INTERNAL ASSERTION FAILED') ||
-            error?.message?.includes('index')) {
+        if (error?.code === 'failed-precondition' ||
+          error?.message?.includes('INTERNAL ASSERTION FAILED') ||
+          error?.message?.includes('index')) {
           console.warn('[listenToUserPosts] orderBy failed, using fallback query:', error.message?.substring(0, 100));
-          
+
           // Retry with fallback query
           const fallbackQ = query(postsCol, where('createdBy', '==', userId));
           return onSnapshot(
@@ -131,7 +132,7 @@ export function listenToUserPosts(
     console.error('[listenToUserPosts] Setup error:', setupErr);
     if (onError) onError(setupErr);
     callback([]);
-    return () => {};
+    return () => { };
   }
 }
 

@@ -14,8 +14,8 @@
  * - Default photo fallback
  */
 
-import { doc, onSnapshot, getDoc, Unsubscribe, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { db } from '../auth/authService';
+import { doc, onSnapshot, getDoc, Unsubscribe, serverTimestamp, Timestamp } from '../../core/firebase/compat';
+import { db, storage } from '../../core/firebase';
 import { store } from '../../store';
 import { updateProfilePhoto, updateProfilePhotoWithTimestamp } from '../../store/slices/profilePhotoSlice';
 
@@ -80,17 +80,17 @@ export async function getUserProfilePhoto(userId: string): Promise<string> {
     // Priority: profilePhotoUrl > profilePhoto > photoURL
     const photoUrl = data.profilePhotoUrl || data.profilePhoto || data.photoURL;
     const photoUpdatedAt = data.profilePhotoUpdatedAt;
-    
+
     // Check if photoUrl is null, undefined, empty string, or default placeholder
     if (photoUrl && photoUrl.trim() !== '' && photoUrl !== DEFAULT_PROFILE_PHOTO) {
       // Valid photo URL - update memory cache and Redux store
       profilePhotoMemoryCache[userId] = photoUrl;
       if (photoUpdatedAt) {
         // Store timestamp for race-condition prevention
-        const timestamp = photoUpdatedAt instanceof Timestamp 
-          ? photoUpdatedAt.toMillis() 
-          : typeof photoUpdatedAt === 'number' 
-            ? photoUpdatedAt 
+        const timestamp = photoUpdatedAt instanceof Timestamp
+          ? photoUpdatedAt.toMillis()
+          : typeof photoUpdatedAt === 'number'
+            ? photoUpdatedAt
             : Date.now();
         store.dispatch(updateProfilePhotoWithTimestamp({ userId, photoUrl, updatedAt: timestamp }));
       } else {
@@ -129,7 +129,7 @@ export function subscribeToUserProfilePhoto(
 ): () => void {
   if (!userId) {
     console.warn('[userProfilePhotoService] Cannot subscribe: userId is empty');
-    return () => {};
+    return () => { };
   }
 
   // If already subscribed, return existing unsubscribe
@@ -140,7 +140,7 @@ export function subscribeToUserProfilePhoto(
 
   try {
     const userRef = doc(db, 'users', userId);
-    
+
     const unsubscribe = onSnapshot(
       userRef,
       (snapshot) => {
@@ -160,44 +160,44 @@ export function subscribeToUserProfilePhoto(
         // Priority: profilePhotoUrl > profilePhoto > photoURL
         let photoUrl = data.profilePhotoUrl || data.profilePhoto || data.photoURL;
         const photoUpdatedAt = data.profilePhotoUpdatedAt;
-        
+
         // Check if photoUrl is null, undefined, empty string, or default placeholder
         if (!photoUrl || photoUrl.trim() === '' || photoUrl === DEFAULT_PROFILE_PHOTO) {
           photoUrl = DEFAULT_PROFILE_PHOTO;
         }
-        
+
         // Race-condition prevention: Check timestamp
         const state = store.getState();
         const storedTimestamp = state.profilePhoto?.profilePhotoUpdatedAtMap[userId];
         let newTimestamp: number;
-        
+
         if (photoUpdatedAt) {
-          newTimestamp = photoUpdatedAt instanceof Timestamp 
-            ? photoUpdatedAt.toMillis() 
-            : typeof photoUpdatedAt === 'number' 
-              ? photoUpdatedAt 
+          newTimestamp = photoUpdatedAt instanceof Timestamp
+            ? photoUpdatedAt.toMillis()
+            : typeof photoUpdatedAt === 'number'
+              ? photoUpdatedAt
               : Date.now();
         } else {
           // No timestamp - use current time (legacy data)
           newTimestamp = Date.now();
         }
-        
+
         // Ignore old updates (race-condition prevention)
         if (storedTimestamp && newTimestamp <= storedTimestamp) {
           console.log(`[userProfilePhotoService] Ignoring stale update for ${userId} (timestamp: ${newTimestamp} <= ${storedTimestamp})`);
           return;
         }
-        
+
         // Update memory cache
         profilePhotoMemoryCache[userId] = photoUrl;
-        
+
         // Update Redux store with timestamp
         if (photoUpdatedAt) {
           store.dispatch(updateProfilePhotoWithTimestamp({ userId, photoUrl, updatedAt: newTimestamp }));
         } else {
           store.dispatch(updateProfilePhoto({ userId, photoUrl }));
         }
-        
+
         // Call callback if provided
         if (callback) {
           callback(photoUrl);
@@ -228,7 +228,7 @@ export function subscribeToUserProfilePhoto(
     // On error, return cached or default
     const cached = profilePhotoMemoryCache[userId] || DEFAULT_PROFILE_PHOTO;
     profilePhotoMemoryCache[userId] = cached;
-    return () => {};
+    return () => { };
   }
 }
 

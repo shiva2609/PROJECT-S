@@ -28,8 +28,8 @@ import {
   runTransaction,
   writeBatch,
   increment
-} from 'firebase/firestore';
-import { db } from '../../../services/auth/authService';
+} from '../../../core/firebase/compat';
+import { db } from '../../../core/firebase';
 import { getUsersPublicInfo } from '../user/user.service';
 import { sendNotification } from '../../../services/notifications/NotificationAPI';
 

@@ -23,8 +23,8 @@ import {
   runTransaction,
   QueryDocumentSnapshot,
   DocumentData,
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
+} from '../../core/firebase/compat';
+import { db, auth } from '../../core/firebase';
 import { retryWithBackoff } from '../../utils/retry';
 import { safeFirestoreRead } from '../../utils/offlineHandler';
 
@@ -152,6 +152,7 @@ export async function getUserByUsername(username: string): Promise<User | null> 
  * @param data - Partial user data to update
  */
 export async function updateProfile(userId: string, data: Partial<User>): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const userRef = doc(db, 'users', userId);
     const updateData: any = { ...data };
@@ -459,6 +460,7 @@ export async function getFollowing(
  * @param delta - Amount to increment (default: 1)
  */
 export async function incrementFollowerCount(userId: string, delta: number = 1): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, {
@@ -476,6 +478,7 @@ export async function incrementFollowerCount(userId: string, delta: number = 1):
  * @param delta - Amount to increment (default: 1)
  */
 export async function incrementFollowingCount(userId: string, delta: number = 1): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, {
@@ -510,6 +513,7 @@ export async function decrementFollowingCount(): Promise<void> {
  * @param token - Push notification token
  */
 export async function updatePushToken(userId: string, token: string): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, {
@@ -527,6 +531,7 @@ export async function updatePushToken(userId: string, token: string): Promise<vo
  * @param token - Push notification token to remove
  */
 export async function removePushToken(userId: string, token: string): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, {

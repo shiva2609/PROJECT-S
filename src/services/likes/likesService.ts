@@ -2,29 +2,12 @@
  * Likes API
  * 
  * Handles post likes/unlikes with idempotent operations.
+ * REDIRECTS to centralized PostInteractions service.
  */
 
-import {
-  doc,
-  getDoc,
-  setDoc,
-  deleteDoc,
-  collection,
-  query,
-  where,
-  getDocs,
-  limit as firestoreLimit,
-  orderBy,
-  startAfter,
-  runTransaction,
-  serverTimestamp,
-} from 'firebase/firestore';
-import {
-  increment,
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
-import { sendNotification } from '../notifications/NotificationAPI';
-import { getDoc as getPostDoc } from 'firebase/firestore'; // Alias to avoid conflict if needed or use existing getDoc
+import * as PostInteractions from '../../global/services/posts/post.interactions.service';
+import { doc, getDoc, collection, query, where, orderBy, getDocs, limit as firestoreLimit, startAfter } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 
 // ---------- Types ----------
 
@@ -46,100 +29,8 @@ interface PaginationResult {
  * @param postId - Post ID
  */
 export async function likePost(userId: string, postId: string): Promise<void> {
-  try {
-    const likeId = `${userId}_${postId}`;
-    const likeRef = doc(db, 'likes', likeId);
-
-    console.log("🔥 LIKE FUNCTION HIT", { userId, postId });
-
-    // Check if already liked
-    const likeSnap = await getDoc(likeRef);
-    if (likeSnap.exists()) {
-      console.log('[likePost] Post already liked, no-op');
-      return; // Already liked, no-op
-    }
-
-    // Use transaction to ensure atomicity
-    await runTransaction(db, async (transaction) => {
-      // Get post to verify it exists
-      const postRef = doc(db, 'posts', postId);
-      const postSnap = await transaction.get(postRef);
-
-      if (!postSnap.exists()) {
-        console.warn('[likePost] Post does not exist:', postId);
-        throw new Error('Post not found');
-      }
-
-      // Create like document
-      transaction.set(likeRef, {
-        userId,
-        postId,
-        createdAt: serverTimestamp(),
-      });
-
-      // Increment post like count
-      transaction.update(postRef, {
-        likeCount: increment(1),
-      });
-    });
-
-    console.log("🔥 ABOUT TO TRIGGER NOTIFICATION", { userId, postId });
-    // TRIGGER NOTIFICATION (Client-side polyfill)
-    try {
-      console.log("🔥 NOTIFICATION TRIGGER ENTERED");
-      // Fetch post owner to send notification
-      const postRef = doc(db, 'posts', postId);
-      const postSnap = await getDoc(postRef);
-      if (postSnap.exists()) {
-        const postData = postSnap.data();
-        const authorId = postData.authorId || postData.userId || postData.createdBy; // handles different schemas
-        console.log("⚠️ GUARD CHECK", { authorId, currentUserId: userId });
-
-        // Don't notify if liking own post
-        if (authorId && authorId !== userId) {
-          console.log("🔥 SENDING NOTIFICATION TO:", authorId);
-          const { getUserById } = await import('../users/usersService');
-          const liker = await getUserById(userId);
-
-          await sendNotification(authorId, {
-            type: 'like',
-            actorId: userId,
-            postId: postId,
-            message: 'liked your post',
-            data: {
-              postId,
-              postImage: postData.mediaUrl || postData.imageUrl || (postData.media && postData.media[0]),
-              sourceUsername: liker?.username || 'Someone',
-              sourceAvatarUri: liker?.photoUrl
-            }
-          });
-          console.log("✅ NOTIFICATION WRITE SUCCESS");
-        } else {
-          console.log("⚠️ SKIPPED: Self-like or missing authorId");
-        }
-      } else {
-        console.log("⚠️ SKIPPED: Post not found");
-      }
-    } catch (notifError) {
-      console.error("❌ NOTIFICATION WRITE FAILED", notifError);
-      // Don't fail the like action if notification fails
-    }
-
-    console.log('[likePost] Successfully liked post:', postId);
-  } catch (error: any) {
-    console.error('[likePost] Error liking post:', {
-      userId,
-      postId,
-      error: error,
-      code: error?.code,
-      message: error?.message,
-    });
-    throw {
-      code: 'like-post-failed',
-      message: error?.message || 'Failed to like post',
-      originalError: error
-    };
-  }
+  console.log('[likesService] Redirecting likePost to PostInteractions', { userId, postId });
+  return PostInteractions.toggleLike(postId, userId, true);
 }
 
 /**
@@ -148,55 +39,8 @@ export async function likePost(userId: string, postId: string): Promise<void> {
  * @param postId - Post ID
  */
 export async function unlikePost(userId: string, postId: string): Promise<void> {
-  try {
-    const likeId = `${userId}_${postId}`;
-    const likeRef = doc(db, 'likes', likeId);
-
-    // Check if liked
-    const likeSnap = await getDoc(likeRef);
-    if (!likeSnap.exists()) {
-      console.log('[unlikePost] Post not liked, no-op');
-      return; // Not liked, no-op
-    }
-
-    // Use transaction to ensure atomicity
-    await runTransaction(db, async (transaction) => {
-      // Get post to verify it exists
-      const postRef = doc(db, 'posts', postId);
-      const postSnap = await transaction.get(postRef);
-
-      if (!postSnap.exists()) {
-        console.warn('[unlikePost] Post does not exist:', postId);
-        // Still delete the like document even if post doesn't exist
-        transaction.delete(likeRef);
-        return;
-      }
-
-      // Delete like document
-      transaction.delete(likeRef);
-
-      // Decrement post like count (ensure it doesn't go below 0)
-      const currentCount = postSnap.data().likeCount || 0;
-      transaction.update(postRef, {
-        likeCount: Math.max(0, currentCount - 1),
-      });
-    });
-
-    console.log('[unlikePost] Successfully unliked post:', postId);
-  } catch (error: any) {
-    console.error('[unlikePost] Error unliking post:', {
-      userId,
-      postId,
-      error: error,
-      code: error?.code,
-      message: error?.message,
-    });
-    throw {
-      code: 'unlike-post-failed',
-      message: error?.message || 'Failed to unlike post',
-      originalError: error
-    };
-  }
+  console.log('[likesService] Redirecting unlikePost to PostInteractions', { userId, postId });
+  return PostInteractions.toggleLike(postId, userId, false);
 }
 
 /**
@@ -207,11 +51,11 @@ export async function unlikePost(userId: string, postId: string): Promise<void> 
  */
 export async function isPostLiked(userId: string, postId: string): Promise<boolean> {
   try {
-    const likeId = `${userId}_${postId}`;
-    const likeRef = doc(db, 'likes', likeId);
+    // Check the source of truth: posts/{postId}/likes/{userId}
+    const likeRef = doc(db, 'posts', postId, 'likes', userId);
     const likeSnap = await getDoc(likeRef);
     return likeSnap.exists();
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error checking like status:', error);
     return false;
   }
@@ -255,9 +99,3 @@ export async function getLikedPosts(
     throw { code: 'get-liked-posts-failed', message: 'Failed to fetch liked posts' };
   }
 }
-
-// Note: Hooks call likePost(postId) and unlikePost(postId) without userId
-// These functions should get userId from auth context in the hook implementation
-// For now, we export the full signature functions above
-// Hooks will need to be updated to pass userId, or we can add wrapper functions here
-

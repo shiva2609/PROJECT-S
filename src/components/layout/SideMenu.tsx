@@ -7,8 +7,8 @@ import { Fonts } from '../../theme/fonts';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { AccountType, VerificationStatus, getAccountTypeMetadata, UserAccountData } from '../../types/account';
 import { useAuth } from '../../providers/AuthProvider';
-import { db } from '../../services/auth/authService';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../core/firebase';
+import { doc, getDoc, onSnapshot } from '../../core/firebase/compat';
 import { signOut } from '../../services/auth/authService';
 import { useDispatch } from 'react-redux';
 import { logout } from '../../store';
@@ -93,7 +93,7 @@ const ProfileMiniCard = ({ userData, displayName }: ProfileMiniCardProps) => {
 const VerificationStatusCard = ({ pendingChange, onPress }: VerificationStatusCardProps) => {
   // Debug logging
   console.log('VerificationStatusCard - pendingChange:', JSON.stringify(pendingChange, null, 2));
-  
+
   if (!pendingChange) {
     console.log('VerificationStatusCard - No pending change, returning null');
     return null;
@@ -211,7 +211,7 @@ const MenuGroup = ({ title, items }: MenuGroupProps) => {
           key={index}
           icon={item.icon}
           label={item.label}
-          onPress={item.onPress || (() => {})}
+          onPress={item.onPress || (() => { })}
         />
       ))}
     </View>
@@ -220,9 +220,9 @@ const MenuGroup = ({ title, items }: MenuGroupProps) => {
 
 // Menu Item Component
 const MenuItem = ({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) => (
-  <TouchableOpacity 
-    activeOpacity={0.6} 
-    onPress={onPress} 
+  <TouchableOpacity
+    activeOpacity={0.6}
+    onPress={onPress}
     style={styles.menuItem}
   >
     <Icon name={icon} size={22} color={Colors.brand.secondary} style={styles.menuIcon} />
@@ -240,7 +240,7 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
   useEffect(() => {
     if (visible && user) {
       loadUserData();
-      
+
       // Set up real-time listener for pendingAccountChange updates
       const userRef = doc(db, 'users', user.uid);
       const unsubscribe = onSnapshot(userRef, (docSnapshot) => {
@@ -290,7 +290,7 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
       await signOut();
       await AsyncStorage.removeItem(AUTH_USER_KEY);
       dispatch(logout());
-      
+
       if (navigation) {
         navigation.reset({
           index: 0,
@@ -324,11 +324,14 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
 
   const rewardsItems: MenuItemData[] = [
     { label: 'Explorer Points Wallet', icon: 'wallet-outline', route: 'PointsWallet' },
+    { label: 'Achievements', icon: 'trophy-outline', route: 'Achievements' },
+    { label: 'Traveller Card', icon: 'card-outline', route: 'TravellerCard' },
   ];
 
   const settingsItems: MenuItemData[] = [
     { label: 'Account Settings', icon: 'settings-outline', route: 'Account' },
     ...(showUpgrade ? [{ label: 'Upgrade Account', icon: 'arrow-up-circle-outline', route: 'RoleUpgrade' } as MenuItemData] : []),
+    { label: 'Terms & Policies', icon: 'document-text-outline', route: 'TermsPolicies' },
     { label: 'Logout', icon: 'log-out-outline', route: '', onPress: handleLogout },
   ];
 
@@ -351,7 +354,7 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
         transition={{ type: 'timing', duration: 320 }}
         style={styles.menuContainer}
       >
-        <ScrollView 
+        <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -385,8 +388,8 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
           <View style={styles.divider} />
 
           {/* Trips Group */}
-          <MenuGroup 
-            title="Trips" 
+          <MenuGroup
+            title="Trips"
             items={tripsItems.map(item => ({
               ...item,
               onPress: () => {
@@ -400,8 +403,8 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
           <View style={styles.divider} />
 
           {/* Tools Group */}
-          <MenuGroup 
-            title="Tools" 
+          <MenuGroup
+            title="Tools"
             items={toolsItems.map(item => ({
               ...item,
               onPress: () => {
@@ -415,8 +418,8 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
           <View style={styles.divider} />
 
           {/* Rewards Group */}
-          <MenuGroup 
-            title="Rewards" 
+          <MenuGroup
+            title="Rewards"
             items={rewardsItems.map(item => ({
               ...item,
               onPress: () => {
@@ -430,8 +433,8 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
           <View style={styles.divider} />
 
           {/* Settings Group */}
-          <MenuGroup 
-            title="Settings" 
+          <MenuGroup
+            title="Settings"
             items={settingsItems.map(item => ({
               ...item,
               onPress: item.onPress || (() => {

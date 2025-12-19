@@ -5,8 +5,8 @@
  * Stores favorites in user's document in Firestore.
  */
 
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, getDocs, query, where, collection } from 'firebase/firestore';
-import { db } from '../auth/authService';
+import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, getDocs, query, where, collection } from '../../core/firebase/compat';
+import { db } from '../../core/firebase'; // Direct import from core/firebase
 import { requireAuth, getCurrentUserId } from '../../utils/authUtils';
 import { Alert } from 'react-native';
 

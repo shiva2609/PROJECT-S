@@ -81,8 +81,12 @@ export default function RideCreator({ accountType, onClose, navigation }: Props)
     try {
       const imageUrls: string[] = [];
       for (const imageUri of images) {
-        const path = `rides/${user.uid}/${Date.now()}_${Math.random().toString(36)}.jpg`;
-        const url = await uploadImageAsync({ uri: imageUri, path });
+        // Strict upload contract: ({ uri }, userId, folder)
+        const url = await uploadImageAsync(
+          { uri: imageUri },
+          user.uid,
+          'rides'
+        );
         imageUrls.push(url);
       }
 
@@ -98,11 +102,11 @@ export default function RideCreator({ accountType, onClose, navigation }: Props)
         console.warn('Could not fetch user account type:', error);
       }
 
-  const hostTypeMap: Record<string, string> = {
-    'RideCreator': 'RidePartner',
-    'Host': 'TravelHost',
-    'Agency': 'Agency',
-  };
+      const hostTypeMap: Record<string, string> = {
+        'RideCreator': 'RidePartner',
+        'Host': 'TravelHost',
+        'Agency': 'Agency',
+      };
       const hostType = hostTypeMap[userAccountType] || userAccountType;
 
       await addDoc(collection(db, 'posts'), {

@@ -23,9 +23,10 @@ import {
   getDocs,
   Timestamp,
   orderBy,
-  limit
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
+  limit,
+  writeBatch
+} from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 
 const UNREAD_COUNTS_COLLECTION = 'unreadCounts';
 const LAST_READ_COLLECTION = 'lastRead';
@@ -246,7 +247,7 @@ export async function markNotificationsAsRead(userId: string): Promise<void> {
     );
 
     const snapshot = await getDocs(q);
-    const batch = await import('firebase/firestore').then(m => m.writeBatch(db));
+    const batch = writeBatch(db);
 
     snapshot.forEach((doc) => {
       batch.update(doc.ref, { read: true, readAt: serverTimestamp() });

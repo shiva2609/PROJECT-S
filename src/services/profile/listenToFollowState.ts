@@ -6,8 +6,8 @@
  * Returns FollowState object
  */
 
-import { collection, query, where, onSnapshot, doc, Unsubscribe, QuerySnapshot, DocumentSnapshot } from 'firebase/firestore';
-import { db } from '../auth/authService';
+import { collection, query, where, onSnapshot, doc, Unsubscribe, QuerySnapshot, DocumentSnapshot } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { FollowState } from '../../types/firestore';
 import { normalizeFollow } from '../../utils/normalize/normalizeFollow';
 
@@ -25,22 +25,22 @@ export function listenToFollowState(
   callback: (state: FollowState) => void,
   onError?: (err: any) => void
 ): Unsubscribe {
-  if (!currentUserId || !profileUserId || 
-      typeof currentUserId !== 'string' || typeof profileUserId !== 'string' ||
-      currentUserId.trim().length === 0 || profileUserId.trim().length === 0) {
+  if (!currentUserId || !profileUserId ||
+    typeof currentUserId !== 'string' || typeof profileUserId !== 'string' ||
+    currentUserId.trim().length === 0 || profileUserId.trim().length === 0) {
     console.warn('[listenToFollowState] Invalid user IDs');
     callback({ isFollowing: false, followId: null });
-    return () => {};
+    return () => { };
   }
 
   // If same user, not following
   if (currentUserId === profileUserId) {
     callback({ isFollowing: false, followId: null });
-    return () => {};
+    return () => { };
   }
 
   const followsCol = collection(db, 'follows');
-  
+
   // Try composite query first
   let q;
   try {
@@ -54,7 +54,7 @@ export function listenToFollowState(
     // Fallback: use document ID pattern
     const followDocId = `${currentUserId}_${profileUserId}`;
     const followRef = doc(db, 'follows', followDocId);
-    
+
     return onSnapshot(
       followRef,
       (snapshot: DocumentSnapshot) => {
@@ -83,6 +83,10 @@ export function listenToFollowState(
 
           // Get first matching document
           const docSnap = snapshot.docs[0];
+          if (!docSnap) {
+            callback({ isFollowing: false, followId: null });
+            return;
+          }
           const raw = { id: docSnap.id, ...docSnap.data() };
           const normalized = normalizeFollow(raw);
 
@@ -98,8 +102,8 @@ export function listenToFollowState(
       },
       (error: any) => {
         // Suppress INTERNAL ASSERTION FAILED errors
-        if (error?.message?.includes('INTERNAL ASSERTION FAILED') || 
-            error?.message?.includes('Unexpected state')) {
+        if (error?.message?.includes('INTERNAL ASSERTION FAILED') ||
+          error?.message?.includes('Unexpected state')) {
           console.warn('[listenToFollowState] Firestore internal error (non-fatal):', error.message?.substring(0, 100));
           callback({ isFollowing: false, followId: null });
           return;
@@ -109,7 +113,7 @@ export function listenToFollowState(
         console.warn('[listenToFollowState] Query failed, trying document ID pattern:', error.message?.substring(0, 100));
         const followDocId = `${currentUserId}_${profileUserId}`;
         const followRef = doc(db, 'follows', followDocId);
-        
+
         return onSnapshot(
           followRef,
           (snapshot: DocumentSnapshot) => {
@@ -130,7 +134,7 @@ export function listenToFollowState(
     console.error('[listenToFollowState] Setup error:', setupErr);
     if (onError) onError(setupErr);
     callback({ isFollowing: false, followId: null });
-    return () => {};
+    return () => { };
   }
 }
 

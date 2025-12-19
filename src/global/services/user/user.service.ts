@@ -5,8 +5,8 @@
  * Used by all profile screens, followers/following lists, and post grids
  */
 
-import { doc, onSnapshot, getDoc, getDocs, collection, query, where, orderBy, Unsubscribe, getCountFromServer } from 'firebase/firestore';
-import { db } from '../../../services/auth/authService';
+import { doc, onSnapshot, getDoc, getDocs, collection, query, where, orderBy, Unsubscribe, getCountFromServer } from '../../../core/firebase/compat';
+import { db } from '../../../core/firebase';
 import { normalizeUser } from '../../../utils/normalize/normalizeUser';
 import { normalizePost } from '../../../utils/normalize/normalizePost';
 import { Post } from '../../../types/firestore';
@@ -110,6 +110,7 @@ export async function getUserPublicInfo(userId: string): Promise<UserPublicInfo 
       aboutMe: (normalized as any).aboutMe || (raw as any).aboutMe || (raw as any).about || '',
       travelPlan: normalized.travelPlan || [],
       onboardingComplete: normalized.onboardingComplete || false,
+      isNewUser: (normalized as any).isNewUser ?? (raw as any).isNewUser ?? false,
     };
 
     // Update cache
@@ -245,6 +246,7 @@ export function listenToUserPublicInfo(
             aboutMe: (normalized as any).aboutMe || (raw as any).aboutMe || (raw as any).about || '',
             travelPlan: normalized.travelPlan || [],
             onboardingComplete: normalized.onboardingComplete || false,
+            isNewUser: (normalized as any).isNewUser ?? (raw as any).isNewUser ?? false,
           };
 
           callback(userInfo);
@@ -267,8 +269,9 @@ export function listenToUserPublicInfo(
 
 /**
  * Get user posts (one-time fetch)
+ * CRITICAL: Hydrates posts with author username and avatar to ensure PostCard renders correctly
  * @param userId - User ID to get posts for
- * @returns Array of posts
+ * @returns Array of posts (enriched with author data)
  */
 export async function getUserPosts(userId: string): Promise<Post[]> {
   if (!userId) return [];
@@ -312,7 +315,29 @@ export async function getUserPosts(userId: string): Promise<Post[]> {
       });
     }
 
-    return posts;
+    // CRITICAL FIX: Hydrate posts with author data (matching post.service.ts pattern)
+    // This ensures PostCard always has username/avatar, preventing "User" fallback
+    try {
+      const authorInfo = await getUserPublicInfo(userId);
+
+      if (authorInfo) {
+        // Enrich all posts with author data
+        const enrichedPosts = posts.map(post => ({
+          ...post,
+          authorUsername: authorInfo.username,
+          authorAvatar: authorInfo.photoURL,
+          username: authorInfo.username, // Fallback field used by PostCard
+        } as any));
+
+        return enrichedPosts;
+      } else {
+        console.warn('[getUserPosts] Could not fetch author info for userId:', userId);
+        return posts;
+      }
+    } catch (enrichErr: any) {
+      console.error('[getUserPosts] Error enriching posts with author data:', enrichErr);
+      return posts;
+    }
   } catch (error: any) {
     console.error('[getUserPosts] Error:', error);
     return [];
@@ -321,8 +346,9 @@ export async function getUserPosts(userId: string): Promise<Post[]> {
 
 /**
  * Listen to user posts (realtime)
+ * CRITICAL: Hydrates posts with author username and avatar to ensure PostCard renders correctly
  * @param userId - User ID to listen to posts for
- * @param callback - Callback with array of posts
+ * @param callback - Callback with array of posts (enriched with author data)
  * @returns Unsubscribe function
  */
 export function listenToUserPosts(
@@ -350,7 +376,7 @@ export function listenToUserPosts(
   try {
     return onSnapshot(
       q,
-      (snapshot) => {
+      async (snapshot) => {
         try {
           const posts: Post[] = [];
           snapshot.forEach((docSnap) => {
@@ -374,7 +400,32 @@ export function listenToUserPosts(
             });
           }
 
-          callback(posts);
+          // CRITICAL FIX: Hydrate posts with author data (matching post.service.ts pattern)
+          // This ensures PostCard always has username/avatar, preventing "User" fallback
+          try {
+            // Fetch author info for the user (should be cached or fast since it's a single user)
+            const authorInfo = await getUserPublicInfo(userId);
+
+            if (authorInfo) {
+              // Enrich all posts with author data
+              const enrichedPosts = posts.map(post => ({
+                ...post,
+                authorUsername: authorInfo.username,
+                authorAvatar: authorInfo.photoURL,
+                username: authorInfo.username, // Fallback field used by PostCard
+              } as any));
+
+              callback(enrichedPosts);
+            } else {
+              // If author fetch fails, still return posts (PostCard will handle fallback)
+              console.warn('[listenToUserPosts] Could not fetch author info for userId:', userId);
+              callback(posts);
+            }
+          } catch (enrichErr: any) {
+            console.error('[listenToUserPosts] Error enriching posts with author data:', enrichErr);
+            // Fallback to unenriched posts
+            callback(posts);
+          }
         } catch (err: any) {
           console.error('[listenToUserPosts] Error processing snapshot:', err);
           callback([]);
@@ -386,7 +437,7 @@ export function listenToUserPosts(
           const fallbackQ = query(postsCol, where('createdBy', '==', userId));
           return onSnapshot(
             fallbackQ,
-            (snapshot) => {
+            async (snapshot) => {
               const posts: Post[] = [];
               snapshot.forEach((docSnap) => {
                 try {
@@ -406,7 +457,24 @@ export function listenToUserPosts(
                 return bTime - aTime;
               });
 
-              callback(posts);
+              // CRITICAL FIX: Hydrate posts with author data in fallback path too
+              try {
+                const authorInfo = await getUserPublicInfo(userId);
+                if (authorInfo) {
+                  const enrichedPosts = posts.map(post => ({
+                    ...post,
+                    authorUsername: authorInfo.username,
+                    authorAvatar: authorInfo.photoURL,
+                    username: authorInfo.username,
+                  } as any));
+                  callback(enrichedPosts);
+                } else {
+                  callback(posts);
+                }
+              } catch (enrichErr: any) {
+                console.error('[listenToUserPosts] Fallback: Error enriching posts:', enrichErr);
+                callback(posts);
+              }
             },
             (fallbackError: any) => {
               console.error('[listenToUserPosts] Fallback query also failed:', fallbackError);

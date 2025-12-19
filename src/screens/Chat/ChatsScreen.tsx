@@ -18,8 +18,8 @@ import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/us
 import { Colors } from '../../theme/colors';
 import { listenToConversations } from '../../services/chat/MessagesAPI';
 import * as UsersAPI from '../../services/users/usersService';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '../../services/auth/authService';
+import { collection, onSnapshot } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 
 interface ChatListItem {
   id: string; // chatId
@@ -103,7 +103,11 @@ export default function ChatsScreen({ navigation }: any) {
       return;
     }
 
+    console.log('[ChatsScreen] Setting up conversations listener for user:', user.uid);
+
     const unsubscribe = listenToConversations(user.uid, (conversations) => {
+      console.log('[ChatsScreen] Received conversations callback, count:', conversations.length);
+      console.log('[ChatsScreen] Conversation IDs:', conversations.map((c: any) => c.id));
       setRawConversations(conversations);
     });
 
@@ -233,7 +237,7 @@ export default function ChatsScreen({ navigation }: any) {
               const copilotItem: ChatListItem = {
                 id: 'sanchari-copilot',
                 userId: 'sanchari-copilot',
-                username: 'Sanchari Copilot',
+                username: 'Ask Sanchari',
                 profilePhoto: undefined,
                 lastMessage: lastCopilotMessage?.text || 'Your saved itinerary',
                 lastMessageTime,
@@ -284,7 +288,7 @@ export default function ChatsScreen({ navigation }: any) {
           if (item.userId === 'sanchari-copilot') {
             navigation.navigate('Messaging', {
               userId: 'sanchari-copilot',
-              username: 'Sanchari Copilot',
+              username: 'Ask Sanchari',
               profilePhoto: undefined,
               isCopilot: true,
             });

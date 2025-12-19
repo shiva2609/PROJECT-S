@@ -31,10 +31,9 @@ import UserAvatar from '../../components/user/UserAvatar';
 import VerifiedBadge from '../../components/user/VerifiedBadge';
 import { useUser } from '../../global/hooks/useUser';
 import { useFollowStatus } from '../../global/hooks/useFollowStatus';
-import { listenToSavedPosts, getSavedPosts } from '../../global/services/posts/post.interactions.service';
-import { getPostsByIds } from '../../global/services/posts/post.service';
+import { useSavedPostsList } from '../../hooks/useSavedPostsList';
 import { useSession } from '../../core/session';
-import { getOrCreateChat } from '../../features/messages/services';
+import { getOrCreateConversation } from '../../services/chat/MessagesAPI';
 import ProfileSkeleton from '../../components/profile/ProfileSkeleton';
 
 export default function ProfileScreen({ navigation, route }: any) {
@@ -54,50 +53,19 @@ export default function ProfileScreen({ navigation, route }: any) {
   // Local state for UI
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
-  const [savedPosts, setSavedPosts] = useState<Post[]>([]);
-  const [savedPostIds, setSavedPostIds] = useState<string[]>([]);
+  // Use hook for saved posts (only active when on saved tab and own profile)
+  const { posts: fetchedSavedPosts, loading: savedPostsLoading } = useSavedPostsList(
+    (isOwnProfile && activeTab === 'saved') ? currentUserId : undefined
+  );
+
+  // Update local state when hook updates (or just use hook result directly)
+  // Since we have refreshing logic, we might want to keep using the hook result directly
+  // But strictly speaking, we want to combine it with `savedPosts` state or just replace it.
+
+  // Simplification: Direct usage
+  const savedPosts = fetchedSavedPosts;
+
   const [creatingChat, setCreatingChat] = useState<boolean>(false);
-
-  // Fetch saved posts using global service
-  useEffect(() => {
-    if (!isOwnProfile || !currentUserId || activeTab !== 'saved') {
-      return;
-    }
-
-    const unsubscribe = listenToSavedPosts(currentUserId, async (postIds) => {
-      setSavedPostIds(postIds);
-
-      // Fetch full post data for saved post IDs
-      if (postIds.length > 0) {
-        try {
-          // Fetch posts by their IDs using global service
-          const fetchedPosts = await getPostsByIds(postIds);
-
-          // Sort by savedAt (most recent first)
-          const savedPostsData = await getSavedPosts(currentUserId);
-          const savedAtMap = new Map(savedPostsData.map(sp => [sp.postId, sp.savedAt]));
-
-          const sortedPosts = fetchedPosts.sort((a, b) => {
-            const aSavedAt = savedAtMap.get(a.id);
-            const bSavedAt = savedAtMap.get(b.id);
-            if (!aSavedAt || !bSavedAt) return 0;
-            const aTime = aSavedAt.toMillis?.() || (aSavedAt as any).seconds * 1000 || 0;
-            const bTime = bSavedAt.toMillis?.() || (bSavedAt as any).seconds * 1000 || 0;
-            return bTime - aTime; // Most recent first
-          });
-
-          setSavedPosts(sortedPosts as Post[]);
-        } catch (error: any) {
-          console.error('[ProfileScreen] Error fetching saved posts:', error);
-          setSavedPosts([]);
-        }
-      } else {
-        setSavedPosts([]);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [isOwnProfile, currentUserId, activeTab]);
 
   // Convert user data to User type for compatibility
   const profileUser = user ? {
@@ -199,20 +167,20 @@ export default function ProfileScreen({ navigation, route }: any) {
       return;
     }
 
-    console.log('[ProfileScreen] Creating chat between:', sessionUserId, 'and', targetUserId);
+    console.log('[ProfileScreen] Creating conversation between:', sessionUserId, 'and', targetUserId);
     setCreatingChat(true);
     try {
-      // Create or get existing chat using deterministic chatId
-      const chat = await getOrCreateChat(sessionUserId, targetUserId);
-      console.log('[ProfileScreen] Chat created/retrieved:', chat.chatId);
+      // Create or get existing conversation using deterministic conversationId
+      const conversation = await getOrCreateConversation(sessionUserId, targetUserId);
+      console.log('[ProfileScreen] Conversation created/retrieved:', conversation.id);
 
       // SINGLE NAVIGATION CONTRACT: Only chatId is required
-      console.log('[ProfileScreen] Navigating to ChatRoom with chatId:', chat.chatId);
+      console.log('[ProfileScreen] Navigating to ChatRoom with chatId:', conversation.id);
       navigation?.navigate('ChatRoom', {
-        chatId: chat.chatId,
+        chatId: conversation.id,
       });
     } catch (error: any) {
-      console.error('[ProfileScreen] Error creating chat:', error);
+      console.error('[ProfileScreen] Error creating conversation:', error);
       // Show error to user
       if (error?.message) {
         console.error('[ProfileScreen] Error message:', error.message);
@@ -567,13 +535,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 2,
-    flexWrap: 'wrap',
+    // flexWrap: 'wrap', // Removed to prevent wrapping
   },
   profileDisplayName: {
     fontSize: 20, // Larger
     fontFamily: Fonts.bold,
     color: Colors.black.primary,
     marginRight: 6,
+    flexShrink: 1, // Allow text to shrink/truncate
   },
 
   accountTypeContainer: {

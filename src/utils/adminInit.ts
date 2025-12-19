@@ -9,9 +9,15 @@
  * await initializeAdminAccount();
  */
 
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../services/auth/authService';
+import {
+	createUserWithEmailAndPassword,
+	signInWithEmailAndPassword,
+	doc,
+	setDoc,
+	getDoc,
+	serverTimestamp
+} from '../core/firebase/compat';
+import { auth, db } from '../core/firebase';
 import { AccountType } from '../types/account';
 
 const ADMIN_CONFIG = {
@@ -37,11 +43,10 @@ export async function initializeAdminAccount(): Promise<boolean> {
 		if (existingAdmin.exists()) {
 			console.log('✅ Admin account already exists in Firestore');
 			const adminData = existingAdmin.data();
-			
+
 			// Verify the auth user exists
 			try {
 				// Try to sign in to verify auth user exists
-				const { signInWithEmailAndPassword } = await import('firebase/auth');
 				await signInWithEmailAndPassword(auth, ADMIN_CONFIG.email, ADMIN_CONFIG.password);
 				console.log('✅ Admin auth account verified');
 				return true;
@@ -65,13 +70,24 @@ export async function initializeAdminAccount(): Promise<boolean> {
 				ADMIN_CONFIG.password
 			);
 			authUser = userCredential.user;
-			console.log(`✅ Admin auth user created: ${authUser.uid}`);
+			console.log(`✅ Admin auth user created: ${authUser?.uid}`);
 		} catch (error: any) {
 			if (error.code === 'auth/email-already-in-use') {
 				console.log('✅ Admin auth user already exists');
 				// Try to find existing user by email (would need to query users collection)
 				// For now, we'll just create the Firestore document
 				console.log('⚠️ Auth user exists but admin document may be missing. Creating Firestore doc...');
+				// Fallback: If we can't get the UID from creation, we might be stuck unless we sign in.
+				// But we tried signing in above if existingAdmin existed.
+				// If existingAdmin DID NOT exist, but Auth user DOES exist, we are here.
+				try {
+					const cred = await signInWithEmailAndPassword(auth, ADMIN_CONFIG.email, ADMIN_CONFIG.password);
+					authUser = cred.user;
+				} catch (e) {
+					console.error("Could not recover auth user ID");
+					throw error;
+				}
+
 			} else {
 				throw error;
 			}

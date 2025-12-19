@@ -16,8 +16,8 @@ import {
   runTransaction,
   serverTimestamp,
   increment,
-} from 'firebase/firestore';
-import { db } from '../auth/authService';
+} from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 
 export interface FollowerUser {
   uid: string;
@@ -39,7 +39,7 @@ export function listenToFollowers(
 ): () => void {
   if (!userId) {
     callback([]);
-    return () => {};
+    return () => { };
   }
 
   const followersRef = collection(db, 'users', userId, 'followers');
@@ -48,7 +48,7 @@ export function listenToFollowers(
     followersRef,
     async (snapshot) => {
       const followers: FollowerUser[] = [];
-      
+
       for (const docSnap of snapshot.docs) {
         const data = docSnap.data();
         followers.push({
@@ -83,7 +83,7 @@ export function listenToFollowing(
 ): () => void {
   if (!userId) {
     callback([]);
-    return () => {};
+    return () => { };
   }
 
   const followingRef = collection(db, 'users', userId, 'following');
@@ -92,7 +92,7 @@ export function listenToFollowing(
     followingRef,
     async (snapshot) => {
       const following: FollowerUser[] = [];
-      
+
       for (const docSnap of snapshot.docs) {
         const data = docSnap.data();
         following.push({
@@ -246,10 +246,10 @@ export async function unfollowUser(sourceUserId: string, targetUserId: string): 
 export async function isFollowing(sourceUserId: string, targetUserId: string): Promise<boolean> {
   try {
     if (!sourceUserId || !targetUserId) return false;
-    
+
     const followingRef = doc(db, 'users', sourceUserId, 'following', targetUserId);
     const followingSnap = await getDocs(query(collection(db, 'users', sourceUserId, 'following')));
-    
+
     // Check if targetUserId exists in the following subcollection
     return followingSnap.docs.some(docSnap => docSnap.id === targetUserId);
   } catch (error: any) {
@@ -296,9 +296,9 @@ export async function getFollowers(userId: string): Promise<FollowerUser[]> {
       const followsRef = collection(db, 'follows');
       const followsQuery = query(followsRef, where('followingId', '==', userId));
       const followsSnapshot = await getDocs(followsQuery);
-      
+
       console.log(`[getFollowers] Found ${followsSnapshot.docs.length} follows in collection`);
-      
+
       for (const followDoc of followsSnapshot.docs) {
         const followData = followDoc.data();
         const followerId = followData.followerId;
@@ -366,9 +366,9 @@ export async function getFollowing(userId: string): Promise<FollowerUser[]> {
       const followsRef = collection(db, 'follows');
       const followsQuery = query(followsRef, where('followerId', '==', userId));
       const followsSnapshot = await getDocs(followsQuery);
-      
+
       console.log(`[getFollowing] Found ${followsSnapshot.docs.length} follows in collection`);
-      
+
       for (const followDoc of followsSnapshot.docs) {
         const followData = followDoc.data();
         const followingId = followData.followingId;

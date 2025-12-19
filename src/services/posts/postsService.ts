@@ -24,9 +24,9 @@ import {
   serverTimestamp,
   QueryDocumentSnapshot,
   DocumentData,
-} from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../auth/authService';
+} from '../../core/firebase/compat';
+import { ref, uploadBytesResumable, getDownloadURL } from '../../core/firebase/compat';
+import { db, storage, auth } from '../../core/firebase';
 import { sendNotification } from '../notifications/NotificationAPI';
 import { retryWithBackoff } from '../../utils/retry';
 import { isOfflineError, safeFirestoreRead } from '../../utils/offlineHandler';
@@ -37,6 +37,7 @@ import {
   buildSafeQuery,
   sortByCreatedAtDesc,
   safeGetDocs,
+  extractCreatedAt,
 } from '../../utils/safeFirestore';
 import { normalizePost as normalizePostGlobal } from '../../utils/normalize/normalizePost';
 
@@ -51,10 +52,10 @@ function normalizeUserPost(docSnap: QueryDocumentSnapshot<DocumentData>) {
 
   return {
     id: normalized.id,
-    authorId: normalized.createdBy || normalized.userId || normalized.ownerId || normalized.authorId || null,
+    authorId: normalized.createdBy || normalized.userId || normalized.ownerId || normalized.authorId || undefined,
     media: mediaUrl ? [mediaUrl] : (normalized.gallery || []),
     caption: normalized.caption || '',
-    createdAt: normalized.createdAt,
+    createdAt: extractCreatedAt(normalized),
     likeCount: normalized.likeCount || normalized.likesCount || 0,
     commentCount: normalized.commentCount || normalized.commentsCount || 0,
     savedCount: normalized.savedCount || 0,
@@ -68,7 +69,7 @@ function normalizeUserPost(docSnap: QueryDocumentSnapshot<DocumentData>) {
 
 export interface Post {
   id: string;
-  authorId: string;
+  authorId?: string;
   media: string[];
   caption?: string;
   createdAt: any;
@@ -170,19 +171,54 @@ function extractHashtags(caption: string): string[] {
  * @param pathPrefix - Storage path prefix (e.g., 'posts', 'profile')
  * @returns Upload result with URL and metadata
  */
+/**
+ * Upload media file to Firebase Storage
+ * @param file - File object with uri and type
+ * @param userId - User ID (required for path)
+ * @param postId - Post ID (required for path)
+ * @param pathPrefix - RESERVED/IGNORED in V1 (defaults to 'posts')
+ * @returns Upload result with URL and metadata
+ */
 export async function uploadMedia(
   file: { uri: string; type: 'image' | 'video' },
-  pathPrefix: string = 'posts'
+  userId: string,
+  postId: string,
+  pathPrefix: string = 'posts' // Keep for compatibility but ignore for path construction
 ): Promise<MediaUploadResult> {
   try {
+    // V1 Canonical Path: users/{userId}/posts/{postId}/{mediaId}
     const timestamp = Date.now();
-    const fileName = `${pathPrefix}/${timestamp}_${Math.random().toString(36).substring(7)}.${file.type === 'image' ? 'jpg' : 'mp4'}`;
-    const storageRef = ref(storage, fileName);
+    const fileName = `media_${timestamp}_${Math.random().toString(36).substring(7)}.${file.type === 'image' ? 'jpg' : 'mp4'}`;
+    const storagePath = `users/${userId}/posts/${postId}/${fileName}`;
+    const storageRef = ref(storage, storagePath);
+
+    console.warn(`[UPLOAD] Uploading to canonical path: ${storagePath}`);
 
     // For React Native, we need to convert URI to blob
-    // This is a placeholder - actual implementation depends on react-native-fs or similar
     const response = await fetch(file.uri);
     const blob = await response.blob();
+
+    const currentUser = auth.currentUser;
+    console.warn('[UPLOAD] auth.currentUser:', currentUser?.uid);
+
+    if (!currentUser) {
+      console.error('[UPLOAD ERROR] No authenticated user found before upload');
+      throw new Error('User not authenticated - cannot upload');
+    }
+
+    // Note: We avoid manual token refresh here as per new architecture invariants
+    // "Remove any implicit assumptions of authentication" includes manual refresh hacks.
+    // If auth.currentUser exists, we assume it's valid.
+
+    // NATIVE AUTH CHECK & SETTLE DELAY (Critical for Real Devices)
+    // We must ensure the Native SDK (used by underlying storage) is also ready
+    const nativeAuth = require('@react-native-firebase/auth').default;
+    if (!nativeAuth().currentUser) {
+      console.error('[UPLOAD ERROR] Native Firebase Auth not fully initialized');
+      throw new Error('Firebase Auth not fully initialized for Storage upload');
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 300));
 
     const uploadTask = uploadBytesResumable(storageRef, blob);
 
@@ -192,7 +228,10 @@ export async function uploadMedia(
         (snapshot) => {
           // Progress tracking can be added here
         },
-        (error) => reject(error),
+        (error) => {
+          console.error('[UPLOAD ERROR FULL]', error);
+          reject(error);
+        },
         () => resolve(uploadTask.snapshot)
       );
     });
@@ -203,7 +242,6 @@ export async function uploadMedia(
       url: downloadURL,
       meta: {
         // Metadata extraction would go here
-        // For now, return placeholder
       },
     };
   } catch (error: any) {
@@ -226,12 +264,17 @@ export async function createPost(
   payload: Partial<Post>,
   mediaFiles?: { uri: string; type: 'image' | 'video' }[]
 ): Promise<Post> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
+    // Generate postId upfront
+    const postId = `post_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
     // Upload media files first
     const mediaUrls: string[] = [];
     if (mediaFiles && mediaFiles.length > 0) {
       for (const file of mediaFiles) {
-        const uploadResult = await uploadMedia(file, 'posts');
+        // Use the new signature with userId and postId
+        const uploadResult = await uploadMedia(file, authorId, postId);
         mediaUrls.push(uploadResult.url);
       }
     }
@@ -240,6 +283,7 @@ export async function createPost(
     const hashtags = payload.caption ? extractHashtags(payload.caption) : [];
 
     const postData = {
+      id: postId, // Explicitly include ID in data if needed, but doc ID is key
       authorId,
       media: mediaUrls,
       caption: payload.caption || '',
@@ -251,11 +295,11 @@ export async function createPost(
       ...payload.metadata,
     };
 
-    const postsRef = collection(db, 'posts');
-    const docRef = await addDoc(postsRef, postData);
+    const postRef = doc(db, 'posts', postId);
+    await setDoc(postRef, postData);
 
     return {
-      id: docRef.id,
+      id: postId,
       ...postData,
       createdAt: new Date(),
     } as Post;
@@ -271,6 +315,7 @@ export async function createPost(
  * @param data - Partial post data to update
  */
 export async function updatePost(postId: string, data: Partial<Post>): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const postRef = doc(db, 'posts', postId);
     const updateData: any = { ...data };
@@ -293,6 +338,7 @@ export async function updatePost(postId: string, data: Partial<Post>): Promise<v
  * @param postId - Post document ID
  */
 export async function deletePost(postId: string): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     const postRef = doc(db, 'posts', postId);
     await deleteDoc(postRef);
@@ -483,6 +529,7 @@ export async function addComment(
   userId: string,
   text: string
 ): Promise<{ commentId: string }> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   console.log("🔥 ADD COMMENT FUNCTION HIT", { postId, userId });
   try {
     // Get user data for comment
@@ -572,6 +619,7 @@ async function triggerCommentNotification(postId: string, commenterId: string, c
  * @param commentId - Comment ID
  */
 export async function deleteComment(postId: string, commentId: string): Promise<void> {
+  if (!auth.currentUser) throw new Error('User not authenticated');
   try {
     // Use batch write for atomicity (delete comment + decrement count)
     const batch = writeBatch(db);
@@ -591,88 +639,11 @@ export async function deleteComment(postId: string, commentId: string): Promise<
   }
 }
 
-// ---------- Save/Unsave ----------
+// CRITICAL: Interaction logic moved to post.interactions.service.ts
+// Do NOT add save/unsave/like/comment logic here.
+// Use PostInteractions.toggleLike, PostInteractions.toggleSavePost, etc.
 
-/**
- * Save a post for a user
- * @param userId - User ID
- * @param postId - Post ID
- */
-export async function savePost(userId: string, postId: string): Promise<void> {
-  try {
-    const savedRef = doc(db, 'users', userId, 'saved', postId);
-    await setDoc(savedRef, {
-      postId,
-      savedAt: serverTimestamp(),
-    });
-
-    // Increment saved count
-    const postRef = doc(db, 'posts', postId);
-    await updateDoc(postRef, {
-      savedCount: increment(1),
-    });
-  } catch (error: any) {
-    console.error('Error saving post:', error);
-    throw { code: 'save-post-failed', message: 'Failed to save post' };
-  }
-}
-
-/**
- * Unsave a post for a user
- * @param userId - User ID
- * @param postId - Post ID
- */
-export async function unsavePost(userId: string, postId: string): Promise<void> {
-  try {
-    const savedRef = doc(db, 'users', userId, 'saved', postId);
-    await deleteDoc(savedRef);
-
-    // Decrement saved count
-    const postRef = doc(db, 'posts', postId);
-    await updateDoc(postRef, {
-      savedCount: increment(-1),
-    });
-  } catch (error: any) {
-    console.error('Error unsaving post:', error);
-    throw { code: 'unsave-post-failed', message: 'Failed to unsave post' };
-  }
-}
-
-// ---------- Count Updates ----------
-
-/**
- * Increment like count for a post
- * @param postId - Post ID
- * @param delta - Amount to increment (default: 1)
- */
-export async function incrementLikeCount(postId: string, delta: number = 1): Promise<void> {
-  try {
-    const postRef = doc(db, 'posts', postId);
-    await updateDoc(postRef, {
-      likeCount: increment(delta),
-    });
-  } catch (error: any) {
-    console.error('Error incrementing like count:', error);
-    throw { code: 'increment-like-failed', message: 'Failed to update like count' };
-  }
-}
-
-/**
- * Increment comment count for a post
- * @param postId - Post ID
- * @param delta - Amount to increment (default: 1)
- */
-export async function incrementCommentCount(postId: string, delta: number = 1): Promise<void> {
-  try {
-    const postRef = doc(db, 'posts', postId);
-    await updateDoc(postRef, {
-      commentCount: increment(delta),
-    });
-  } catch (error: any) {
-    console.error('Error incrementing comment count:', error);
-    throw { code: 'increment-comment-failed', message: 'Failed to update comment count' };
-  }
-}
+// CRITICAL: Interaction logic moved to post.interactions.service.ts
 
 // ---------- Hashtag Search ----------
 
@@ -682,20 +653,20 @@ export async function incrementCommentCount(postId: string, delta: number = 1): 
  * @param limit - Maximum results (default: 20)
  * @returns Array of hashtag results with counts
  */
-export async function searchHashtags(
-  query: string,
+export async function searchPosts(
+  searchQuery: string,
   limit: number = 20
 ): Promise<{ tag: string; count: number }[]> {
   try {
-    const searchQuery = query.toLowerCase().trim().replace('#', '');
-    if (!searchQuery) {
+    const term = searchQuery.toLowerCase().trim().replace('#', '');
+    if (!term) {
       return [];
     }
 
     const postsRef = collection(db, 'posts');
     const q = query(
       postsRef,
-      where('hashtags', 'array-contains', searchQuery),
+      where('hashtags', 'array-contains', term),
       firestoreLimit(limit)
     );
 

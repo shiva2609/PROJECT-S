@@ -19,8 +19,8 @@ import {
   serverTimestamp,
   increment,
   Unsubscribe,
-} from 'firebase/firestore';
-import { db } from '../../../services/auth/authService';
+} from '../../../core/firebase/compat';
+import { db } from '../../../core/firebase';
 
 /**
  * Get followers IDs (one-time fetch)

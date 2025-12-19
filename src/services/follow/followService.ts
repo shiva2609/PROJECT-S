@@ -6,7 +6,7 @@
  * Never touches likes/comments/saves
  */
 
-import { db } from '../auth/authService';
+import { db } from '../../core/firebase';
 import {
   doc,
   updateDoc,
@@ -18,7 +18,7 @@ import {
   setDoc,
   deleteDoc,
   serverTimestamp,
-} from 'firebase/firestore';
+} from '../../core/firebase/compat';
 import { store } from '../../store';
 import { setUserFollowState } from '../../store/slices/userFollowStateSlice';
 import type { FollowState } from '../../store/slices/userFollowStateSlice';

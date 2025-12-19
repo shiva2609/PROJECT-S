@@ -1,28 +1,13 @@
 /**
- * Firebase App Initialization
+ * Firebase App Initialization (Native)
  * 
- * SINGLE SOURCE OF TRUTH for Firebase app initialization.
- * This file ensures Firebase is initialized exactly once.
- * 
- * DO NOT call initializeApp() anywhere else in the codebase.
+ * Uses @react-native-firebase/app which reads from google-services.json / GoogleService-Info.plist
  */
 
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { firebaseConfig } from './config';
+import firebase from '@react-native-firebase/app';
 
-let firebaseApp: FirebaseApp;
-
-// Initialize Firebase App (reuse existing if available)
-if (getApps().length === 0) {
-    firebaseApp = initializeApp(firebaseConfig);
-    console.log('🔥 Firebase App initialized:', {
-        projectId: firebaseApp.options.projectId,
-        appId: firebaseApp.options.appId,
-        authDomain: firebaseApp.options.authDomain,
-    });
-} else {
-    firebaseApp = getApp();
-    console.log('🔥 Firebase App already initialized, reusing existing instance');
-}
+// The default app is automatically initialized by the native module
+const firebaseApp = firebase.app();
+console.log('🔥 Firebase App (Native) initialized');
 
 export { firebaseApp };

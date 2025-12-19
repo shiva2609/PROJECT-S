@@ -71,8 +71,12 @@ export default function CourseCreator({ accountType, onClose, navigation }: Prop
     try {
       const imageUrls: string[] = [];
       for (const imageUri of images) {
-        const path = `courses/${user.uid}/${Date.now()}_${Math.random().toString(36)}.jpg`;
-        const url = await uploadImageAsync({ uri: imageUri, path });
+        // Strict upload contract: ({ uri }, userId, folder)
+        const url = await uploadImageAsync(
+          { uri: imageUri },
+          user.uid,
+          'courses'
+        );
         imageUrls.push(url);
       }
 

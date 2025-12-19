@@ -70,8 +70,12 @@ export default function LocalTourCreator({ accountType, onClose, navigation }: P
     try {
       const imageUrls: string[] = [];
       for (const imageUri of images) {
-        const path = `localTours/${user.uid}/${Date.now()}_${Math.random().toString(36)}.jpg`;
-        const url = await uploadImageAsync({ uri: imageUri, path });
+        // Strict upload contract: ({ uri }, userId, folder)
+        const url = await uploadImageAsync(
+          { uri: imageUri },
+          user.uid,
+          'localTours'
+        );
         imageUrls.push(url);
       }
 

@@ -21,8 +21,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../../services/auth/authService';
+import { doc, getDoc, updateDoc } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { useAuth } from '../../providers/AuthProvider';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
@@ -38,15 +38,15 @@ import { useFocusEffect } from '@react-navigation/native';
  */
 const generateAutoBio = (formData: ProfileData, accountType: AccountType): string => {
   const parts: string[] = [];
-  
+
   // Start with account type
   const accountTypeDisplay = accountType === 'Host' ? 'Trip Host' :
-                            accountType === 'EventOrganizer' ? 'Event Organizer' :
-                            accountType === 'RideCreator' ? 'Ride Partner' :
-                            accountType === 'StayHost' ? 'Stay Host' :
-                            accountType === 'AdventurePro' ? 'Adventure Pro' :
-                            accountType === 'Agency' ? 'Travel Agency' :
-                            accountType;
+    accountType === 'EventOrganizer' ? 'Event Organizer' :
+      accountType === 'RideCreator' ? 'Ride Partner' :
+        accountType === 'StayHost' ? 'Stay Host' :
+          accountType === 'AdventurePro' ? 'Adventure Pro' :
+            accountType === 'Agency' ? 'Travel Agency' :
+              accountType;
   parts.push(accountTypeDisplay);
 
   // Role-specific bio generation
@@ -152,7 +152,7 @@ const generateAutoBio = (formData: ProfileData, accountType: AccountType): strin
 
   // Join parts with " | " separator
   let bio = parts.join(' | ');
-  
+
   // Add period at the end if not empty
   if (bio && !bio.endsWith('.')) {
     bio += '.';
@@ -307,7 +307,7 @@ interface ProfileData {
 }
 
 export default function EditProfileScreen({ navigation, route }: any) {
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -347,10 +347,10 @@ export default function EditProfileScreen({ navigation, route }: any) {
           email: data.email || user.email,
           profilePhoto: data.profilePhoto || data.photoURL || data.profilePhotoUrl,
         });
-        
+
         const userAccountType = (data.accountType || data.role || 'Traveler') as AccountType;
         setAccountType(userAccountType);
-        
+
         const currentProfilePhoto = data.profilePhoto || data.photoURL || data.profilePhotoUrl || '';
         setPreviousProfilePhotoUrl(currentProfilePhoto || null);
         setFormData({
@@ -447,10 +447,22 @@ export default function EditProfileScreen({ navigation, route }: any) {
       return;
     }
 
+    // CRITICAL: Check auth readiness (matching post upload pattern)
+    if (!authReady) {
+      Alert.alert('Error', 'Authentication not ready. Please wait a moment and try again.');
+      return;
+    }
+
     try {
       setUploadingPhoto(true);
 
-      // Upload new profile photo
+      console.log('📸 [EditProfileScreen] Starting profile photo upload:', {
+        userId: user.uid,
+        authReady,
+        imageUri: finalImageUri.substring(0, 50) + '...',
+      });
+
+      // Upload new profile photo (now includes auth checks and token refresh)
       const downloadURL = await uploadProfilePhoto(finalImageUri, user.uid);
       console.log('✅ [EditProfileScreen] Profile photo uploaded:', downloadURL);
 
@@ -478,7 +490,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
     } finally {
       setUploadingPhoto(false);
     }
-  }, [user, previousProfilePhotoUrl, fetchUserData]);
+  }, [user, authReady, previousProfilePhotoUrl, fetchUserData]);
 
   // Handle finalProfilePhoto from ProfilePhotoCropScreen
   useFocusEffect(
@@ -654,11 +666,12 @@ export default function EditProfileScreen({ navigation, route }: any) {
       if (result.assets && result.assets.length > 0) {
         setUploadingGallery(galleryField);
         const uploadPromises = result.assets.map(async (asset) => {
-          const fileName = `${galleryField}/${user?.uid}/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-          return await uploadImageAsync({
-            uri: asset.uri || '',
-            path: fileName,
-          });
+          if (!user?.uid) throw new Error('User ID required');
+          return await uploadImageAsync(
+            { uri: asset.uri || '' },
+            user.uid,
+            galleryField
+          );
         });
 
         const uploadedUrls = await Promise.all(uploadPromises);
@@ -1112,11 +1125,11 @@ export default function EditProfileScreen({ navigation, route }: any) {
                       maxHeight: 800,
                     });
                     if (result.assets && result.assets[0]) {
-                      const fileName = `business_logos/${user?.uid}/${Date.now()}.jpg`;
-                      const downloadURL = await uploadImageAsync({
-                        uri: result.assets[0].uri || '',
-                        path: fileName,
-                      });
+                      const downloadURL = await uploadImageAsync(
+                        { uri: result.assets[0].uri || '' },
+                        user?.uid!!,
+                        'business_logos'
+                      );
                       setFormData({ ...formData, businessLogo: downloadURL });
                     }
                   } catch (error) {

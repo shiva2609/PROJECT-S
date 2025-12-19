@@ -5,8 +5,8 @@ import {
   StyleSheet,
   Dimensions,
 } from 'react-native';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../services/auth/authService';
+import { doc, getDoc } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import { useProfilePhoto } from '../../hooks/useProfilePhoto';
 import { Post } from '../../services/api/firebaseService';
 import { formatTimestamp, parseHashtags } from '../../utils/postHelpers';
@@ -288,6 +288,18 @@ function PostCard({
   const location = post.location || post.placeName || '';
   const username = authorUsername;
   const timestamp = formatTimestamp(post.createdAt || Date.now());
+
+  // DEV-ONLY: Verify username is never empty
+  if (__DEV__ && !username) {
+    console.warn('[PostCard] Missing username for post:', {
+      postId: post.id,
+      creatorId,
+      authorUsername: (post as any).authorUsername,
+      postUsername: post.username,
+      hasAuthorUsername: !!(post as any).authorUsername,
+      hasPostUsername: !!post.username,
+    });
+  }
 
   const likeCount = actualLikeCount > 0 ? actualLikeCount : Math.max(0, post.likeCount || 0);
   const commentCount = actualCommentCount > 0 ? actualCommentCount : Math.max(0, post.commentCount || 0);

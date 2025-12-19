@@ -19,8 +19,8 @@ import {
   startAfter,
   QueryDocumentSnapshot,
   Timestamp,
-} from 'firebase/firestore';
-import { db } from '../../../services/auth/authService';
+} from '../../../core/firebase/compat';
+import { db } from '../../../core/firebase';
 import { normalizePost } from '../../../utils/normalize/normalizePost';
 import { Post as FirestorePost } from '../../../types/firestore';
 
@@ -41,13 +41,51 @@ function chunkArray<T>(array: T[], chunkSize: number): T[][] {
  * @param postIds - Array of post IDs to fetch
  * @returns Array of posts
  */
+/**
+ * Helper to extract image URLs
+ */
+function extractImageURLs(raw: any, normalized: any): string[] {
+  const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage ||
+    raw.finalCroppedUrl || null;
+
+  let imageURLs: string[] = [];
+
+  if (Array.isArray(raw.mediaUrls) && raw.mediaUrls.length > 0) {
+    imageURLs = raw.mediaUrls.filter((url: any) => url && typeof url === 'string');
+  } else if (Array.isArray(raw.gallery) && raw.gallery.length > 0) {
+    imageURLs = raw.gallery.filter((url: any) => url && typeof url === 'string');
+  } else if (Array.isArray(raw.media) && raw.media.length > 0) {
+    imageURLs = raw.media
+      .map((item: any) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object') {
+          return item.url || item.uri || item.finalCroppedUrl || null;
+        }
+        return null;
+      })
+      .filter((url: any): url is string => url !== null && typeof url === 'string');
+  } else if (Array.isArray(normalized.mediaUrls) && normalized.mediaUrls.length > 0) {
+    imageURLs = normalized.mediaUrls.filter((url: any) => url && typeof url === 'string');
+  } else if (Array.isArray(normalized.gallery) && normalized.gallery.length > 0) {
+    imageURLs = normalized.gallery.filter((url: any) => url && typeof url === 'string');
+  } else {
+    const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl ||
+      normalized.mediaUrl || normalized.coverImage || null;
+    if (imageURL) {
+      imageURLs = [imageURL];
+    }
+  }
+
+  return imageURLs.length > 0 ? imageURLs : (rawImageURL ? [rawImageURL] : []);
+}
+
 export async function getPostsByIds(postIds: string[]): Promise<PostWithAuthor[]> {
   if (!postIds || postIds.length === 0) {
     return [];
   }
 
   try {
-    // Fetch all posts in parallel
+    // 1. Fetch all posts in parallel
     const postPromises = postIds.map(async (postId) => {
       try {
         const postRef = doc(db, 'posts', postId);
@@ -61,35 +99,13 @@ export async function getPostsByIds(postIds: string[]): Promise<PostWithAuthor[]
             const rawImageURL = raw.imageURL || raw.imageUrl || raw.mediaUrl || raw.coverImage ||
               raw.finalCroppedUrl || null;
 
-            let imageURLs: string[] = [];
-
-            if (Array.isArray(raw.mediaUrls) && raw.mediaUrls.length > 0) {
-              imageURLs = raw.mediaUrls.filter((url: any) => url && typeof url === 'string');
-            } else if (Array.isArray(raw.gallery) && raw.gallery.length > 0) {
-              imageURLs = raw.gallery.filter((url: any) => url && typeof url === 'string');
-            } else if (Array.isArray(raw.media) && raw.media.length > 0) {
-              imageURLs = raw.media
-                .map((item: any) => {
-                  if (typeof item === 'string') return item;
-                  if (item && typeof item === 'object') {
-                    return item.url || item.uri || item.finalCroppedUrl || null;
-                  }
-                  return null;
-                })
-                .filter((url: any): url is string => url !== null && typeof url === 'string');
-            } else {
-              const imageURL = rawImageURL || normalized.imageURL || normalized.imageUrl ||
-                normalized.mediaUrl || normalized.coverImage || null;
-              if (imageURL) {
-                imageURLs = [imageURL];
-              }
-            }
+            const imageURLs = extractImageURLs(raw, normalized);
 
             const post: PostWithAuthor = {
               ...normalized,
-              authorId: normalized.createdBy || normalized.authorId || '',
+              authorId: normalized.createdBy,
               imageURL: rawImageURL,
-              imageURLs: imageURLs.length > 0 ? imageURLs : (rawImageURL ? [rawImageURL] : []),
+              imageURLs: imageURLs,
             };
 
             return post;
@@ -102,13 +118,51 @@ export async function getPostsByIds(postIds: string[]): Promise<PostWithAuthor[]
       }
     });
 
-    const posts = await Promise.all(postPromises);
-    return posts.filter((p): p is PostWithAuthor => p !== null);
+    const posts = (await Promise.all(postPromises)).filter((p): p is PostWithAuthor => p !== null);
+
+    // 2. Identify missing authors
+    const authorIdsToFetch = new Set<string>();
+    posts.forEach(p => {
+      if (!p.authorUsername || !p.authorAvatar) {
+        if (p.authorId) {
+          authorIdsToFetch.add(p.authorId);
+        }
+      }
+    });
+
+    if (authorIdsToFetch.size === 0) {
+      return posts;
+    }
+
+    // 3. Fetch missing author info
+    const { getUsersPublicInfo } = await import('../user/user.service');
+    const authors = await getUsersPublicInfo(Array.from(authorIdsToFetch));
+    const authorMap = new Map(authors.map(u => [u.uid, u]));
+
+    // 4. Enrich posts with author info
+    const enrichedPosts = posts.map(post => {
+      const author = authorMap.get(post.authorId);
+      if (author) {
+        return {
+          ...post,
+          authorUsername: author.username,
+          authorDisplayName: author.displayName,
+          authorAvatar: author.photoURL,
+          username: author.username,
+          userAvatar: author.photoURL,
+        };
+      }
+      return post;
+    });
+
+    return enrichedPosts;
+
   } catch (error: any) {
     console.error('[getPostsByIds] Error:', error);
     return [];
   }
 }
+
 
 /**
  * Post with author information

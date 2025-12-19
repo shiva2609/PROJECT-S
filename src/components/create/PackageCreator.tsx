@@ -75,12 +75,12 @@ export default function PackageCreator({ accountType, onClose, navigation }: Pro
   const validateStartDate = (startDateStr: string): boolean => {
     const startDateObj = parseDate(startDateStr);
     if (!startDateObj) return false;
-    
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const twoWeeksFromToday = new Date(today);
     twoWeeksFromToday.setDate(today.getDate() + 14);
-    
+
     return startDateObj >= twoWeeksFromToday;
   };
 
@@ -183,8 +183,12 @@ export default function PackageCreator({ accountType, onClose, navigation }: Pro
       // Upload images
       const imageUrls: string[] = [];
       for (const imageUri of images) {
-        const path = `posts/${user.uid}/${Date.now()}_${Math.random().toString(36)}.jpg`;
-        const url = await uploadImageAsync({ uri: imageUri, path });
+        // Strict upload contract: ({ uri }, userId, folder)
+        const url = await uploadImageAsync(
+          { uri: imageUri },
+          user.uid,
+          'posts'
+        );
         imageUrls.push(url);
       }
 
