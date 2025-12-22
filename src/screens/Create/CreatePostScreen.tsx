@@ -25,6 +25,7 @@ import {
   requestMediaPermission,
   showPermissionDialog,
   MediaPermissionType,
+  MediaPermissionState,
   PermissionAction,
 } from '../../utils/mediaPermissions';
 import { ScreenLayout } from '../../components/layout/ScreenLayout';
@@ -51,8 +52,9 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
   const [photos, setPhotos] = useState<Asset[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [permissionState, setPermissionState] = useState<MediaPermissionState>(MediaPermissionState.GRANTED);
   const isMountedRef = useRef(true);
-  const hasNavigatedFromCreateFlowRef = useRef(false); // Track if we're navigating within create flow
+  const hasNavigatedFromCreateFlowRef = useRef(false);
 
   // 🔐 DEPRECATED: Custom permission logic removed
   // ALL permission handling now delegated to mediaPermissions.ts
@@ -62,142 +64,38 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
     if (!isMountedRef.current) return;
 
     try {
-      // 🔐 iOS PICKER-FIRST FLOW: DO NOT pre-check permission on iOS
-      // Permission is inferred from picker result, not queried beforehand
-      if (Platform.OS === 'ios') {
-        console.log('🍎 [CreatePostScreen] iOS: Opening picker directly (no pre-check)');
+      // 🔐 STEP 1: Resolve permission state through canonical resolver
+      const resolution = await resolveMediaPermissionState(MediaPermissionType.GALLERY);
+      if (!isMountedRef.current) return;
 
-        // Check if we've successfully loaded before
-        const { hasMediaPermissionBeenGranted, markMediaPermissionGranted } = await import('../../utils/mediaPermissionMemory');
-        const hasLocalGrant = await hasMediaPermissionBeenGranted();
-
-        // iOS: Always use CameraRoll, no permission pre-check
-        try {
-          const result = await CameraRoll.getPhotos({
-            first: 100,
-            assetType: 'Photos',
-          });
-
-          if (result.edges && result.edges.length > 0) {
-            const photos = result.edges.map((edge) => {
-              const photo = edge.node.image;
-              return {
-                uri: photo.uri,
-                width: photo.width || 0,
-                height: photo.height || 0,
-                timestamp: edge.node.timestamp || Date.now(),
-                type: 'image/jpeg',
-                fileName: photo.filename || `photo_${edge.node.timestamp || Date.now()}.jpg`,
-              } as Asset;
-            });
-
+      // 🔐 STEP 2: Handle permission state
+      if (!resolution.canAccess) {
+        if (resolution.action === PermissionAction.REQUEST) {
+          const requestResult = await requestMediaPermission(MediaPermissionType.GALLERY);
+          if (!requestResult.canAccess) {
             if (isMountedRef.current) {
-              setPhotos(photos);
-
-              // Mark permission as granted after successful media access
-              if (!hasLocalGrant) {
-                await markMediaPermissionGranted();
-                console.log('🍎 [CreatePostScreen] iOS: Permission marked as granted');
-              }
-            }
-          } else {
-            // 🔐 EMPTY GALLERY ≠ PERMISSION DENIED
-            // This could be limited access or truly empty gallery
-            if (isMountedRef.current) {
-              setPhotos([]);
-              console.log('🍎 [CreatePostScreen] iOS: Empty gallery (limited access or no photos)');
-
-              // Still mark as granted - user allowed access
-              if (!hasLocalGrant) {
-                await markMediaPermissionGranted();
-              }
-            }
-          }
-        } catch (iosError: any) {
-          console.error('🍎 [CreatePostScreen] iOS picker error:', iosError);
-
-          // Only show permission dialog if error indicates permission issue
-          const errorMsg = iosError?.message?.toLowerCase() ?? '';
-          if (errorMsg.includes('permission') || errorMsg.includes('denied') || errorMsg.includes('authorized')) {
-            const { showPermissionDialog } = await import('../../utils/mediaPermissions');
-            if (isMountedRef.current) {
-              showPermissionDialog({
-                state: 'denied' as any,
-                canAccess: false,
-                message: 'Photo access required. Please allow photo access in Settings.',
-                action: 'OPEN_SETTINGS' as any,
-              });
-            }
-          } else {
-            // Other error - show generic error
-            if (isMountedRef.current) {
-              Alert.alert('Error', 'Failed to load photos. Please try again.');
-            }
-          }
-        }
-
-        if (isMountedRef.current) {
-          setLoading(false);
-        }
-        return;
-      }
-
-      // 🔐 ANDROID FLOW: Use permission bridging layer
-      const { hasMediaPermissionBeenGranted, markMediaPermissionGranted } = await import('../../utils/mediaPermissionMemory');
-      const { resolveMediaPermissionState, requestMediaPermission, showPermissionDialog, MediaPermissionType, PermissionAction } = await import('../../utils/mediaPermissions');
-
-      const hasLocalGrant = await hasMediaPermissionBeenGranted();
-
-      // If we have local grant memory, skip permission dialog
-      if (hasLocalGrant) {
-        console.log('🤖 [CreatePostScreen] Android: Permission previously granted, loading media directly');
-      } else {
-        // Resolve permission state through canonical resolver
-        const resolution = await resolveMediaPermissionState(MediaPermissionType.GALLERY);
-        if (!isMountedRef.current) return;
-
-        // Handle permission state
-        if (!resolution.canAccess) {
-          if (resolution.action === PermissionAction.REQUEST) {
-            const requestResult = await requestMediaPermission(MediaPermissionType.GALLERY);
-
-            if (!requestResult.canAccess) {
-              // Still no access - show recovery dialog
-              if (isMountedRef.current) {
-                showPermissionDialog(requestResult);
-                setLoading(false);
-              }
-              return;
-            }
-            // Permission granted - continue to load photos below
-          } else {
-            // Blocked or other state - show recovery dialog
-            if (isMountedRef.current) {
-              showPermissionDialog(resolution);
+              showPermissionDialog(requestResult);
               setLoading(false);
             }
             return;
           }
+        } else {
+          if (isMountedRef.current) {
+            showPermissionDialog(resolution);
+            setLoading(false);
+          }
+          return;
         }
       }
 
-      // Permission granted - load photos
-      let result = await CameraRoll.getPhotos({
-        first: 100,
-        assetType: 'Photos',
-        groupTypes: 'All',
+      // 🔐 STEP 3: Load photos with mandatory MIME-ONLY query (NO folder filtering)
+      const PAGE_SIZE = 500;
+      const result = await CameraRoll.getPhotos({
+        first: PAGE_SIZE,
+        assetType: 'Photos', // 🔐 STRICT VIDEO EXCLUSION
+        include: ['filename', 'fileSize', 'imageSize', 'location'],
+        mimeTypes: ['image/jpeg', 'image/png', 'image/webp'], // Allow all standard image types
       });
-
-      // 🔐 ANDROID FIX: Force media re-query after first grant
-      if (Platform.OS === 'android' && result.edges.length === 0 && !hasLocalGrant) {
-        console.log('🤖 [CreatePostScreen] Android: Empty result on first grant, retrying after delay...');
-        await new Promise(res => setTimeout(res, 300));
-        result = await CameraRoll.getPhotos({
-          first: 100,
-          assetType: 'Photos',
-          groupTypes: 'All',
-        });
-      }
 
       if (result.edges && result.edges.length > 0) {
         const photos = result.edges.map((edge) => {
@@ -206,32 +104,28 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
             uri: photo.uri,
             width: photo.width || 0,
             height: photo.height || 0,
-            timestamp: edge.node.timestamp || Date.now(),
+            timestamp: String(edge.node.timestamp || Date.now()),
             type: 'image/jpeg',
             fileName: photo.filename || `photo_${edge.node.timestamp || Date.now()}.jpg`,
-          } as Asset;
+          } as any as Asset;
         });
 
         if (isMountedRef.current) {
           setPhotos(photos);
+          setPermissionState(resolution.state);
 
-          // 🔐 CRITICAL: Mark permission as granted ONLY after successful media access
-          if (!hasLocalGrant) {
-            await markMediaPermissionGranted();
-            console.log('🤖 [CreatePostScreen] Android: Permission marked as granted');
+          // 🛠️ REGRESSION PROTECTION: Dev-only logging
+          if (__DEV__) {
+            console.log('📸 [CreatePostScreen] MEDIA FETCH COUNT:', photos.length);
+            console.log(
+              '📁 [CreatePostScreen] SAMPLE FILES:',
+              photos.slice(0, 5).map(a => a.fileName || (a.uri ? a.uri.split('/').pop() : 'unknown'))
+            );
           }
         }
       } else {
-        // 🔐 EMPTY GALLERY ≠ PERMISSION DENIED
-        // Show empty state, don't re-ask permission
         if (isMountedRef.current) {
           setPhotos([]);
-          console.log('🤖 [CreatePostScreen] Android: Gallery is empty (not a permission issue)');
-
-          // Still mark permission as granted if we got here
-          if (!hasLocalGrant) {
-            await markMediaPermissionGranted();
-          }
         }
       }
     } catch (error: any) {
@@ -279,6 +173,17 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
     };
   }, [loadPhotos]);
 
+  // Lifecycle re-sync on focus
+  useFocusEffect(
+    useCallback(() => {
+      if (hasNavigatedFromCreateFlowRef.current) {
+        hasNavigatedFromCreateFlowRef.current = false;
+        return;
+      }
+      loadPhotos();
+    }, [loadPhotos])
+  );
+
   // TOGGLE SELECTION: First tap = select, second tap = deselect
   // This ensures proper toggle behavior for image selection
   const handleImagePress = useCallback((asset: Asset) => {
@@ -295,7 +200,7 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
         uri: imageId,
         width: asset.width,
         height: asset.height,
-        createdAt: asset.timestamp || Date.now(),
+        createdAt: (asset.timestamp ? (typeof asset.timestamp === 'string' ? parseInt(asset.timestamp, 10) : asset.timestamp) : Date.now()) as any,
       });
 
       // Update selected index if needed
@@ -326,7 +231,7 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
         uri: imageId,
         width: asset.width,
         height: asset.height,
-        createdAt: asset.timestamp || Date.now(),
+        createdAt: (asset.timestamp ? (typeof asset.timestamp === 'string' ? parseInt(asset.timestamp, 10) : asset.timestamp) : Date.now()) as any,
       });
       // Set as preview after selection
       const newIndex = selectedImages.length;
@@ -334,51 +239,6 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
     }
   }, [selectedImages, toggleSelectImage]);
 
-  const handleCamera = useCallback(async () => {
-    try {
-      const options = {
-        mediaType: 'photo' as MediaType,
-        quality: 0.8,
-      };
-
-      const result = await launchCamera(options);
-      if (result.assets && result.assets[0] && result.assets[0].uri) {
-        const capturedImage = {
-          id: result.assets[0].uri,
-          uri: result.assets[0].uri,
-          width: result.assets[0].width,
-          height: result.assets[0].height,
-          createdAt: result.assets[0].timestamp || Date.now(),
-        };
-
-        // Check if already selected (toggle behavior)
-        const exists = selectedImages.some((img) => img.id === capturedImage.id);
-
-        if (exists) {
-          // Deselect if already selected
-          toggleSelectImage(capturedImage);
-          const updatedImages = selectedImages.filter((img) => img.id !== capturedImage.id);
-          setSelectedIndex(updatedImages.length > 0 ? updatedImages.length - 1 : 0);
-        } else {
-          // Select if not selected (check max limit)
-          if (selectedImages.length >= MAX_SELECTION) {
-            Alert.alert(
-              'Maximum Selection',
-              `You can select up to ${MAX_SELECTION} images only.`,
-              [{ text: 'OK' }]
-            );
-            return;
-          }
-          toggleSelectImage(capturedImage);
-          setSelectedIndex(selectedImages.length);
-        }
-      }
-    } catch (error: any) {
-      if (error.code !== 'E_CAMERA_CANCELLED') {
-        Alert.alert('Error', 'Failed to capture photo');
-      }
-    }
-  }, [selectedImages, toggleSelectImage]);
 
   const handleNext = useCallback(() => {
     if (selectedImages.length === 0) {
@@ -465,6 +325,25 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
         </TouchableOpacity>
       </View>
 
+      {/* 🔐 iOS LIMITED ACCESS BANNER */}
+      {Platform.OS === 'ios' && permissionState === MediaPermissionState.LIMITED && (
+        <View style={styles.limitedBanner}>
+          <View style={styles.limitedTextContainer}>
+            <Icon name="information-circle-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.limitedText}>You've allowed access to only some photos</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.limitedButton}
+            onPress={async () => {
+              await requestMediaPermission(MediaPermissionType.GALLERY);
+              loadPhotos();
+            }}
+          >
+            <Text style={styles.limitedButtonText}>Select More</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Preview Section */}
       {previewImage && (
         <View style={styles.previewContainer}>
@@ -493,17 +372,6 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
         numColumns={GRID_COLUMNS}
         contentContainerStyle={styles.gridContainer}
         showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <TouchableOpacity
-            style={[styles.photoItem, { width: ITEM_SIZE, height: ITEM_SIZE }]}
-            activeOpacity={0.9}
-            onPress={handleCamera}
-          >
-            <View style={[styles.cameraTile, { width: ITEM_SIZE, height: ITEM_SIZE }]}>
-              <Icon name="camera" size={28} color={Colors.brand.primary} />
-            </View>
-          </TouchableOpacity>
-        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Icon name="images-outline" size={64} color={Colors.black.qua} />
@@ -582,14 +450,40 @@ const styles = StyleSheet.create({
   gridContainer: {
     padding: GRID_SPACING,
   },
+  limitedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#3C3C3C',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1C1C1C',
+  },
+  limitedTextContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  limitedText: {
+    fontFamily: Fonts.regular,
+    fontSize: 13,
+    color: '#FFFFFF',
+    marginLeft: 8,
+  },
+  limitedButton: {
+    backgroundColor: Colors.brand.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  limitedButtonText: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    color: '#FFFFFF',
+  },
   photoItem: {
     margin: GRID_SPACING / 2,
-  },
-  cameraTile: {
-    backgroundColor: Colors.white.secondary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 4,
   },
   emptyContainer: {
     flex: 1,

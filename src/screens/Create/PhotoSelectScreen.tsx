@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { launchImageLibrary, launchCamera, Asset, MediaType } from 'react-native-image-picker';
+import { Asset } from 'react-native-image-picker';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
@@ -24,6 +24,7 @@ import {
   requestMediaPermission,
   showPermissionDialog,
   MediaPermissionType,
+  MediaPermissionState,
   PermissionAction,
 } from '../../utils/mediaPermissions';
 import { ScreenLayout } from '../../components/layout/ScreenLayout';
@@ -63,9 +64,10 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
   const [loading, setLoading] = useState(true);
   const [contentType, setContentType] = useState<ContentType>('post');
   const [previewImage, setPreviewImage] = useState<SelectedImage | null>(null);
-  const [lockedRatio, setLockedRatio] = useState<'1:1' | '4:5' | '16:9' | null>(null); // Lock ratio on first selection (Instagram-style)
+  const [lockedRatio, setLockedRatio] = useState<'1:1' | '4:5' | '16:9' | null>(null);
+  const [permissionState, setPermissionState] = useState<MediaPermissionState>(MediaPermissionState.GRANTED);
   const isMountedRef = useRef(true);
-  const hasNavigatedFromCreateFlowRef = useRef(false); // Track if we're navigating within create flow
+  const hasNavigatedFromCreateFlowRef = useRef(false);
 
   // 🔐 DEPRECATED: Custom permission logic removed
   // ALL permission handling now delegated to mediaPermissions.ts
@@ -80,10 +82,9 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
   useFocusEffect(
     useCallback(() => {
       // Check if we're coming from within the create flow
-      // If flag is set, we're navigating back from a create flow screen - preserve state
       if (hasNavigatedFromCreateFlowRef.current) {
         console.log('🔄 [PhotoSelectScreen] Preserving selection - navigating back from create flow');
-        hasNavigatedFromCreateFlowRef.current = false; // Reset flag after check
+        hasNavigatedFromCreateFlowRef.current = false;
         return;
       }
 
@@ -92,6 +93,9 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
       setSelectedImages([]);
       setPreviewImage(null);
       setLockedRatio(null);
+
+      // 🔄 RELOAD: Always reload photos on focus to ensure sync with OS
+      loadPhotos();
     }, [])
   );
 
@@ -147,11 +151,13 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
         }
       }
 
-      // Get photos from camera roll
+      // 🔐 STEP 3: Load photos with mandatory MIME-ONLY query (NO folder filtering)
+      const PAGE_SIZE = 500;
       const result = await CameraRoll.getPhotos({
-        first: 100, // Load first 100 photos
-        assetType: 'Photos',
-        ...(Platform.OS === 'ios' ? {} : { groupTypes: 'All' }),
+        first: PAGE_SIZE,
+        assetType: 'Photos', // 🔐 STRIZCT VIDEO EXCLUSION
+        include: ['filename', 'fileSize', 'imageSize', 'location'],
+        mimeTypes: ['image/jpeg', 'image/png', 'image/webp'], // Allow all standard image types
       });
 
       if (result.edges && result.edges.length > 0) {
@@ -162,15 +168,24 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
             uri: photo.uri,
             width: photo.width || 0,
             height: photo.height || 0,
-            timestamp: edge.node.timestamp || Date.now(),
+            timestamp: String(edge.node.timestamp || Date.now()),
             type: 'image/jpeg',
             fileName: photo.filename || `photo_${edge.node.timestamp || Date.now()}.jpg`,
-          } as Asset;
+          } as any as Asset;
         });
 
         if (isMountedRef.current) {
           setPhotos(photos);
-          // Don't auto-select - let user select manually (Instagram-like behavior)
+          setPermissionState(resolution.state);
+
+          // 🛠️ REGRESSION PROTECTION: Dev-only logging
+          if (__DEV__) {
+            console.log('📸 MEDIA FETCH COUNT:', photos.length);
+            console.log(
+              '📁 SAMPLE FILES:',
+              photos.slice(0, 5).map(a => a.fileName || (a.uri ? a.uri.split('/').pop() : 'unknown'))
+            );
+          }
         }
       } else {
         if (isMountedRef.current) {
@@ -216,15 +231,14 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
         }
 
         // Update preview if this was the preview image (use functional update to avoid stale closure)
-        setPreviewImage((currentPreview) => {
+        setPreviewImage(((currentPreview: SelectedImage | null) => {
           if (currentPreview?.id === imageId) {
             // If deselected image was preview, switch to last remaining image or null
             const newPreview = updated.length > 0 ? updated[updated.length - 1] : null;
-            console.log('🔄 [PhotoSelectScreen] Preview updated after deselect:', newPreview ? 'new image' : 'null');
             return newPreview;
           }
-          return currentPreview;
-        });
+          return currentPreview || null;
+        }) as any);
 
         return updated;
       } else {
@@ -241,11 +255,11 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
 
         console.log('✅ [PhotoSelectScreen] Selecting image');
         const newImage: SelectedImage = {
-          uri: asset.uri,
+          uri: asset.uri!,
           width: asset.width,
           height: asset.height,
           id: imageId,
-          createdAt: asset.timestamp || Date.now(),
+          createdAt: asset.timestamp ? Number(asset.timestamp) : Date.now(),
         };
 
         // INSTAGRAM LOGIC: Lock ratio on FIRST selection (default to 4:5 for posts)
@@ -286,66 +300,6 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
     });
   };
 
-  const handleCamera = async () => {
-    try {
-      const options = {
-        mediaType: 'photo' as MediaType,
-        quality: 0.8,
-      };
-
-      const result = await launchCamera(options);
-      if (result.assets && result.assets[0] && result.assets[0].uri) {
-        const capturedImage: SelectedImage = {
-          uri: result.assets[0].uri,
-          width: result.assets[0].width,
-          height: result.assets[0].height,
-          id: result.assets[0].uri,
-          createdAt: result.assets[0].timestamp || Date.now(),
-        };
-
-        // Toggle selection for captured image (Instagram-like behavior) with max limit check
-        setSelectedImages((prev) => {
-          const exists = prev.find((img) => img.id === capturedImage.id);
-          if (exists) {
-            // Deselect if already selected (always allowed)
-            setPreviewImage((currentPreview) => {
-              const updated = prev.filter((img) => img.id !== capturedImage.id);
-              if (updated.length === 0) {
-                setLockedRatio(null);
-              }
-              return currentPreview?.id === capturedImage.id
-                ? (updated.length > 0 ? updated[updated.length - 1] : null)
-                : currentPreview;
-            });
-            return prev.filter((img) => img.id !== capturedImage.id);
-          } else {
-            // Select if not selected (check max limit first)
-            if (prev.length >= MAX_SELECTION) {
-              Alert.alert(
-                'Maximum Selection',
-                `You can select up to ${MAX_SELECTION} images only.`,
-                [{ text: 'OK' }]
-              );
-              return prev; // Don't add - return previous state
-            }
-
-            // Lock ratio on first selection
-            if (prev.length === 0 && !lockedRatio) {
-              const defaultRatio: '1:1' | '4:5' | '16:9' = contentType === 'post' ? '4:5' : '16:9';
-              setLockedRatio(defaultRatio);
-            }
-
-            setPreviewImage(capturedImage);
-            return [...prev, capturedImage];
-          }
-        });
-      }
-    } catch (error: any) {
-      if (error.code !== 'E_CAMERA_CANCELLED') {
-        Alert.alert('Error', 'Failed to capture photo');
-      }
-    }
-  };
 
   const handleNext = () => {
     if (selectedImages.length === 0) {
@@ -353,27 +307,24 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
       return;
     }
 
-    // Mark that we're navigating within create flow (preserve state on back)
     hasNavigatedFromCreateFlowRef.current = true;
-
-    // INSTAGRAM LOGIC: Pass locked ratio to crop screen (all images use same ratio)
     const ratioToUse = lockedRatio || (contentType === 'post' ? '4:5' : '16:9');
 
-    // Navigate to CropAdjustScreen with contentType, selectedImages, and LOCKED ratio
     navigateToScreen(navigation, 'CropAdjust', {
       contentType: contentType,
       selectedImages: selectedImages,
-      imageUri: selectedImages[0].uri,
+      imageUri: selectedImages[0]?.uri || '',
       currentImageIndex: 0,
       allowMultiple: selectedImages.length > 1,
-      lockedRatio: ratioToUse, // Pass locked ratio (Instagram-style: one ratio per post)
+      lockedRatio: ratioToUse,
     });
   };
 
   // Memoized helper functions for better performance
   const getImageIndex = useCallback((asset: Asset): number => {
     if (!asset.uri) return -1;
-    return selectedImages.findIndex((img) => img.id === asset.uri) + 1;
+    const uri = asset.uri as string;
+    return selectedImages.findIndex((img) => img.id === uri) + 1;
   }, [selectedImages]);
 
   const isImageSelected = useCallback((asset: Asset): boolean => {
@@ -448,6 +399,25 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
         </TouchableOpacity>
       </View>
 
+      {/* 🔐 iOS LIMITED ACCESS BANNER */}
+      {Platform.OS === 'ios' && permissionState === MediaPermissionState.LIMITED && (
+        <View style={styles.limitedBanner}>
+          <View style={styles.limitedTextContainer}>
+            <Icon name="information-circle-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.limitedText}>You've allowed access to only some photos</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.limitedButton}
+            onPress={async () => {
+              await requestMediaPermission(MediaPermissionType.GALLERY);
+              loadPhotos();
+            }}
+          >
+            <Text style={styles.limitedButtonText}>Select More</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Preview Section */}
       {previewImage && (
         <View style={styles.previewContainer}>
@@ -512,17 +482,6 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
         contentContainerStyle={styles.gridContainer}
         showsVerticalScrollIndicator={false}
         extraData={selectedImages} // Force re-render when selection changes
-        ListHeaderComponent={
-          <TouchableOpacity
-            style={styles.photoItem}
-            activeOpacity={0.9}
-            onPress={handleCamera}
-          >
-            <View style={[styles.photoImage, styles.cameraTile]}>
-              <Icon name="camera" size={28} color="#FF7F4D" />
-            </View>
-          </TouchableOpacity>
-        }
         ListEmptyComponent={
           <EmptyState
             icon="images-outline"
@@ -628,6 +587,38 @@ const styles = StyleSheet.create({
   tabTextDisabled: {
     opacity: 0.5,
   },
+  limitedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#3C3C3C',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1C1C1C',
+  },
+  limitedTextContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  limitedText: {
+    fontFamily: Fonts.regular,
+    fontSize: 13,
+    color: '#FFFFFF',
+    marginLeft: 8,
+  },
+  limitedButton: {
+    backgroundColor: '#FF7F4D',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  limitedButtonText: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    color: '#FFFFFF',
+  },
   gridContainer: {
     padding: GRID_SPACING,
   },
@@ -643,11 +634,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F3F3',
   },
   photoPlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cameraTile: {
-    backgroundColor: '#F2F2F2',
     justifyContent: 'center',
     alignItems: 'center',
   },

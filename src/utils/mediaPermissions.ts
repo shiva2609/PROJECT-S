@@ -19,6 +19,7 @@
  */
 
 import { Platform, PermissionsAndroid, Linking, Alert } from 'react-native';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 
 /**
  * EXPLICIT PERMISSION STATE MODEL
@@ -278,7 +279,7 @@ async function resolveAndroidPermission(
         }
 
         // Check current permission status
-        const checkResult = await PermissionsAndroid.check(permission);
+        const checkResult = await PermissionsAndroid.check(permission as any);
 
         if (checkResult) {
             // 🔐 PERMISSION-MEDIA BRIDGING: Check if we have local grant memory
@@ -383,7 +384,7 @@ async function requestAndroidPermission(
 
     try {
         let permission: string;
-        let rationale: { title: string; message: string };
+        let rationale: any;
 
         switch (type) {
             case MediaPermissionType.GALLERY:
@@ -395,6 +396,7 @@ async function requestAndroidPermission(
                 rationale = {
                     title: 'Photo Access',
                     message: 'Sanchari needs access to your photos to let you select images for posts.',
+                    buttonPositive: 'OK',
                 };
                 break;
 
@@ -403,6 +405,7 @@ async function requestAndroidPermission(
                 rationale = {
                     title: 'Camera Access',
                     message: 'Sanchari needs camera access to let you take photos for posts.',
+                    buttonPositive: 'OK',
                 };
                 break;
 
@@ -411,6 +414,7 @@ async function requestAndroidPermission(
                 rationale = {
                     title: 'Contacts Access',
                     message: 'Sanchari needs contacts access to help you find friends.',
+                    buttonPositive: 'OK',
                 };
                 break;
 
@@ -418,7 +422,7 @@ async function requestAndroidPermission(
                 return resolveAndroidPermission(type);
         }
 
-        const granted = await PermissionsAndroid.request(permission, rationale);
+        const granted = await PermissionsAndroid.request(permission as any, rationale);
 
         if (granted === PermissionsAndroid.RESULTS.GRANTED) {
             return {
