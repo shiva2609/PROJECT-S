@@ -59,6 +59,7 @@ import CreateReelScreen from '../../screens/Create/CreateReelScreen';
 import UnifiedEditScreen from '../../screens/Create/UnifiedEditScreen';
 import AddDetailsScreen from '../../screens/Create/AddDetailsScreen';
 import FeedbackScreen from '../../screens/Support/FeedbackScreen'; // V1 SUPPORT
+import SuggestionsScreen from '../../screens/Account/SuggestionsScreen';
 import DrawerNavigator from './DrawerNavigator';
 import { CreateFlowProvider } from '../../store/stores/useCreateFlowStore';
 
@@ -70,6 +71,8 @@ export function Tabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        unmountOnBlur: false, // 🔐 PERSISTENCE: Ensure screens stay mounted
+        lazy: false, // 🔐 FEELS INSTANT: Pre-render all main tabs
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.mutedText,
         tabBarStyle: {
@@ -131,7 +134,7 @@ export default function AppNavigator() {
             gestureEnabled: true,
             fullScreenGestureEnabled: true,
             animation: 'slide_from_right',
-            animationDuration: 350,
+            animationDuration: 200,
           }}
         >
           {!user ? (
@@ -389,6 +392,14 @@ export default function AppNavigator() {
               <Stack.Screen
                 name="ProfileScreen"
                 component={ProfileScreen}
+                options={{
+                  headerShown: false,
+                  gestureEnabled: true,
+                }}
+              />
+              <Stack.Screen
+                name="SuggestionsScreen"
+                component={SuggestionsScreen}
                 options={{
                   headerShown: false,
                   gestureEnabled: true,

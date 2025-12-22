@@ -239,7 +239,8 @@ export async function addComment(
   userId: string,
   username: string,
   photoURL: string | null,
-  text: string
+  text: string,
+  commentId?: string // Optional idempotency key
 ): Promise<string> {
   if (!postId || !userId || !text.trim()) {
     throw new Error('Post ID, User ID, and text are required');
@@ -248,8 +249,17 @@ export async function addComment(
   const commentsRef = collection(db, 'posts', postId, 'comments');
   const postRef = doc(db, 'posts', postId);
 
-  // Create ref beforehand to get ID
-  const commentRef = doc(commentsRef);
+  // Use provided ID or generate new one
+  const commentRef = commentId ? doc(commentsRef, commentId) : doc(commentsRef);
+
+  // IDEMPOTENCY CHECK: If commentId is provided, check if it already exists to avoid double counting
+  if (commentId) {
+    const existingSnap = await getDoc(commentRef);
+    if (existingSnap.exists()) {
+      console.log('🔒 [addComment] Idempotent hit: Comment already exists', commentId);
+      return commentId;
+    }
+  }
 
   const batch = writeBatch(db);
 

@@ -8,7 +8,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Gemini API Key
-const GEMINI_API_KEY = 'AIzaSyBH05meBGVrvrxSkiyWxE2afku4qpJbPMk';
+const GEMINI_API_KEY = 'AIzaSyAMcXQsEqgKTESj1uFBJfycH-EaYvRbQXc';
 
 export interface ItineraryDay {
   title: string;

@@ -8,15 +8,14 @@ import RNFS from 'react-native-fs';
 import { computeCropRect } from './cropMath';
 import type { CropParams } from '../store/stores/useCreateFlowStore';
 
-// Profile photo box dimensions from ProfileScreen
-export const PROFILE_PHOTO_WIDTH = 100;
-export const PROFILE_PHOTO_HEIGHT = 130;
-export const PROFILE_PHOTO_ASPECT_RATIO = PROFILE_PHOTO_WIDTH / PROFILE_PHOTO_HEIGHT; // ~0.769
+// Profile photo box dimensions (Square for circular crop)
+export const PROFILE_PHOTO_WIDTH = 500;
+export const PROFILE_PHOTO_HEIGHT = 500;
+export const PROFILE_PHOTO_ASPECT_RATIO = 1.0;
 
 // Output dimensions for final bitmap (high quality)
-// Scale up for better quality: 1000x1300 maintains the exact ratio
 export const PROFILE_PHOTO_OUTPUT_WIDTH = 1000;
-export const PROFILE_PHOTO_OUTPUT_HEIGHT = 1300;
+export const PROFILE_PHOTO_OUTPUT_HEIGHT = 1000;
 
 export interface ProfilePhotoCropOptions {
   imageUri: string;
@@ -81,38 +80,26 @@ export async function exportProfilePhotoBitmap({
     // Output dimensions for profile photo
     const outputWidth = PROFILE_PHOTO_OUTPUT_WIDTH;
     const outputHeight = PROFILE_PHOTO_OUTPUT_HEIGHT;
-    const outputAspect = outputWidth / outputHeight;
 
-    // Calculate the aspect ratio of the crop box
-    const cropAspect = frameWidth / frameHeight;
+    // Ensure the crop is a square that fits within the image
+    // This prevents stretching when using targetSize in the crop libraries
+    const sideInOriginal = Math.min(
+      frameWidth / cropParams.zoom,
+      frameHeight / cropParams.zoom,
+      imageSize.width,
+      imageSize.height
+    );
 
-    // Calculate actual crop dimensions maintaining aspect ratio
-    let actualCropWidth: number;
-    let actualCropHeight: number;
-
-    if (cropAspect > outputAspect) {
-      // Crop box is wider - fit to height
-      actualCropHeight = cropSizeInOriginalY;
-      actualCropWidth = actualCropHeight * outputAspect;
-    } else {
-      // Crop box is taller - fit to width
-      actualCropWidth = cropSizeInOriginalX;
-      actualCropHeight = actualCropWidth / outputAspect;
-    }
-
-    // Calculate top-left corner
-    const x = Math.max(0, originalCenterX - actualCropWidth / 2);
-    const y = Math.max(0, originalCenterY - actualCropHeight / 2);
-
-    // Ensure crop rect doesn't exceed image bounds
-    const finalWidth = Math.min(actualCropWidth, imageSize.width - x);
-    const finalHeight = Math.min(actualCropHeight, imageSize.height - y);
+    // Calculate top-left corner centered on the user's focus point
+    // but clamped to ensure the square stays within image bounds
+    const x = Math.max(0, Math.min(originalCenterX - sideInOriginal / 2, imageSize.width - sideInOriginal));
+    const y = Math.max(0, Math.min(originalCenterY - sideInOriginal / 2, imageSize.height - sideInOriginal));
 
     const finalCropRect = {
       x: Math.round(x),
       y: Math.round(y),
-      width: Math.round(finalWidth),
-      height: Math.round(finalHeight),
+      width: Math.round(sideInOriginal),
+      height: Math.round(sideInOriginal),
     };
 
     console.log('🖼️ [exportProfilePhotoBitmap] Crop rect:', finalCropRect);
@@ -121,7 +108,7 @@ export async function exportProfilePhotoBitmap({
     // The library needs a proper file path that it can read
     // On Android, cache files might not be readable, so we copy to a proper location
     let processedUri = imageUri;
-    
+
     // Remove file:// prefix for processing
     if (processedUri.startsWith('file://')) {
       processedUri = processedUri.replace('file://', '');
@@ -129,7 +116,7 @@ export async function exportProfilePhotoBitmap({
     if (processedUri.startsWith('file:///')) {
       processedUri = processedUri.replace('file:///', '');
     }
-    
+
     // On Android, copy the file to a location that react-native-photo-manipulator can read
     if (Platform.OS === 'android') {
       try {
@@ -201,7 +188,7 @@ export async function exportProfilePhotoBitmap({
       }
 
       const targetSize = { width: outputWidth, height: outputHeight };
-      
+
       // Call the crop function
       const croppedImageUri = await RNPhotoManipulator.crop(processedUri, safeCropRect, targetSize);
 

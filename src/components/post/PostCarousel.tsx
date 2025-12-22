@@ -10,6 +10,7 @@ import {
   NativeSyntheticEvent,
 } from 'react-native';
 import { Fonts } from '../../theme/fonts';
+import { SmartImage } from '../common/SmartImage';
 
 // Optional video support
 let Video: any = null;
@@ -119,10 +120,11 @@ const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio,
             playWhenInactive={false}
           />
         ) : (
-          <Image
-            source={{ uri: item.uri }}
+          <SmartImage
+            uri={item.uri}
             style={{ width: containerWidth, height: containerHeight, borderRadius: 12 }}
             resizeMode="cover"
+            showPlaceholder={true}
           />
         )}
       </View>
@@ -152,10 +154,12 @@ const PostCarousel = React.memo<PostCarouselProps>(({ media, aspectRatio, ratio,
             playWhenInactive={false}
           />
         ) : (
-          <Image
-            source={{ uri: item.uri }}
-            style={{ width: containerWidth, height: containerHeight, borderRadius: 18,}}
+          <SmartImage
+            uri={item.uri}
+            style={{ width: containerWidth, height: containerHeight, borderRadius: 18 }}
             resizeMode="cover"
+            showPlaceholder={true}
+            borderRadius={18}
           />
         )}
       </View>

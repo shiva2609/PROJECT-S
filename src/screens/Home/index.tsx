@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import {
+import AnimatedRN, {
   View,
   Text,
   StyleSheet,
@@ -7,9 +7,12 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+} from 'react-native-reanimated';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -31,15 +34,20 @@ import TopicClaimAlert from '../../components/common/TopicClaimAlert';
 import FollowingUsersScreen from '../Account/FollowingUsersScreen';
 import PostSkeleton from '../../components/post/PostSkeleton';
 import { useBlockedUsers } from '../../hooks/useBlockedUsers'; // V1 MODERATION
+import { useRefreshController, useRefreshListener } from '../../hooks/useRefreshController';
+import { RetryUI } from '../../components/common/RetryUI';
+import { ScreenLayout } from '../../components/layout/ScreenLayout';
 
 // Create animated FlatList for native driver support
-const AnimatedFlatList = Animated.createAnimatedComponent(FlatList as any);
+const AnimatedFlatList = AnimatedRN.Animated.createAnimatedComponent(FlatList as any);
 
 /**
  * Home Feed Screen
  * 
- * Displays "For You" and "Following" feeds using unified hooks and components.
- * All post interactions use optimistic updates with backend sync.
+ * 🔐 FIX: Resolved Tab Switch Remount Bug
+ * 1. Persistent mounting of both feeds (display: none for hidden)
+ * 2. Independent data hooks (For You hook does NOT depend on active tab)
+ * 3. Preserve scroll position and image decode cache
  */
 export default function HomeScreen({ navigation: navProp, route }: any) {
   const { user } = useAuth();
@@ -48,146 +56,135 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   const { toggleFollow: handleFollowUser } = useUnifiedFollow();
   const insets = useSafeAreaInsets();
 
-  // State must be defined before useHomeFeed hook
+  // 🔐 PERSISTENCE: State defined before hooks
   const [selectedTab, setSelectedTab] = useState<'For You' | 'Following'>('For You');
+  const [unreadCounts, setUnreadCounts] = useState({ notifications: 0, messages: 0 });
 
-  // Use global home feed hook
-  const {
-    feed: posts,
-    loading,
-    refreshing,
-    hasMore,
-    fetchMore,
-    refresh,
-    type: feedType
-  } = useHomeFeed(user?.uid, {
-    feedType: selectedTab === 'For You' ? 'foryou' : 'following',
+  // 🔐 PERSISTENT HOOK 1: For You Feed (Stays mounted/active regardless of tab)
+  const forYouFeed = useHomeFeed(user?.uid, {
+    feedType: 'foryou',
     limit: 10
   });
 
-  // V1 MODERATION: Filter blocked users from feed
+  // Following feed is managed internally by FollowingUsersScreen
+
+  // 🔐 CANONICAL REFRESH CONTROLLER
+  const { state: refreshState, refresh, retry } = useRefreshController({
+    fetchInitial: async () => {
+      return forYouFeed.feed;
+    },
+    refresh: async () => {
+      if (selectedTab === 'For You') {
+        await forYouFeed.refresh();
+      } else {
+        // We could trigger Following feed refresh here if needed, 
+        // but it usually has its own pull-to-refresh.
+        await forYouFeed.refresh();
+      }
+      return forYouFeed.feed;
+    },
+  }, {
+    refreshOnForeground: true,
+    minRefreshInterval: 1000,
+  });
+
+  // 🔐 PROGRAMMATIC REFRESH LISTENER
+  useRefreshListener('home', refresh);
+
+  // V1 MODERATION: Filter blocked users
   const { filterPosts } = useBlockedUsers(user?.uid);
 
-  // Local state for post updates
-  const [postsState, setPostsState] = useState<PostWithAuthor[]>([]);
+  // Local state for For You updates
+  const [forYouPosts, setForYouPosts] = useState<PostWithAuthor[]>([]);
 
-  // Sync posts from hook and apply blocked users filter
+  // Sync For You posts
   useEffect(() => {
-    // V1 MODERATION: Filter out posts from blocked users
-    const filteredPosts = filterPosts(posts);
-    setPostsState(filteredPosts);
-  }, [posts, filterPosts]);
+    const filtered = filterPosts(forYouFeed.feed);
+    setForYouPosts(filtered);
+  }, [forYouFeed.feed, filterPosts]);
 
-  // Update post function
   const updatePost = useCallback((postId: string, updates: Partial<PostWithAuthor>) => {
-    setPostsState((prev) =>
+    setForYouPosts((prev) =>
       prev.map((post) => (post.id === postId ? { ...post, ...updates } : post))
     );
   }, []);
 
-  // Remove post function
   const removePost = useCallback((postId: string) => {
-    setPostsState((prev) => prev.filter((post) => post.id !== postId));
+    setForYouPosts((prev) => prev.filter((post) => post.id !== postId));
   }, []);
 
   // Post actions with optimistic updates
   const postActions = usePostActions((postId: string, updates: any) => {
-    // Apply optimistic updates to posts list
-    const currentPost = posts.find(p => p.id === postId);
+    const currentPost = forYouPosts.find(p => p.id === postId);
     if (currentPost) {
       const newUpdates: any = {};
-
-      // Handle function-based updates (for counts)
       if (typeof updates.likeCount === 'function') {
         newUpdates.likeCount = updates.likeCount(currentPost.likeCount);
       } else if (updates.likeCount !== undefined) {
         newUpdates.likeCount = updates.likeCount;
       }
-
       if (typeof updates.commentCount === 'function') {
         newUpdates.commentCount = updates.commentCount(currentPost.commentCount);
       } else if (updates.commentCount !== undefined) {
         newUpdates.commentCount = updates.commentCount;
       }
-
-      if (updates.isLiked !== undefined) {
-        newUpdates.isLiked = updates.isLiked;
-      }
-
-      if (updates.isSaved !== undefined) {
-        newUpdates.isSaved = updates.isSaved;
-      }
+      if (updates.isLiked !== undefined) newUpdates.isLiked = updates.isLiked;
+      if (updates.isSaved !== undefined) newUpdates.isSaved = updates.isSaved;
 
       updatePost(postId, newUpdates);
     }
   });
-  const [unreadCounts, setUnreadCounts] = useState({ notifications: 0, messages: 0 });
-
-  /**
-   * INSTAGRAM-STYLE COLLAPSING HEADER
-   * 
-   * Why scroll-driven animation:
-   * - Provides fluid, responsive UX that feels native
-   * - Maximizes content visibility on scroll
-   * - No layout jumps or re-renders
-   * 
-   * Why translateY instead of hide/show:
-   * - Smooth interpolation vs abrupt toggle
-   * - GPU-accelerated transform
-   * - Maintains layout stability (no height changes)
-   * - Works seamlessly with native scroll events
-   */
-  const HEADER_HEIGHT = 110 + insets.top; // topBar (48) + sharedHeader (62) + safe area top
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const lastScrollY = useRef(0);
-  const headerTranslateY = useRef(new Animated.Value(0)).current;
-
-  // Track scroll direction and animate header
-  const handleScroll = Animated.event(
-    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-    {
-      useNativeDriver: true,
-      listener: (event: any) => {
-        const currentScrollY = event.nativeEvent.contentOffset.y;
-        const delta = currentScrollY - lastScrollY.current;
-
-        // Only animate if scrolled past threshold (avoid jitter at top)
-        if (currentScrollY > 5) {
-          if (delta > 0 && currentScrollY > 20) {
-            // Scrolling down (content moving up) -> hide header smoothly
-            Animated.timing(headerTranslateY, {
-              toValue: -HEADER_HEIGHT,
-              duration: 200,
-              useNativeDriver: true,
-            }).start();
-          } else if (delta < -3) {
-            // Scrolling up (content moving down) -> show header smoothly
-            Animated.timing(headerTranslateY, {
-              toValue: 0,
-              duration: 200,
-              useNativeDriver: true,
-            }).start();
-          }
-        } else {
-          // At top of feed -> always show header
-          Animated.timing(headerTranslateY, {
-            toValue: 0,
-            duration: 150,
-            useNativeDriver: true,
-          }).start();
-        }
-
-        lastScrollY.current = currentScrollY;
-      },
-    }
-  );
 
   const { visible: rewardVisible, claimed, points, claiming: rewardClaiming, error: rewardError, grantReward, dismiss: dismissReward, showReward } = useRewardOnboarding(user?.uid);
   const { showAlert: showTopicAlert, onClaimNow: handleTopicClaimNow, onRemindLater: handleTopicRemindLater } = useTopicClaimReminder(user?.uid, navigation);
 
-  // Feed will auto-fetch via useHomeFeed hook
+  const HEADER_HEIGHT = 110;
+  const lastScrollY = useRef(0);
+  const headerTranslateY = useSharedValue(0);
+  const isHeaderVisible = useRef(true);
 
-  // Listen to unread counts
+  // Reanimated style for the header
+  const headerAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateY: headerTranslateY.value }],
+    };
+  });
+
+  const showHeader = useCallback(() => {
+    if (!isHeaderVisible.current) {
+      headerTranslateY.value = withTiming(0, { duration: 180 });
+      isHeaderVisible.current = true;
+    }
+  }, []);
+
+  const hideHeader = useCallback(() => {
+    if (isHeaderVisible.current) {
+      headerTranslateY.value = withTiming(-(HEADER_HEIGHT + insets.top), { duration: 180 });
+      isHeaderVisible.current = false;
+    }
+  }, [insets.top]);
+
+  const handleScroll = useCallback((event: any) => {
+    const currentY = event.nativeEvent.contentOffset.y;
+    const diff = currentY - lastScrollY.current;
+
+    // 1. Always show if at very top (handles bounces)
+    if (currentY <= 0) {
+      showHeader();
+    }
+    // 2. Hide on scroll down (significant movement)
+    else if (diff > 10) {
+      hideHeader();
+    }
+    // 3. Show on scroll up (significant movement)
+    else if (diff < -10) {
+      showHeader();
+    }
+
+    lastScrollY.current = currentY;
+  }, [showHeader, hideHeader]);
+
+  // Notifications
   useEffect(() => {
     if (!user) return;
     const unsubscribe = listenToUnreadCounts(user.uid, (counts) => {
@@ -211,34 +208,23 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     }, [claimed, user, showReward, route?.params, navProp])
   );
 
-  // Use posts from state (synced from hook)
-  const displayedPosts = useMemo(() => {
-    return postsState;
-  }, [postsState]);
-
-  // Handle like with optimistic update
+  // Like / Save / Share
   const handleLike = useCallback(async (postId: string, currentIsLiked?: boolean) => {
     try {
-      await postActions.toggleLike(postId, currentIsLiked, (isLiked, countDelta) => {
-        // Update is handled by postActions callback
-      });
+      await postActions.toggleLike(postId, currentIsLiked);
     } catch (error: any) {
       console.error('Error toggling like:', error);
     }
   }, [postActions]);
 
-  // Handle save with optimistic update
   const handleSave = useCallback(async (postId: string, currentIsSaved?: boolean) => {
     try {
-      await postActions.toggleSave(postId, currentIsSaved, (isSaved) => {
-        // Update is handled by postActions callback
-      });
+      await postActions.toggleSave(postId, currentIsSaved);
     } catch (error: any) {
       console.error('Error toggling save:', error);
     }
   }, [postActions]);
 
-  // Handle share
   const handleShare = useCallback(async (post: PostWithAuthor | any) => {
     try {
       await postActions.sharePost(post);
@@ -246,6 +232,76 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
       console.error('Error sharing post:', error);
     }
   }, [postActions]);
+
+  const handleFollow = useCallback(async (targetUserId: string) => {
+    try {
+      await handleFollowUser(targetUserId);
+    } catch (error: any) {
+      console.error('Error following user:', error);
+    }
+  }, [handleFollowUser]);
+
+  const renderPost = useCallback(({ item }: { item: PostWithAuthor }) => {
+    const authorId = item.authorId || item.userId || item.createdBy || item.ownerId || '';
+    const isLiked = item.isLiked ?? false;
+    const isSaved = item.isSaved ?? false;
+    const isOwnerFollowed = item.isFollowingAuthor ?? false;
+    const showFollowButton = !isOwnerFollowed && authorId !== user?.uid;
+
+    const postForCard = {
+      ...item,
+      username: item.authorUsername || 'Unknown',
+      profilePhoto: item.authorAvatar,
+      ownerAvatar: item.authorAvatar,
+      avatarUri: item.authorAvatar,
+    };
+
+    return (
+      <PostCard
+        post={postForCard as any}
+        isLiked={isLiked}
+        isSaved={isSaved}
+        onLike={() => handleLike(item.id, isLiked)}
+        onComment={() => {
+          navProp?.navigate('Comments', { postId: item.id });
+        }}
+        onShare={() => handleShare(item as any)}
+        onBookmark={() => handleSave(item.id, isSaved)}
+        onProfilePress={() => navProp?.navigate('ProfileScreen', { userId: authorId })}
+        onPostDetailPress={() => {
+          const postIndex = forYouPosts.findIndex((p) => p.id === item.id);
+          navProp?.navigate('PostDetail', {
+            posts: forYouPosts as any,
+            index: postIndex >= 0 ? postIndex : 0,
+            postId: item.id
+          });
+        }}
+        currentUserId={user?.uid}
+        isFollowing={isOwnerFollowed}
+        inForYou={true}
+        enablePress={false}
+        showFollowButton={showFollowButton}
+        onFollow={handleFollow}
+        onPostRemoved={removePost}
+      />
+    );
+  }, [handleLike, handleSave, handleShare, navProp, forYouPosts, user?.uid, handleFollow, removePost]);
+
+  const keyExtractor = useCallback((item: PostWithAuthor) => item.id, []);
+
+  const renderEmptyComponent = useMemo(() => (
+    !forYouPosts || forYouPosts.length === 0 ? (
+      <View style={{ paddingVertical: 100, alignItems: 'center' }}>
+        <Text style={{ color: Colors.black.qua, fontFamily: Fonts.regular }}>No posts yet</Text>
+      </View>
+    ) : null
+  ), [forYouPosts]);
+
+  const handleLoadMore = useCallback(() => {
+    if (forYouFeed.hasMore && !forYouFeed.loading) {
+      forYouFeed.fetchMore();
+    }
+  }, [forYouFeed]);
 
   const openDrawer = useCallback(() => {
     try {
@@ -262,84 +318,21 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
     }
   }, [navProp, navigation]);
 
-  const handleFollow = useCallback(async (targetUserId: string) => {
-    try {
-      await handleFollowUser(targetUserId);
-      // OPTIMISTIC UPDATE ONLY - DO NOT REFRESH FEED
-      // await refresh(); 
-      // await refreshRelations(user?.uid || '');
-    } catch (error: any) {
-      console.error('Error following user:', error);
-    }
-  }, [handleFollowUser, user?.uid]);
-
-  const renderPost = useCallback(({ item }: { item: PostWithAuthor }) => {
-    const authorId = item.authorId || item.userId || item.createdBy || item.ownerId || '';
-    // Use item properties as source of truth (populated by useHomeFeed and updated locally)
-    const isLiked = item.isLiked ?? false;
-    const isSaved = item.isSaved ?? false;
-    const isOwnerFollowed = item.isFollowingAuthor ?? false;
-    const showFollowButton = !isOwnerFollowed && selectedTab === 'For You' && authorId !== user?.uid;
-
-    // Create post object with author info for PostCard
-    const postForCard = {
-      ...item,
-      username: item.authorUsername || 'Unknown',
-      profilePhoto: item.authorAvatar,
-      ownerAvatar: item.authorAvatar,
-      avatarUri: item.authorAvatar,
-    };
-
-    return (
-      <PostCard
-        post={postForCard as any}
-        isLiked={isLiked}
-        isSaved={isSaved}
-        onLike={() => handleLike(item.id, isLiked)}
-        onComment={() => {
-          // CRITICAL: Navigate to Comments screen, NOT PostDetail
-          // Comment icon must open comments view, not post feed
-          navProp?.navigate('Comments', {
-            postId: item.id,
-          });
-        }}
-        onShare={() => handleShare(item as any)}
-        onBookmark={() => handleSave(item.id, isSaved)}
-        onProfilePress={() => navProp?.navigate('ProfileScreen', { userId: authorId })}
-        onPostDetailPress={() => {
-          const postIndex = displayedPosts.findIndex((p) => p.id === item.id);
-          navProp?.navigate('PostDetail', {
-            posts: displayedPosts as any,
-            index: postIndex >= 0 ? postIndex : 0,
-            postId: item.id
-          });
-        }}
-        currentUserId={user?.uid}
-        isFollowing={isOwnerFollowed}
-        inForYou={selectedTab === 'For You'}
-        showFollowButton={showFollowButton}
-        onFollow={handleFollow}
-        onPostRemoved={removePost}
-      />
-    );
-  }, [postActions, handleLike, handleSave, handleShare, navProp, displayedPosts, user?.uid, selectedTab, handleFollow, removePost]);
-
-  const handleLoadMore = useCallback(() => {
-    if (hasMore && !loading) {
-      fetchMore();
-    }
-  }, [hasMore, loading, fetchMore]);
-
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Animated Header Container */}
+    <ScreenLayout
+      scrollable={false}
+      includeBottomInset={false}
+      includeTopInset={false} // 🔐 FIX: Prevent double padding with absolute header
+      backgroundColor={Colors.white.secondary}
+      keyboardAvoiding={false}
+    >
       <Animated.View
         style={[
           styles.headerContainer,
           {
             paddingTop: insets.top,
-            transform: [{ translateY: headerTranslateY }],
           },
+          headerAnimatedStyle,
         ]}
       >
         <View style={styles.topBar}>
@@ -378,7 +371,6 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
           </View>
         </View>
 
-
         <View style={styles.sharedHeader}>
           <SegmentedControl
             selectedTab={selectedTab}
@@ -387,75 +379,43 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
         </View>
       </Animated.View>
 
-      {/* Feed Content */}
-      {loading && posts.length === 0 ? (
-        <View style={styles.skeletonContainer}>
-          <PostSkeleton />
-          <PostSkeleton />
+      <View style={{ flex: 1 }}>
+        {/* VIEWPORT 1: For You */}
+        <View style={{ flex: 1, display: selectedTab === 'For You' ? 'flex' : 'none' }}>
+          <AnimatedFlatList
+            data={forYouPosts}
+            keyExtractor={keyExtractor}
+            renderItem={renderPost}
+            windowSize={10}
+            initialNumToRender={5}
+            maxToRenderPerBatch={5}
+            removeClippedSubviews={false}
+            contentContainerStyle={{ paddingTop: HEADER_HEIGHT + insets.top, paddingBottom: 20 }}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshState.refreshing}
+                onRefresh={refresh}
+                tintColor={Colors.brand.primary}
+              />
+            }
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.5}
+            ListEmptyComponent={renderEmptyComponent}
+          />
         </View>
-      ) : (
-        <View style={{ flex: 1 }}>
-          {selectedTab === 'For You' ? (
-            <AnimatedFlatList
-              data={displayedPosts}
-              keyExtractor={(item: PostWithAuthor) => item.id}
-              renderItem={renderPost}
-              windowSize={8}
-              initialNumToRender={5}
-              maxToRenderPerBatch={10}
-              updateCellsBatchingPeriod={50}
-              removeClippedSubviews
-              contentContainerStyle={{ paddingTop: HEADER_HEIGHT, paddingBottom: 400 }}
-              getItemLayout={(data: any, index: number) => ({
-                length: 600, // Approximate post height
-                offset: 600 * index,
-                index,
-              })}
-              onScroll={handleScroll}
-              scrollEventThrottle={16}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={refresh}
-                  tintColor={Colors.brand.primary}
-                />
-              }
-              onEndReached={handleLoadMore}
-              onEndReachedThreshold={0.5}
-              ListEmptyComponent={
-                !displayedPosts || displayedPosts.length === 0 ? (
-                  <View style={styles.emptyState}>
-                    <Text style={styles.emptyTitle}>No posts yet, start exploring!</Text>
-                    <Text style={styles.emptySub}>Follow explorers or create your first travel memory.</Text>
-                    <TouchableOpacity
-                      activeOpacity={0.8}
-                      style={styles.exploreCta}
-                      onPress={() => navProp?.navigate('Explore')}
-                    >
-                      <Text style={styles.exploreCtaText}>Explore Trips</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : null
-              }
-            />
-          ) : (
-            <FollowingUsersScreen
-              navigation={navProp}
-              onUserPress={(userId) => navProp?.navigate('ProfileScreen', { userId })}
-              onPostPress={(post) => {
-                const postIndex = posts.findIndex((p) => p.id === post.id);
-                navProp?.navigate('PostDetail', {
-                  posts: posts,
-                  index: postIndex >= 0 ? postIndex : 0,
-                  postId: post.id
-                });
-              }}
-              onScroll={handleScroll}
-              headerHeight={HEADER_HEIGHT}
-            />
-          )}
+
+        {/* VIEWPORT 2: Following */}
+        <View style={{ flex: 1, display: selectedTab === 'Following' ? 'flex' : 'none' }}>
+          <FollowingUsersScreen
+            navigation={navProp}
+            onUserPress={(userId) => navProp?.navigate('ProfileScreen', { userId })}
+            onScroll={handleScroll}
+            headerHeight={HEADER_HEIGHT + insets.top}
+          />
         </View>
-      )}
+      </View>
 
       <RewardPopCard
         visible={rewardVisible}
@@ -478,12 +438,11 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
         onClaimNow={handleTopicClaimNow}
         onRemindLater={handleTopicRemindLater}
       />
-    </SafeAreaView >
+    </ScreenLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.white.secondary },
   headerContainer: {
     position: 'absolute',
     top: 0,
@@ -534,40 +493,4 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: Colors.white.primary, fontSize: 10, fontFamily: Fonts.semibold },
   sharedHeader: { paddingVertical: 8, backgroundColor: Colors.white.secondary },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  skeletonContainer: {
-    paddingTop: 10,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: 20,
-  },
-  emptyTitle: {
-    fontFamily: Fonts.semibold,
-    color: Colors.black.secondary,
-    fontSize: 16,
-  },
-  emptySub: {
-    fontFamily: Fonts.regular,
-    color: Colors.black.qua,
-    fontSize: 12,
-    marginTop: 6,
-    textAlign: 'center',
-  },
-  exploreCta: {
-    marginTop: 12,
-    backgroundColor: Colors.brand.primary,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  exploreCtaText: {
-    color: Colors.white.primary,
-    fontFamily: Fonts.semibold,
-  },
 });

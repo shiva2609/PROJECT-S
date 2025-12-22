@@ -54,17 +54,21 @@ export function segmentFollowersAndSuggestions({
   suggestedUsers,
   loggedUserId,
 }: SegmentFollowersAndSuggestionsInput): SegmentFollowersAndSuggestionsOutput {
-  // STEP 1: Process followers section
-  // Filter out logged-in user and ensure uniqueness
+  const followingSet = new Set(followingIds);
   const followerIds = new Set<string>();
   const followersSection: User[] = [];
-  
+
   for (const follower of followers) {
     const uid = follower.uid || follower.id;
     if (!uid || uid === loggedUserId) {
       continue; // Skip invalid or self
     }
-    
+
+    // EXCLUDE if already followed
+    if (followingSet.has(uid)) {
+      continue;
+    }
+
     if (!followerIds.has(uid)) {
       followerIds.add(uid);
       followersSection.push(follower);
@@ -73,7 +77,6 @@ export function segmentFollowersAndSuggestions({
 
   // STEP 2: Process suggested section
   // Create sets for efficient lookup
-  const followingSet = new Set(followingIds);
   const suggestedSection: User[] = [];
   const suggestedIds = new Set<string>();
 
@@ -112,7 +115,7 @@ export function segmentFollowersAndSuggestions({
         return fUid === sUid;
       });
     });
-    
+
     if (overlap.length > 0) {
       console.error('[follow.segmentation] ERROR: Duplicate users found between sections:', overlap.map(u => u.uid || u.id));
       console.assert(overlap.length === 0, 'Duplicate users found between sections');

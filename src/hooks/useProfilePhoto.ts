@@ -20,31 +20,27 @@
 
 import { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
+import { Image } from 'react-native';
 import type { RootState } from '../store';
 import {
   getUserProfilePhoto,
   subscribeToUserProfilePhoto,
   getDefaultProfilePhoto,
+  isDefaultProfilePhoto,
   getCachedProfilePhoto,
 } from '../services/users/userProfilePhotoService';
 import { store } from '../store';
 
-/**
- * Hook to get and subscribe to a user's profile photo
- * 
- * @param userId - User ID to get profile photo for
- * @param options - Optional configuration
- * @param options.shape - 'circle' (default) or 'rectangle' - only affects return value, not the actual image
- * @returns Profile photo URL (always returns a valid URL, never null)
- */
 export function useProfilePhoto(
   userId: string | null | undefined,
-  options?: { shape?: 'circle' | 'rectangle' }
+  initialUrl?: string
 ): string {
-  // Priority: Memory Cache → Redux Store → Default
+  // Priority: initialUrl → Memory Cache → Redux Store → Default
   const getInitialUrl = (): string => {
     if (!userId) return getDefaultProfilePhoto();
-    // 1. Check memory cache first (fastest)
+    // 0. Use provided initial URL if available (fastest)
+    if (initialUrl && !isDefaultProfilePhoto(initialUrl)) return initialUrl;
+    // 1. Check memory cache (runtime persistence)
     const memoryCached = getCachedProfilePhoto(userId);
     if (memoryCached) return memoryCached;
     // 2. Check Redux store
@@ -56,9 +52,13 @@ export function useProfilePhoto(
   };
 
   const [photoUrl, setPhotoUrl] = useState<string>(getInitialUrl);
-  const shape = options?.shape || 'circle';
 
-  // Get from Redux store (fast path for re-renders)
+  useEffect(() => {
+    if (photoUrl && !isDefaultProfilePhoto(photoUrl)) {
+      Image.prefetch(photoUrl).catch(() => { });
+    }
+  }, [photoUrl]);
+
   const cachedUrl = useSelector((state: RootState) => {
     if (!userId) return null;
     return state.profilePhoto?.profilePhotoMap[userId] || null;
@@ -70,39 +70,27 @@ export function useProfilePhoto(
       return;
     }
 
-    // Priority: Memory Cache → Redux Store → Firestore
+    // Refresh memory cache if needed
     const memoryCached = getCachedProfilePhoto(userId);
     if (memoryCached) {
       setPhotoUrl(memoryCached);
     } else if (cachedUrl) {
-      // Use Redux cached value immediately
       setPhotoUrl(cachedUrl);
-    } else {
-      // Fetch from Firestore (with offline fallback)
-      getUserProfilePhoto(userId)
-        .then((url) => {
-          setPhotoUrl(url);
-        })
-        .catch((error) => {
-          // Offline/error fallback - use default
-          console.warn(`[useProfilePhoto] Error fetching photo for ${userId}, using default:`, error);
-          setPhotoUrl(getDefaultProfilePhoto());
-        });
+    } else if (initialUrl) {
+      setPhotoUrl(initialUrl);
     }
 
-    // Subscribe to real-time updates
+    // Subscribe to real-time updates (now multi-callback safe)
     const unsubscribe = subscribeToUserProfilePhoto(userId, (url) => {
       setPhotoUrl(url);
     });
 
-    // Cleanup subscription on unmount or userId change
     return () => {
       unsubscribe();
     };
-  }, [userId, cachedUrl]);
+  }, [userId, cachedUrl, initialUrl]);
 
-  // Always return a valid URL (never null/undefined)
-  return photoUrl || getDefaultProfilePhoto();
+  return photoUrl || initialUrl || getDefaultProfilePhoto();
 }
 
 /**

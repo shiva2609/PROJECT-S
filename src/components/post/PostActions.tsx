@@ -43,19 +43,16 @@ const PostActions = ({
     const [isLikeProcessing, setIsLikeProcessing] = useState(false);
 
     useEffect(() => {
-        // Simple distinct scale bounce on like change
-        Animated.sequence([
-            Animated.spring(likeScale, {
-                toValue: 1.2,
-                friction: 3,
-                useNativeDriver: true,
-            }),
+        // 🔐 POLISH: Heart pop animation (0.6 -> 1) on LIKE only
+        if (isLiked) {
+            likeScale.setValue(0.6);
             Animated.spring(likeScale, {
                 toValue: 1,
-                friction: 3,
+                friction: 5,
+                tension: 100, // Snappy pop
                 useNativeDriver: true,
-            }),
-        ]).start();
+            }).start();
+        }
     }, [isLiked, likeScale]);
 
     useEffect(() => {

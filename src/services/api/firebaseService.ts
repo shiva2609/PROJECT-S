@@ -524,6 +524,17 @@ export async function uploadImageAsync(
 		throw new Error('❌ uploadImageAsync: Image URI is required.');
 	}
 
+	// 🔐 INVARIANT ENFORCEMENT: Validate that URI is a finalized bitmap
+	// This prevents accidental upload of original camera roll URIs
+	if (__DEV__) {
+		const { assertValidUploadPayload } = require('../../utils/imagePipelineInvariants');
+		assertValidUploadPayload(
+			imageAsset.uri,
+			userId,
+			'firebaseService.uploadImageAsync'
+		);
+	}
+
 	// 2. Ensure Auth (Optional but recommended for security context, though we don't use the uid from it)
 	if (!auth.currentUser) {
 		console.warn('⚠️ uploadImageAsync: No authenticated user found in SDK. Upload might fail due to security rules.');

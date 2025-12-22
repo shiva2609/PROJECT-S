@@ -128,6 +128,10 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
     }
   }, [handleFollowUser, refresh, refreshRelations, user?.uid]);
 
+  const handleViewAll = useCallback(() => {
+    navigation?.navigate('SuggestionsScreen', { source: 'following' });
+  }, [navigation]);
+
   const renderPost = useCallback(({ item }: { item: PostWithAuthor }) => {
     const authorId = item.authorId || item.userId || item.createdBy || item.ownerId || '';
     // Use item properties as source of truth
@@ -175,6 +179,7 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
         currentUserId={user?.uid}
         isFollowing={isOwnerFollowed}
         inForYou={false}
+        enablePress={false}
         showFollowButton={showFollowButton}
         onFollow={handleFollow}
         onPostRemoved={removePost}
@@ -189,7 +194,7 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
   }, [hasMore, loading, fetchMore]);
 
   const postsEnded = !loading && !hasMore && posts.length > 0;
-  const shouldShowSuggestions = !loading;
+  const shouldShowSuggestions = true; // Always show suggestions if available
 
   if (loading && posts.length === 0) {
     return (
@@ -225,7 +230,7 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: 400 }}
+        contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: 20 }}
         ListFooterComponent={
           <>
             {postsEnded && (
@@ -234,15 +239,14 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
                 <Text style={styles.postsEndedSubtext}>No more posts to show</Text>
               </View>
             )}
-            {shouldShowSuggestions && (
-              <View style={styles.suggestionsWrapper}>
-                <FollowingSuggestions
-                  onUserPress={onUserPress}
-                  compact={true}
-                  showContactsCard={true}
-                />
-              </View>
-            )}
+            <View style={styles.suggestionsWrapper}>
+              <FollowingSuggestions
+                onUserPress={onUserPress}
+                onViewMore={handleViewAll}
+                compact={true}
+                showContactsCard={true}
+              />
+            </View>
           </>
         }
         ListEmptyComponent={
@@ -287,9 +291,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: 'center',
   },
-  suggestionsWrapper: {
-    width: '100%',
-  },
   postsEndedCard: {
     backgroundColor: Colors.white.primary,
     marginHorizontal: 16,
@@ -317,5 +318,10 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.regular,
     color: Colors.black.qua,
     textAlign: 'center',
+  },
+  suggestionsWrapper: {
+    width: '100%',
+    marginTop: 10,
+    paddingBottom: 0,
   },
 });

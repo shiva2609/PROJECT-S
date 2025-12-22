@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScreenLayout } from '../../components/layout/ScreenLayout';
 import { colors } from '../../utils/colors';
 import { useDispatch } from 'react-redux';
 import { FontFamily } from '../../GlobalStyles';
@@ -44,7 +44,11 @@ export default function LoginScreen({ navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <ScreenLayout
+      scrollable
+      keyboardAvoiding
+      backgroundColor={colors.surface}
+    >
       <View style={styles.headerArea}>
         <Text style={styles.welcomeTop}>Welcome</Text>
         <Text style={styles.welcomeBrand}>Sanchari!</Text>
@@ -86,7 +90,7 @@ export default function LoginScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
       </View>
-    </SafeAreaView>
+    </ScreenLayout>
   );
 }
 

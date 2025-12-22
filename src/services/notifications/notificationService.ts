@@ -320,18 +320,31 @@ export function listenToUnreadCounts(
   // Initial calculation
   updateCounts();
 
-  // Listen to notifications changes
+  // Listen to notifications changes (Optimized)
   try {
     const notificationsRef = collection(db, 'notifications', userId, 'items');
-    // No query needed for subcollection unless filtering
-    // Just listen to the whole subcollection changes or filtered by unread
-
-    // Simplest: just query unread to minimize bandwidth? 
-    // Wait, onSnapshot on collection(userId, items) is what we want.
+    // FILTER: Only listen to unread items to minimize download size
+    const unreadQuery = query(notificationsRef, where('read', '==', false));
 
     unsubscribeNotifications = onSnapshot(
-      notificationsRef,
-      () => updateCounts(),
+      unreadQuery,
+      (snapshot) => {
+        // Use snapshot size directly - NO RE-FETCH NEEDED
+        console.log('📊 Unread notifications snapshot update:', snapshot.size);
+        // We still need message counts, so we can't fully bypass updateCounts purely,
+        // unless we split the state updates.
+        // For now, let's optimize updateCounts to accept an optional override or split the callback.
+
+        // Option B: Just manually fetch messages if needed, or rely on the messages listener to update that part.
+        // Let's refactor the callback locally.
+
+        // We can't easily sync with the message listener if we use a single callback for both.
+        // But we can cache the values.
+
+        calculateUnreadMessageCount(userId).then(messages => {
+          callback({ notifications: snapshot.size, messages });
+        });
+      },
       (error: any) => {
         if (error?.message?.includes('INTERNAL ASSERTION FAILED')) return;
         console.error('Error listening to notifications:', error);

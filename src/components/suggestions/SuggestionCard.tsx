@@ -16,6 +16,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../../providers/AuthProvider';
 import { useFollowStatus } from '../../global/hooks/useFollowStatus';
 import * as UserService from '../../global/services/user/user.service';
+import { SmartImage } from '../common/SmartImage';
 import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/users/userProfilePhotoService';
 import { SuggestionCandidate } from '../../utils/suggestionUtils';
 import { Colors } from '../../theme/colors';
@@ -34,63 +35,14 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
   const [showPopover, setShowPopover] = useState(false);
   const [localFollowing, setLocalFollowing] = useState(isFollowing || false);
 
-  // Fetch user data from Firestore using global service
-  const [userData, setUserData] = useState<{
-    username: string;
-    displayName: string;
-    photoURL: string;
-    verified: boolean;
-  } | null>(null);
-  const [loadingUserData, setLoadingUserData] = useState(true);
-
-  // Fetch user public info from Firestore
-  useEffect(() => {
-    const fetchUserData = async () => {
-      if (!user.id) {
-        setLoadingUserData(false);
-        return;
-      }
-
-      try {
-        setLoadingUserData(true);
-        console.log('[SuggestionCard] Fetching user data for:', user.id, 'prop username:', user.username);
-        const publicInfo = await UserService.getUserPublicInfo(user.id);
-        console.log('[SuggestionCard] Fetched publicInfo:', publicInfo ? { username: publicInfo.username, displayName: publicInfo.displayName } : 'null');
-
-        if (publicInfo) {
-          // Global service now guarantees username is never empty
-          // No need for complex fallback logic
-          setUserData({
-            username: publicInfo.username, // ✅ Always has value from global service
-            displayName: publicInfo.displayName || publicInfo.username,
-            photoURL: publicInfo.photoURL || user.avatar || '',
-            verified: publicInfo.verified || user.verified || false,
-          });
-        } else {
-          // Fallback to prop data if Firestore fetch fails
-          setUserData({
-            username: user.username || user.name || user.id.substring(0, 8),
-            displayName: user.name || user.username || 'User',
-            photoURL: user.avatar || '',
-            verified: user.verified || false,
-          });
-        }
-      } catch (error) {
-        console.error('[SuggestionCard] Error fetching user data:', error, 'user.id:', user.id);
-        // Fallback to prop data on error
-        setUserData({
-          username: user.username || user.name || user.id.substring(0, 8),
-          displayName: user.name || user.username || 'User',
-          photoURL: user.avatar || '',
-          verified: user.verified || false,
-        });
-      } finally {
-        setLoadingUserData(false);
-      }
-    };
-
-    fetchUserData();
-  }, [user.id, user.username, user.name, user.avatar, user.verified]);
+  // Use prop data directly to avoid flickering and redundant fetches
+  const userData = {
+    username: user.username || user.name || user.id.substring(0, 8),
+    displayName: user.name || user.username || 'User',
+    photoURL: user.avatar || '',
+    verified: user.verified || false,
+  };
+  const loadingUserData = false;
 
   // Debug: Log when card mounts
   useEffect(() => {
@@ -169,14 +121,10 @@ export default function SuggestionCard({ user, onPress, onLongPress, onFollowCha
               <Icon name="person" size={32} color="#FFFFFF" />
             </View>
           ) : (
-            <Image
-              source={{ uri: userData.photoURL }}
-              defaultSource={{ uri: getDefaultProfilePhoto() }}
-              onError={() => {
-                // Offline/CDN failure - Image component will use defaultSource
-              }}
+            <SmartImage
+              uri={userData.photoURL}
               style={styles.avatar}
-              resizeMode="cover"
+              borderRadius={32}
             />
           )}
           {(userData?.verified || user.verified) && (

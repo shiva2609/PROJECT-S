@@ -21,13 +21,16 @@ export default function SegmentedControl({ selectedTab, onChange, tabs = ['Follo
           <Pressable
             key={tab}
             onPress={() => onChange(tab)}
-            style={styles.tabWrapper}
+            style={({ pressed }) => [
+              styles.tabWrapper,
+              pressed && { opacity: 0.8 },
+            ]}
           >
             <MotiView
               animate={{
                 scale: isActive ? 1.02 : 1,
               }}
-              transition={{ type: 'timing', duration: 300 }}
+              transition={{ type: 'timing', duration: 200 }}
               style={[
                 styles.tab,
                 isActive && styles.activeTab,
@@ -41,8 +44,7 @@ export default function SegmentedControl({ selectedTab, onChange, tabs = ['Follo
                   colors={[Colors.brand.primary, Colors.brand.secondary]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFill}
-                  borderRadius={20}
+                  style={[StyleSheet.absoluteFill, { borderRadius: 20 }]}
                 />
               )}
               <MotiText

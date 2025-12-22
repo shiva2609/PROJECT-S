@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import UserAvatar from '../user/UserAvatar';
 
 interface GlassHeaderProps {
   title?: string;
@@ -24,9 +25,10 @@ interface GlassHeaderProps {
   searchMode?: boolean;
   onSearchChange?: (text: string) => void;
   searchValue?: string;
+  avatarUri?: string;
 }
 
-export default function GlassHeader({
+const GlassHeader = memo(({
   title,
   showBack = false,
   onBack,
@@ -34,7 +36,8 @@ export default function GlassHeader({
   searchMode = false,
   onSearchChange,
   searchValue = '',
-}: GlassHeaderProps) {
+  avatarUri,
+}: GlassHeaderProps) => {
   const insets = useSafeAreaInsets();
   const [searchText, setSearchText] = useState(searchValue);
 
@@ -85,9 +88,16 @@ export default function GlassHeader({
             )}
           </View>
         ) : (
-          <Text style={styles.title} numberOfLines={1}>
-            {title || ''}
-          </Text>
+          <View style={styles.titleContainer}>
+            {avatarUri && (
+              <View style={styles.avatarWrapper}>
+                <UserAvatar uri={avatarUri} size="sm" />
+              </View>
+            )}
+            <Text style={styles.title} numberOfLines={1}>
+              {title || ''}
+            </Text>
+          </View>
         )}
 
         <View style={styles.actionsContainer}>
@@ -105,7 +115,9 @@ export default function GlassHeader({
       </View>
     </View>
   );
-}
+});
+
+export default GlassHeader;
 
 const styles = StyleSheet.create({
   container: {
@@ -127,8 +139,15 @@ const styles = StyleSheet.create({
     marginRight: 12,
     padding: 4,
   },
-  title: {
+  titleContainer: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatarWrapper: {
+    marginRight: 10,
+  },
+  title: {
     fontSize: 18,
     fontFamily: Fonts.semibold,
     color: Colors.black.primary,

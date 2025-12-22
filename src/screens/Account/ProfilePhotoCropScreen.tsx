@@ -25,6 +25,7 @@ import Animated, {
   withSpring,
   runOnJS,
 } from 'react-native-reanimated';
+import { useColorScheme } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { exportProfilePhotoBitmap, PROFILE_PHOTO_ASPECT_RATIO, PROFILE_PHOTO_WIDTH, PROFILE_PHOTO_HEIGHT } from '../../utils/profilePhotoCropUtils';
@@ -80,6 +81,12 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
   const savedTranslateY = useSharedValue(0);
   const savedScale = useSharedValue(1);
 
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const bgColor = isDark ? Colors.black.primary : Colors.white.primary;
+  const textColor = isDark ? Colors.white.primary : Colors.black.primary;
+  const subTextColor = isDark ? Colors.white.qua : Colors.black.qua;
+  const headerBg = isDark ? Colors.black.secondary : Colors.white.secondary;
   // Load image
   useEffect(() => {
     if (!imageUri) return;
@@ -90,21 +97,12 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
       (width, height) => {
         setImageSize({ width, height });
 
-        // Calculate initial scale to fill crop area
-        const imageAspect = width / height;
-        const cropAspect = frameWidth / frameHeight;
+        // Calculate initial scale to fit the image entirely within the crop area (requested: Default zoom = fully visible image)
+        const scaleX = frameWidth / width;
+        const scaleY = frameHeight / height;
 
-        let initialScale: number;
-        if (imageAspect > cropAspect) {
-          // Image is wider - scale to fit height
-          initialScale = frameHeight / height;
-        } else {
-          // Image is taller - scale to fit width
-          initialScale = frameWidth / width;
-        }
-
-        // Ensure image covers the frame
-        initialScale = Math.max(initialScale, 1);
+        // Use min to fit the whole image
+        const initialScale = Math.min(scaleX, scaleY);
 
         savedScale.value = initialScale;
         scale.value = initialScale;
@@ -130,16 +128,6 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
       translateY.value = savedTranslateY.value + e.translationY;
     })
     .onEnd(() => {
-      // Constrain to bounds
-      const scaledWidth = imageSize.width * scale.value;
-      const scaledHeight = imageSize.height * scale.value;
-
-      const maxTranslateX = Math.max(0, (scaledWidth - frameWidth) / 2);
-      const maxTranslateY = Math.max(0, (scaledHeight - frameHeight) / 2);
-
-      translateX.value = Math.max(-maxTranslateX, Math.min(maxTranslateX, translateX.value));
-      translateY.value = Math.max(-maxTranslateY, Math.min(maxTranslateY, translateY.value));
-
       savedTranslateX.value = translateX.value;
       savedTranslateY.value = translateY.value;
     });
@@ -148,28 +136,11 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
   const pinchGesture = Gesture.Pinch()
     .onUpdate((e) => {
       const newScale = savedScale.value * e.scale;
-      // Minimum scale to cover frame
-      const minScale = Math.max(
-        frameWidth / imageSize.width,
-        frameHeight / imageSize.height
-      );
-      scale.value = Math.max(minScale, newScale);
+      // Allow very generous zooming
+      scale.value = Math.max(0.1, Math.min(10, newScale));
     })
     .onEnd(() => {
       savedScale.value = scale.value;
-
-      // Re-constrain position after zoom
-      const scaledWidth = imageSize.width * scale.value;
-      const scaledHeight = imageSize.height * scale.value;
-
-      const maxTranslateX = Math.max(0, (scaledWidth - frameWidth) / 2);
-      const maxTranslateY = Math.max(0, (scaledHeight - frameHeight) / 2);
-
-      translateX.value = Math.max(-maxTranslateX, Math.min(maxTranslateX, translateX.value));
-      translateY.value = Math.max(-maxTranslateY, Math.min(maxTranslateY, translateY.value));
-
-      savedTranslateX.value = translateX.value;
-      savedTranslateY.value = translateY.value;
     });
 
   // Combined gestures
@@ -177,19 +148,10 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
 
   // Animated image style
   const imageAnimatedStyle = useAnimatedStyle(() => {
-    const scaledWidth = imageSize.width * scale.value;
-    const scaledHeight = imageSize.height * scale.value;
-
-    const maxTranslateX = Math.max(0, (scaledWidth - frameWidth) / 2);
-    const maxTranslateY = Math.max(0, (scaledHeight - frameHeight) / 2);
-
-    const constrainedX = Math.max(-maxTranslateX, Math.min(maxTranslateX, translateX.value));
-    const constrainedY = Math.max(-maxTranslateY, Math.min(maxTranslateY, translateY.value));
-
     return {
       transform: [
-        { translateX: constrainedX },
-        { translateY: constrainedY },
+        { translateX: translateX.value },
+        { translateY: translateY.value },
         { scale: scale.value },
       ],
     };
@@ -261,16 +223,16 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: bgColor }]} edges={['top']}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: headerBg }]}>
           <TouchableOpacity
             style={styles.headerButton}
             onPress={() => navigation.goBack()}
           >
-            <Icon name="arrow-back" size={24} color={Colors.white.primary} />
+            <Icon name="arrow-back" size={24} color={textColor} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { fontFamily: Fonts.medium }]}>Adjust Profile Photo</Text>
+          <Text style={[styles.headerTitle, { fontFamily: Fonts.medium, color: textColor }]}>Adjust Profile Photo</Text>
           <TouchableOpacity
             style={styles.headerButton}
             onPress={handleSave}
@@ -290,8 +252,8 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
         <View style={styles.cropContainer}>
           {loading || cropping ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={Colors.white.primary} />
-              {cropping && <Text style={styles.croppingText}>Processing photo...</Text>}
+              <ActivityIndicator size="large" color={Colors.brand.primary} />
+              {cropping && <Text style={[styles.croppingText, { color: textColor }]}>Processing photo...</Text>}
             </View>
           ) : (
             <>
@@ -320,15 +282,26 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
                       </GestureDetector>
                     </Animated.View>
                   </View>
-                  {/* Crop Overlay */}
+                  {/* Circular Crop Overlay */}
                   <View style={styles.overlay} pointerEvents="none">
-                    <View style={styles.overlayTop} />
-                    <View style={styles.overlayMiddle}>
-                      <View style={styles.overlayLeft} />
-                      <Animated.View style={[styles.cropFrame, frameAnimatedStyle]} />
-                      <View style={styles.overlayRight} />
+                    <View style={styles.circleMaskContainer}>
+                      <View style={[styles.circleMask, {
+                        width: frameWidth,
+                        height: frameHeight,
+                        borderRadius: frameWidth / 2,
+                        borderColor: 'rgba(0,0,0,0.5)',
+                        borderWidth: 2000, // Giant border to dim the outside
+                      }]} />
+                      {/* Circle Border Line for clarity */}
+                      <View style={[styles.circleBorder, {
+                        width: frameWidth,
+                        height: frameHeight,
+                        borderRadius: frameWidth / 2,
+                        borderColor: Colors.brand.primary,
+                        borderWidth: 2,
+                        position: 'absolute',
+                      }]} />
                     </View>
-                    <View style={styles.overlayBottom} />
                   </View>
                 </View>
               </View>
@@ -338,7 +311,7 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
 
         {/* Instructions */}
         <View style={styles.instructionsContainer}>
-          <Text style={styles.instructionsText}>
+          <Text style={[styles.instructionsText, { color: subTextColor }]}>
             Pinch to zoom • Drag to adjust position
           </Text>
         </View>
@@ -350,7 +323,6 @@ export default function ProfilePhotoCropScreen({ navigation, route }: ProfilePho
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
   },
   header: {
     flexDirection: 'row',
@@ -358,7 +330,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#000000',
   },
   headerButton: {
     padding: 8,
@@ -366,7 +337,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    color: Colors.white.primary,
     flex: 1,
     textAlign: 'center',
   },
@@ -383,6 +353,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'transparent',
   },
   loadingContainer: {
     alignItems: 'center',
@@ -392,7 +363,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 14,
     fontFamily: Fonts.regular,
-    color: Colors.white.primary,
   },
   cropArea: {
     width: '100%',
@@ -404,6 +374,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     position: 'relative',
+    overflow: 'hidden',
   },
   frameWrapper: {
     position: 'absolute',
@@ -416,37 +387,31 @@ const styles = StyleSheet.create({
   },
   frameContainer: {
     overflow: 'hidden',
+    backgroundColor: 'transparent',
   },
   imageContainer: {
     width: '100%',
     height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  overlayTop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  circleMaskContainer: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
   },
-  overlayMiddle: {
-    flexDirection: 'row',
+  circleMask: {
+    // Large border used to create the cutout effect
   },
-  overlayLeft: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  cropFrame: {
-    borderWidth: 2,
-    borderColor: Colors.white.primary,
-    backgroundColor: 'transparent',
-  },
-  overlayRight: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  overlayBottom: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  circleBorder: {
+    // Visible border line
   },
   instructionsContainer: {
     paddingVertical: 16,
@@ -456,7 +421,6 @@ const styles = StyleSheet.create({
   instructionsText: {
     fontSize: 14,
     fontFamily: Fonts.regular,
-    color: Colors.white.qua,
     textAlign: 'center',
   },
 });

@@ -5,22 +5,23 @@
  * 1. listenToUserProfile - user document
  * 2. listenToUserPosts - posts query
  * 3. listenToFollowState - follow state query
+ * 
+ * ⚡ PERFORMANCE OPTIMIZED: FlatList with ListHeaderComponent
  */
 
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   FlatList,
   Image,
   RefreshControl,
+  Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
@@ -35,6 +36,12 @@ import { useSavedPostsList } from '../../hooks/useSavedPostsList';
 import { useSession } from '../../core/session';
 import { getOrCreateConversation } from '../../services/chat/MessagesAPI';
 import ProfileSkeleton from '../../components/profile/ProfileSkeleton';
+import { ScreenLayout } from '../../components/layout/ScreenLayout';
+import { EmptyState } from '../../components/common/EmptyState';
+import { SmartImage } from '../../components/common/SmartImage';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const GRID_ITEM_WIDTH = SCREEN_WIDTH / 3;
 
 export default function ProfileScreen({ navigation, route }: any) {
   const { user: currentUser } = useAuth();
@@ -44,31 +51,20 @@ export default function ProfileScreen({ navigation, route }: any) {
   const targetUserId = (userId || currentUserId || '').trim() || undefined;
   const isOwnProfile = !userId || userId === currentUserId;
 
-  // Use global useUser hook for all user data
-  const { user, posts, counts, loading, error, refresh } = useUser(targetUserId, { listenPosts: true });
-
-  // Use global useFollowStatus hook for follow state
+  const { user, posts, counts, loading, refresh } = useUser(targetUserId, { listenPosts: true });
   const followStatus = useFollowStatus(currentUser?.uid, targetUserId);
 
-  // Local state for UI
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
-  // Use hook for saved posts (only active when on saved tab and own profile)
-  const { posts: fetchedSavedPosts, loading: savedPostsLoading } = useSavedPostsList(
-    (isOwnProfile && activeTab === 'saved') ? currentUserId : undefined
+  // 🔐 DATA PERSISTENCE: Call hook unconditionally to preserve cache/state
+  const { posts: fetchedSavedPosts, loading: savedLoading } = useSavedPostsList(
+    isOwnProfile ? currentUserId : undefined
   );
 
-  // Update local state when hook updates (or just use hook result directly)
-  // Since we have refreshing logic, we might want to keep using the hook result directly
-  // But strictly speaking, we want to combine it with `savedPosts` state or just replace it.
-
-  // Simplification: Direct usage
   const savedPosts = fetchedSavedPosts;
-
   const [creatingChat, setCreatingChat] = useState<boolean>(false);
 
-  // Convert user data to User type for compatibility
-  const profileUser = user ? {
+  const profileUser = useMemo(() => user ? {
     id: user.uid,
     accountType: user.accountType,
     username: user.username,
@@ -85,53 +81,36 @@ export default function ProfileScreen({ navigation, route }: any) {
     followersCount: counts.followers,
     followingCount: counts.following,
     postsCount: counts.posts,
-  } : null;
+  } : null, [user, counts]);
 
-  // Handle fine-grained follow toggle logic passed to child
   const handleFollowToggle = useCallback(async () => {
     if (!targetUserId || !currentUserId || isOwnProfile || followStatus.loading) {
       return;
     }
-
     try {
-      // Just toggle. Hook handles API and state.
       await followStatus.toggleFollow();
     } catch (error: any) {
       console.error('[ProfileScreen] Error toggling follow:', error);
     }
   }, [targetUserId, currentUserId, isOwnProfile, followStatus]);
 
-  // V1 MODERATION: Handle block user
   const handleBlock = useCallback(async () => {
-    if (!targetUserId || !currentUserId || isOwnProfile) {
-      return;
-    }
-
-    // Import Alert
+    if (!targetUserId || !currentUserId || isOwnProfile) return;
     const { Alert } = await import('react-native');
-
     Alert.alert(
       'Block User',
-      `Are you sure you want to block this user? They won't be able to see your posts and you won't see theirs.`,
+      `Are you sure you want to block this user?`,
       [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Block',
           style: 'destructive',
           onPress: async () => {
             try {
-              // Import block service
               const { blockUser } = await import('../../services/api/firebaseService');
               await blockUser(currentUserId, targetUserId);
-              console.log('✅ User blocked successfully');
-
-              // Navigate back after blocking
               navigation?.goBack();
             } catch (error: any) {
-              console.error('[ProfileScreen] Error blocking user:', error);
               Alert.alert('Error', 'Failed to block user. Please try again.');
             }
           },
@@ -140,57 +119,31 @@ export default function ProfileScreen({ navigation, route }: any) {
     );
   }, [targetUserId, currentUserId, isOwnProfile, navigation]);
 
-  // Handle edit profile
   const handleEditProfile = useCallback(() => {
     navigation?.navigate('EditProfile', { userId: targetUserId });
   }, [navigation, targetUserId]);
 
-  // Navigate to followers/following screens
   const handleFollowersPress = useCallback(() => {
-    navigation?.navigate('Followers', {
-      userId: targetUserId,
-      type: 'followers'
-    });
+    navigation?.navigate('Followers', { userId: targetUserId, type: 'followers' });
   }, [navigation, targetUserId]);
 
   const handleFollowingPress = useCallback(() => {
-    navigation?.navigate('Followers', {
-      userId: targetUserId,
-      type: 'following'
-    });
+    navigation?.navigate('Followers', { userId: targetUserId, type: 'following' });
   }, [navigation, targetUserId]);
 
-  // Handle message - create chat and navigate to ChatRoom
   const handleMessage = useCallback(async () => {
-    if (!sessionUserId || !targetUserId || isOwnProfile || creatingChat) {
-      console.log('[ProfileScreen] Cannot create chat:', { sessionUserId, targetUserId, isOwnProfile, creatingChat });
-      return;
-    }
-
-    console.log('[ProfileScreen] Creating conversation between:', sessionUserId, 'and', targetUserId);
+    if (!sessionUserId || !targetUserId || isOwnProfile || creatingChat) return;
     setCreatingChat(true);
     try {
-      // Create or get existing conversation using deterministic conversationId
       const conversation = await getOrCreateConversation(sessionUserId, targetUserId);
-      console.log('[ProfileScreen] Conversation created/retrieved:', conversation.id);
-
-      // SINGLE NAVIGATION CONTRACT: Only chatId is required
-      console.log('[ProfileScreen] Navigating to ChatRoom with chatId:', conversation.id);
-      navigation?.navigate('ChatRoom', {
-        chatId: conversation.id,
-      });
+      navigation?.navigate('ChatRoom', { chatId: conversation.id });
     } catch (error: any) {
       console.error('[ProfileScreen] Error creating conversation:', error);
-      // Show error to user
-      if (error?.message) {
-        console.error('[ProfileScreen] Error message:', error.message);
-      }
     } finally {
       setCreatingChat(false);
     }
   }, [sessionUserId, targetUserId, isOwnProfile, creatingChat, navigation]);
 
-  // Handle refresh
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -202,12 +155,10 @@ export default function ProfileScreen({ navigation, route }: any) {
     }
   }, [refresh]);
 
+  // Loading state should be granular
+  // const displayedPosts = useMemo(() => (activeTab === 'saved' ? savedPosts : posts) || [], [activeTab, savedPosts, posts]);
 
-  // Determine which posts to show
-  const displayedPosts = (activeTab === 'saved' ? savedPosts : posts) || [];
-
-  // Render post thumbnail
-  const renderPostThumbnail = useCallback(({ item, index }: { item: Post; index: number }) => {
+  const renderPostThumbnail = useCallback((item: Post, index: number, postsList: Post[]) => {
     const imageUrl = item.imageURL || item.coverImage || (item.gallery && item.gallery[0]) || '';
     return (
       <TouchableOpacity
@@ -215,18 +166,20 @@ export default function ProfileScreen({ navigation, route }: any) {
         onPress={() => {
           navigation?.navigate('PostDetail', {
             postId: item.id,
-            userId: profileUser?.id || targetUserId, // Context for feed fetch if needed
-            posts: displayedPosts, // Pass current list for immediate rendering
-            index: index // Pass index for fast scroll
+            userId: profileUser?.id || targetUserId,
+            posts: postsList,
+            index: index
           });
         }}
         activeOpacity={0.8}
       >
         {imageUrl ? (
-          <Image
-            source={{ uri: imageUrl }}
+          <SmartImage
+            uri={imageUrl}
             style={styles.thumbnailImage}
             resizeMode="cover"
+            showPlaceholder={true}
+            borderRadius={2}
           />
         ) : (
           <View style={styles.thumbnailPlaceholder}>
@@ -235,47 +188,34 @@ export default function ProfileScreen({ navigation, route }: any) {
         )}
       </TouchableOpacity>
     );
-  }, [navigation, profileUser?.id, targetUserId, displayedPosts]);
+  }, [navigation, profileUser?.id, targetUserId]);
 
-  if (loading) {
+  const renderTimelinePost = useCallback(({ item, index }: { item: Post; index: number }) =>
+    renderPostThumbnail(item, index, posts || []),
+    [renderPostThumbnail, posts]);
+
+  const renderSavedPost = useCallback(({ item, index }: { item: Post; index: number }) =>
+    renderPostThumbnail(item, index, savedPosts || []),
+    [renderPostThumbnail, savedPosts]);
+
+  const keyExtractor = useCallback((item: Post) => item.id, []);
+
+  const getItemLayout = useCallback((data: any, index: number) => ({
+    length: GRID_ITEM_WIDTH,
+    offset: GRID_ITEM_WIDTH * Math.floor(index / 3),
+    index,
+  }), []);
+
+  const ListHeader = useMemo(() => {
+    if (!profileUser) return null;
     return (
-      <SafeAreaView style={styles.container}>
-        <ProfileSkeleton />
-      </SafeAreaView>
-    );
-  }
-
-  if (!profileUser) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>User not found</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-
-
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={Colors.brand.primary}
-          />
-        }
-      >
-        {/* Header */}
+      <>
+        {/* Header Back Button */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation?.goBack()}>
             <Icon name="arrow-back" size={24} color={Colors.black.primary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{profileUser.username}</Text>
-          {/* V1: Settings icon removed - functionality deferred to V2 */}
           <View style={styles.headerRight} />
         </View>
 
@@ -286,7 +226,7 @@ export default function ProfileScreen({ navigation, route }: any) {
               <View style={styles.cardLeft}>
                 <UserAvatar
                   size="xl"
-                  uri={profileUser.profilePhoto || profileUser.photoUrl || profileUser.photoURL || profileUser.profilePic || undefined}
+                  uri={profileUser.profilePhoto}
                   isVerified={false}
                   variant="profile"
                 />
@@ -295,7 +235,6 @@ export default function ProfileScreen({ navigation, route }: any) {
               <View style={styles.cardRight}>
                 <View style={styles.headerTopRow}>
                   <View style={styles.nameColumn}>
-                    {/* Row 1: Name (or Username) + Badge */}
                     <View style={styles.nameRow}>
                       <Text style={styles.profileDisplayName} numberOfLines={1}>
                         {profileUser.name || profileUser.username || 'User'}
@@ -306,18 +245,13 @@ export default function ProfileScreen({ navigation, route }: any) {
                         </View>
                       )}
                     </View>
-
-                    {/* Row 3: Account Type */}
                     {profileUser.accountType && (
                       <View style={styles.accountTypeContainer}>
-                        <Text style={styles.accountType}>
-                          {profileUser.accountType}
-                        </Text>
+                        <Text style={styles.accountType}>{profileUser.accountType}</Text>
                       </View>
                     )}
                   </View>
 
-                  {/* Action Button (Edit - Top Right) */}
                   <View style={styles.actionButtonWrapper}>
                     {isOwnProfile && (
                       <TouchableOpacity style={styles.editButtonSmall} onPress={handleEditProfile}>
@@ -335,7 +269,6 @@ export default function ProfileScreen({ navigation, route }: any) {
               </View>
             </View>
 
-            {/* Footer Action Row: Follow and Message Buttons */}
             {!isOwnProfile && (
               <View style={styles.cardFooterAction}>
                 <View style={styles.actionButtonsRow}>
@@ -364,36 +297,24 @@ export default function ProfileScreen({ navigation, route }: any) {
                 </View>
               </View>
             )}
-
           </View>
 
-          {/* Stats */}
           <View style={styles.statsRow}>
-            <TouchableOpacity
-              style={styles.statItem}
-              onPress={() => setActiveTab('posts')}
-            >
+            <TouchableOpacity style={styles.statItem} onPress={() => setActiveTab('posts')}>
               <Text style={styles.statNumber}>{profileUser.postsCount || 0}</Text>
               <Text style={styles.statLabel}>Posts</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.statItem}
-              onPress={handleFollowersPress}
-            >
+            <TouchableOpacity style={styles.statItem} onPress={handleFollowersPress}>
               <Text style={styles.statNumber}>{profileUser.followersCount}</Text>
               <Text style={styles.statLabel}>Followers</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.statItem}
-              onPress={handleFollowingPress}
-            >
+            <TouchableOpacity style={styles.statItem} onPress={handleFollowingPress}>
               <Text style={styles.statNumber}>{profileUser.followingCount}</Text>
               <Text style={styles.statLabel}>Following</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Content Tabs */}
         <View style={styles.tabs}>
           <TouchableOpacity
             style={[styles.tab, activeTab === 'posts' && styles.tabActive]}
@@ -418,63 +339,108 @@ export default function ProfileScreen({ navigation, route }: any) {
             </TouchableOpacity>
           )}
         </View>
+      </>
+    );
+  }, [profileUser, navigation, isOwnProfile, followStatus, creatingChat, activeTab, handleBlock, handleEditProfile, handleFollowToggle, handleFollowersPress, handleFollowingPress, handleMessage]);
 
-        {/* Content */}
-        {displayedPosts.length > 0 ? (
-          <View style={styles.postsGrid}>
-            <FlatList
-              data={displayedPosts}
-              renderItem={renderPostThumbnail}
-              keyExtractor={(item) => item.id}
-              numColumns={3}
-              scrollEnabled={false}
-              contentContainerStyle={styles.gridContent}
+  const ListEmptyComponent = useMemo(() => (
+    <View style={styles.emptyPostsContainer}>
+      <Icon
+        name={activeTab === 'saved' ? 'bookmark-outline' : 'camera-outline'}
+        size={48}
+        color={Colors.black.qua}
+      />
+      <Text style={styles.emptyPostsTitle}>
+        {activeTab === 'saved' ? 'No saved posts yet' : 'No posts yet'}
+      </Text>
+      <Text style={styles.emptyPostsSubtitle}>
+        {activeTab === 'saved'
+          ? 'Posts you save will appear here.'
+          : (isOwnProfile ? 'Share your moments with the world.' : 'User hasn\'t posted anything yet.')}
+      </Text>
+    </View>
+  ), [activeTab, isOwnProfile]);
+
+  if (loading) {
+    return (
+      <ScreenLayout scrollable={false}>
+        <ProfileSkeleton />
+      </ScreenLayout>
+    );
+  }
+
+  if (!profileUser) {
+    return (
+      <ScreenLayout scrollable={false}>
+        <EmptyState
+          icon="person-outline"
+          title="User not found"
+          subtitle="This profile doesn't exist or has been removed"
+        />
+      </ScreenLayout>
+    );
+  }
+
+  return (
+    <ScreenLayout scrollable={false}>
+      {/* 🔐 PERSISTENT VIEWPORT 1: Posts Grid */}
+      <View style={{ flex: 1, display: activeTab === 'posts' ? 'flex' : 'none' }}>
+        <FlatList
+          data={posts}
+          renderItem={renderTimelinePost}
+          keyExtractor={keyExtractor}
+          numColumns={3}
+          ListHeaderComponent={ListHeader}
+          ListEmptyComponent={ListEmptyComponent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={Colors.brand.primary}
             />
-          </View>
-        ) : (
-          <View style={styles.emptyPostsContainer}>
-            <Icon
-              name={activeTab === 'saved' ? 'bookmark-outline' : 'camera-outline'}
-              size={48}
-              color={Colors.black.qua}
-            />
-            <Text style={styles.emptyPostsTitle}>
-              {activeTab === 'saved' ? 'No saved posts yet' : 'No posts yet'}
-            </Text>
-            <Text style={styles.emptyPostsSubtitle}>
-              {activeTab === 'saved'
-                ? 'Posts you save will appear here.'
-                : (isOwnProfile ? 'Share your moments with the world.' : 'User hasn\'t posted anything yet.')}
-            </Text>
-          </View>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+          }
+          contentContainerStyle={styles.listContent}
+          getItemLayout={getItemLayout}
+          removeClippedSubviews={false} // 🔐 Image cache safety: clipping can sometimes purge decodes
+          initialNumToRender={12}
+          maxToRenderPerBatch={12}
+          windowSize={10} // Increased for better smoothness
+        />
+      </View>
+
+      {/* 🔐 PERSISTENT VIEWPORT 2: Saved Grid */}
+      {isOwnProfile && (
+        <View style={{ flex: 1, display: activeTab === 'saved' ? 'flex' : 'none' }}>
+          <FlatList
+            data={savedPosts}
+            renderItem={renderSavedPost}
+            keyExtractor={keyExtractor}
+            numColumns={3}
+            ListHeaderComponent={ListHeader}
+            ListEmptyComponent={ListEmptyComponent}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={Colors.brand.primary}
+              />
+            }
+            contentContainerStyle={styles.listContent}
+            getItemLayout={getItemLayout}
+            removeClippedSubviews={false}
+            initialNumToRender={12}
+            maxToRenderPerBatch={12}
+            windowSize={10}
+          />
+        </View>
+      )}
+    </ScreenLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.white.primary,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 16,
-    fontFamily: Fonts.regular,
-    color: Colors.black.qua,
-  },
-  scrollView: {
-    flex: 1,
+  listContent: {
+    paddingBottom: 40,
   },
   header: {
     flexDirection: 'row',
@@ -486,7 +452,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.white.tertiary,
   },
   headerTitle: {
-    fontSize: 16, // Slightly smaller for username in top bar
+    fontSize: 16,
     fontFamily: Fonts.semibold,
     color: Colors.black.primary,
   },
@@ -502,7 +468,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white.secondary,
     borderRadius: 20,
     padding: 20,
-    // Shadow
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
@@ -515,7 +480,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   cardLeft: {
-    marginRight: 16, // Increased spacing
+    marginRight: 16,
   },
   cardRight: {
     flex: 1,
@@ -535,19 +500,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 2,
-    // flexWrap: 'wrap', // Removed to prevent wrapping
   },
   profileDisplayName: {
-    fontSize: 20, // Larger
+    fontSize: 20,
     fontFamily: Fonts.bold,
     color: Colors.black.primary,
     marginRight: 6,
-    flexShrink: 1, // Allow text to shrink/truncate
+    flexShrink: 1,
   },
-
   accountTypeContainer: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255, 92, 2, 0.1)', // Light orange pill
+    backgroundColor: 'rgba(255, 92, 2, 0.1)',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 12,
@@ -652,16 +615,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: Colors.brand.primary,
   },
-  postsGrid: {
-    padding: 2,
-    minHeight: 200,
-  },
-  gridContent: {
-    padding: 2,
-  },
   postThumbnail: {
-    width: '33.33%',
-    aspectRatio: 1,
+    width: GRID_ITEM_WIDTH,
+    height: GRID_ITEM_WIDTH,
     padding: 2,
   },
   thumbnailImage: {

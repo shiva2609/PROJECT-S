@@ -4,6 +4,8 @@ import {
   Text,
   StyleSheet,
   Dimensions,
+  Animated,
+  Pressable,
 } from 'react-native';
 import { doc, getDoc } from '../../core/firebase/compat';
 import { db } from '../../core/firebase';
@@ -15,8 +17,9 @@ import { Colors } from '../../theme/colors';
 import { normalizePost } from '../../utils/postUtils';
 import PostDropdown from './PostDropdown';
 import { usePostInteractions } from '../../global/hooks/usePostInteractions';
-import { useFollowStatus } from '../../global/hooks/useFollowStatus';
 import { MediaItem } from './PostCarousel';
+import * as FollowService from '../../services/follow/followRealtimeService';
+import { sendFollowNotification, removeFollowNotification } from '../../services/notifications/NotificationAPI';
 
 // Subcomponents
 import PostHeader from './PostHeader';
@@ -33,6 +36,7 @@ interface PostCardProps {
   onBookmark?: () => void;
   onProfilePress: () => void;
   onPostDetailPress: () => void;
+  enablePress?: boolean;
   onOptionsPress?: (post: Post) => void;
   currentUserId?: string;
   isFollowing?: boolean;
@@ -52,6 +56,7 @@ function PostCard({
   onBookmark,
   onProfilePress,
   onPostDetailPress,
+  enablePress = true,
   onOptionsPress,
   currentUserId,
   isFollowing: isFollowingProp,
@@ -60,21 +65,49 @@ function PostCard({
   onFollow,
   onPostRemoved,
 }: PostCardProps) {
+  // Animation for press interaction
+  const scaleAnim = React.useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    if (!enablePress) return;
+    Animated.spring(scaleAnim, {
+      toValue: 0.96,
+      useNativeDriver: true,
+      speed: 20,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    if (!enablePress) return;
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 20,
+    }).start();
+  };
   // Safety check: return null if post is invalid
   // We cannot return early here because of hooks usage
   // The hooks should deal gracefully with empty/invalid inputs
 
 
-  const creatorId = post.createdBy || post.userId || post.ownerId || '';
+  const creatorId = post.createdBy || post.userId || (post as any).ownerId || '';
 
-  // Use REAL-TIME follow status hook
-  const followStatus = useFollowStatus(currentUserId, creatorId);
-  const isFollowing = followStatus.isFollowing || isFollowingProp || false;
+  // OPTIMIZATION: Removed useFollowStatus listener.
+  // We rely on isFollowingProp passed from the feed (which is updated by the global listener)
+  // or default to false.
+  const isFollowing = isFollowingProp || false;
+  const [localFollowing, setLocalFollowing] = useState(isFollowing);
+  const [followLoading, setFollowLoading] = useState(false);
+
+  // Sync with prop changes
+  useEffect(() => {
+    setLocalFollowing(isFollowing);
+  }, [isFollowing]);
 
   const showFollowButton = showFollowButtonProp !== undefined
     ? showFollowButtonProp
-    : (post.showFollowButton !== undefined
-      ? post.showFollowButton
+    : ((post as any).showFollowButton !== undefined
+      ? (post as any).showFollowButton
       : (!isFollowing && inForYou && creatorId !== currentUserId));
 
   const [showDropdown, setShowDropdown] = useState(false);
@@ -114,18 +147,29 @@ function PostCard({
 
   // Handle follow
   const handleFollow = useCallback(async () => {
-    if (!creatorId) return;
+    if (!creatorId || !currentUserId || followLoading) return;
+
+    const previousState = localFollowing;
+    // Optimistic Update
+    setLocalFollowing(!previousState);
+
     try {
-      if (followStatus.toggleFollow) {
-        await followStatus.toggleFollow();
+      if (previousState) {
+        await FollowService.unfollowUser(currentUserId, creatorId);
+        await removeFollowNotification(creatorId, currentUserId);
+      } else {
+        await FollowService.followUser(currentUserId, creatorId);
       }
+
       if (onFollow) {
-        await onFollow(creatorId);
+        onFollow(creatorId);
       }
     } catch (error: any) {
       console.error('Error toggling follow:', error);
+      // Rollback
+      setLocalFollowing(previousState);
     }
-  }, [creatorId, followStatus, onFollow]);
+  }, [creatorId, currentUserId, localFollowing, followLoading, onFollow]);
 
   // V1 FEATURE FREEZE: Post sharing intentionally disabled for V1 stability.
   // Re-enable in V2 with finalized chat share UX.
@@ -144,7 +188,7 @@ function PostCard({
     }
     if (creatorId) {
       const userRef = doc(db, 'users', creatorId);
-      getDoc(userRef).then((snapshot) => {
+      getDoc(userRef).then((snapshot: any) => {
         if (snapshot.exists()) {
           const userData = snapshot.data();
           const verified = userData.verificationStatus === 'verified' || userData.verified === true;
@@ -204,14 +248,14 @@ function PostCard({
           const url = item?.url || item?.uri;
           if (url && typeof url === 'string' && url.length > 0) {
             return {
-              type: (item?.type === 'video' ? 'video' : 'image') as const,
+              type: (item?.type === 'video' ? 'video' : 'image'),
               uri: url,
-              id: item?.id || `media-${index}`,
-            };
+              id: (item?.id ? String(item.id) : `media-${index}`),
+            } as MediaItem;
           }
           return null;
         })
-        .filter((item: any): item is MediaItem => item !== null);
+        .filter((item): item is MediaItem => item !== null);
 
       if (mediaItems.length > 0) {
         return mediaItems;
@@ -236,7 +280,7 @@ function PostCard({
       }];
     }
 
-    const photoUrl = (post as any).photoUrl || post.photoUrl;
+    const photoUrl = (post as any).photoUrl;
     if (photoUrl && typeof photoUrl === 'string' && photoUrl.length > 0) {
       return [{
         type: 'image' as const,
@@ -341,58 +385,65 @@ function PostCard({
   }
 
   return (
-    <View style={styles.card}>
-      <PostHeader
-        username={username}
-        profilePhoto={profilePhoto}
-        userId={creatorId}
-        isVerified={isVerified}
-        location={location}
-        onProfilePress={onProfilePress}
-        showFollowButton={showFollowButton}
-        isFollowing={isFollowing}
-        isOwnPost={isOwnPost}
-        onFollow={handleFollow}
-        isFollowLoading={followStatus.loading}
-      />
-
-      <PostMedia
-        media={normalizedMedia}
-        ratio={post.ratio}
-        aspectRatio={post.aspectRatio}
-        postId={post.id}
-      />
-
-      <PostActions
-        isLiked={actualIsLiked}
-        likeCount={likeCount}
-        onLike={handleLike}
-        commentCount={commentCount}
-        onComment={onComment}
-        shareCount={shareCount}
-        onShare={handleShare}
-        isSaved={actualIsSaved}
-        onSave={handleSave}
-        onMorePress={handleMorePress}
-      />
-
-      {currentUserId && creatorId && (
-        <PostDropdown
-          post={post}
-          postUserId={creatorId}
-          currentUserId={currentUserId}
-          isFollowing={isFollowing}
-          inForYou={inForYou}
-          visible={showDropdown}
-          onClose={() => setShowDropdown(false)}
-          onPostRemoved={onPostRemoved}
+    <Pressable
+      onPress={enablePress ? onPostDetailPress : undefined}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      disabled={!enablePress}
+    >
+      <Animated.View style={[styles.card, { transform: [{ scale: scaleAnim }] }]}>
+        <PostHeader
+          username={username}
+          profilePhoto={profilePhoto}
+          userId={creatorId}
+          isVerified={isVerified}
+          location={location}
+          onProfilePress={onProfilePress}
+          showFollowButton={showFollowButton}
+          isFollowing={localFollowing}
+          isOwnPost={isOwnPost}
+          onFollow={handleFollow}
+          isFollowLoading={followLoading}
         />
-      )}
 
-      {renderCaption()}
+        <PostMedia
+          media={normalizedMedia}
+          ratio={post.ratio}
+          aspectRatio={post.aspectRatio}
+          postId={post.id}
+        />
 
-      {timestamp ? <Text style={styles.timestamp}>{timestamp}</Text> : null}
-    </View>
+        <PostActions
+          isLiked={actualIsLiked}
+          likeCount={likeCount}
+          onLike={handleLike}
+          commentCount={commentCount}
+          onComment={onComment}
+          shareCount={shareCount}
+          onShare={handleShare}
+          isSaved={actualIsSaved}
+          onSave={handleSave}
+          onMorePress={handleMorePress}
+        />
+
+        {currentUserId && creatorId && (
+          <PostDropdown
+            post={post}
+            postUserId={creatorId}
+            currentUserId={currentUserId}
+            isFollowing={isFollowing}
+            inForYou={inForYou}
+            visible={showDropdown}
+            onClose={() => setShowDropdown(false)}
+            onPostRemoved={onPostRemoved}
+          />
+        )}
+
+        {renderCaption()}
+
+        {timestamp ? <Text style={styles.timestamp}>{timestamp}</Text> : null}
+      </Animated.View>
+    </Pressable>
   );
 }
 

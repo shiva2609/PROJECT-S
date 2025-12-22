@@ -27,6 +27,8 @@ const profilePhotoMemoryCache: Record<string, string> = {};
 
 // Map to track active subscriptions (userId -> unsubscribe function)
 const activeSubscriptions = new Map<string, Unsubscribe>();
+// Multi-callback support: Map<userId, Set<callback>>
+const subscriptionCallbacks = new Map<string, Set<(url: string) => void>>();
 
 /**
  * Get cached profile photo from memory cache
@@ -127,107 +129,59 @@ export function subscribeToUserProfilePhoto(
   userId: string,
   callback?: (photoUrl: string) => void
 ): () => void {
-  if (!userId) {
-    console.warn('[userProfilePhotoService] Cannot subscribe: userId is empty');
-    return () => { };
+  if (!userId) return () => { };
+
+  // Add callback to the set for this user
+  if (!subscriptionCallbacks.has(userId)) {
+    subscriptionCallbacks.set(userId, new Set());
+  }
+  if (callback) {
+    subscriptionCallbacks.get(userId)!.add(callback);
   }
 
-  // If already subscribed, return existing unsubscribe
+  // If already subscribed to Firestore, just return a handle to remove this specific callback
   if (activeSubscriptions.has(userId)) {
-    console.log(`[userProfilePhotoService] Already subscribed to ${userId}, returning existing subscription`);
-    return activeSubscriptions.get(userId)!;
+    return () => {
+      if (callback) {
+        subscriptionCallbacks.get(userId)?.delete(callback);
+      }
+    };
   }
 
   try {
     const userRef = doc(db, 'users', userId);
-
     const unsubscribe = onSnapshot(
       userRef,
-      (snapshot) => {
-        // Handle deleted/non-existing user
-        if (!snapshot.exists()) {
-          const defaultUrl = DEFAULT_PROFILE_PHOTO;
-          // Update all caches
-          profilePhotoMemoryCache[userId] = defaultUrl;
-          store.dispatch(updateProfilePhoto({ userId, photoUrl: defaultUrl }));
-          if (callback) {
-            callback(defaultUrl);
-          }
-          return;
-        }
+      (snapshot: any) => {
+        const data = snapshot.exists() ? snapshot.data() : null;
+        let photoUrl = data?.profilePhotoUrl || data?.profilePhoto || data?.photoURL || DEFAULT_PROFILE_PHOTO;
 
-        const data = snapshot.data();
-        // Priority: profilePhotoUrl > profilePhoto > photoURL
-        let photoUrl = data.profilePhotoUrl || data.profilePhoto || data.photoURL;
-        const photoUpdatedAt = data.profilePhotoUpdatedAt;
-
-        // Check if photoUrl is null, undefined, empty string, or default placeholder
         if (!photoUrl || photoUrl.trim() === '' || photoUrl === DEFAULT_PROFILE_PHOTO) {
           photoUrl = DEFAULT_PROFILE_PHOTO;
         }
 
-        // Race-condition prevention: Check timestamp
-        const state = store.getState();
-        const storedTimestamp = state.profilePhoto?.profilePhotoUpdatedAtMap[userId];
-        let newTimestamp: number;
-
-        if (photoUpdatedAt) {
-          newTimestamp = photoUpdatedAt instanceof Timestamp
-            ? photoUpdatedAt.toMillis()
-            : typeof photoUpdatedAt === 'number'
-              ? photoUpdatedAt
-              : Date.now();
-        } else {
-          // No timestamp - use current time (legacy data)
-          newTimestamp = Date.now();
-        }
-
-        // Ignore old updates (race-condition prevention)
-        if (storedTimestamp && newTimestamp <= storedTimestamp) {
-          console.log(`[userProfilePhotoService] Ignoring stale update for ${userId} (timestamp: ${newTimestamp} <= ${storedTimestamp})`);
-          return;
-        }
-
-        // Update memory cache
+        // Update caches
         profilePhotoMemoryCache[userId] = photoUrl;
+        store.dispatch(updateProfilePhoto({ userId, photoUrl }));
 
-        // Update Redux store with timestamp
-        if (photoUpdatedAt) {
-          store.dispatch(updateProfilePhotoWithTimestamp({ userId, photoUrl, updatedAt: newTimestamp }));
-        } else {
-          store.dispatch(updateProfilePhoto({ userId, photoUrl }));
-        }
-
-        // Call callback if provided
-        if (callback) {
-          callback(photoUrl);
-        }
+        // Notify ALL callbacks
+        subscriptionCallbacks.get(userId)?.forEach(cb => cb(photoUrl));
       },
-      (error) => {
-        console.error(`[userProfilePhotoService] Error in subscription for ${userId}:`, error);
-        // On error (offline/network failure), use cached or default
-        const cached = profilePhotoMemoryCache[userId] || DEFAULT_PROFILE_PHOTO;
-        profilePhotoMemoryCache[userId] = cached;
-        store.dispatch(updateProfilePhoto({ userId, photoUrl: cached }));
-        if (callback) {
-          callback(cached);
-        }
+      (error: any) => {
+        console.error(`Subscription error for ${userId}:`, error);
       }
     );
 
-    // Store unsubscribe function
     activeSubscriptions.set(userId, unsubscribe);
 
-    // Return cleanup function
     return () => {
-      unsubscribe();
-      activeSubscriptions.delete(userId);
+      if (callback) {
+        subscriptionCallbacks.get(userId)?.delete(callback);
+      }
+      // Note: We keep the Firestore subscription alive for the module lifecycle
+      // to avoid rapid resubscribes during navigation.
     };
-  } catch (error: any) {
-    console.error(`[userProfilePhotoService] Error setting up subscription for ${userId}:`, error);
-    // On error, return cached or default
-    const cached = profilePhotoMemoryCache[userId] || DEFAULT_PROFILE_PHOTO;
-    profilePhotoMemoryCache[userId] = cached;
+  } catch (error) {
     return () => { };
   }
 }

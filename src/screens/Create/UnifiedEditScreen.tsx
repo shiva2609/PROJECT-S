@@ -9,16 +9,20 @@ import {
   ScrollView,
   Dimensions,
   FlatList,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useColorScheme } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { navigateToScreen } from '../../utils/navigationHelpers';
 import { useCreateFlowStore, type AspectRatio } from '../../store/stores/useCreateFlowStore';
 import EditCropBox from '../../components/create/EditCropBox';
-import { getCropBoxDimensions, calculateMinScale, getImageTransform } from '../../utils/cropMath';
+import { getCropBoxDimensions, calculateMinScale, calculateFitScale, getImageTransform } from '../../utils/cropMath';
+import { exportFinalBitmap } from '../../utils/cropUtils'; // 🔐 EXPORT UTIL
+import { validateFinalMediaArray } from '../../utils/imagePipelineInvariants';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const THUMBNAIL_SIZE = 60;
@@ -32,11 +36,22 @@ export default function UnifiedEditScreen({ navigation }: any) {
     cropParams,
     setGlobalRatio,
     updateCropParams,
+    updateAsset,
   } = useCreateFlowStore();
+
+  const theme = useColorScheme();
+  const isDark = theme === 'dark';
+
+  // Theme-aware colors
+  const bgColor = isDark ? Colors.black.primary : Colors.white.primary;
+  const textColor = isDark ? Colors.white.primary : Colors.black.primary;
+  const subTextColor = isDark ? Colors.white.secondary : Colors.black.qua;
+  const overlayColor = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.6)';
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [imageSizes, setImageSizes] = useState<{ [id: string]: { width: number; height: number } }>({});
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false); // 🔐 EXPORTING STATE
   const [sliderValue, setSliderValue] = useState(0);
 
   const currentAsset = selectedImages[currentIndex];
@@ -51,7 +66,7 @@ export default function UnifiedEditScreen({ navigation }: any) {
 
     const loadSizes = async () => {
       const sizes: { [id: string]: { width: number; height: number } } = {};
-      
+
       for (const asset of selectedImages) {
         try {
           await new Promise<void>((resolve) => {
@@ -81,38 +96,54 @@ export default function UnifiedEditScreen({ navigation }: any) {
 
   // Initialize crop params for current image if not exists
   useEffect(() => {
-    if (currentAsset && !cropParams[currentAsset.id]) {
+    // 🔐 CHECK FOR SENTINEL (zoom === 0)
+    if (!currentAsset) return;
+    const currentParams = cropParams[currentAsset.id];
+    if (currentAsset && (!currentParams || currentParams.zoom === 0)) {
       const size = imageSizes[currentAsset.id];
       if (size && size.width > 0) {
-        const minScale = calculateMinScale(
+        // 🔐 FIX 1: Default zoom = Fit (No unwanted zoom on entry)
+        // Image should be fully visible by default
+        const fitScale = calculateFitScale(
           size.width,
           size.height,
           cropBoxDimensions.width,
           cropBoxDimensions.height
         );
+
+        console.log(`🎯 [UnifiedEditScreen] Initializing zoom to fitScale: ${fitScale} for ${currentAsset.id}`);
         updateCropParams(currentAsset.id, {
-          zoom: minScale,
+          zoom: fitScale,
           offsetX: 0,
           offsetY: 0,
         });
       }
     }
-  }, [currentAsset, imageSizes, cropBoxDimensions, cropParams, updateCropParams]);
+  }, [currentAsset, imageSizes, cropParams, updateCropParams, cropBoxDimensions]);
 
   // Update slider value when crop params change
   useEffect(() => {
     if (currentAsset) {
       const size = imageSizes[currentAsset.id];
       if (size && size.width > 0) {
-        const params = cropParams[currentAsset.id] || { zoom: 1, offsetX: 0, offsetY: 0 };
-        const minScale = calculateMinScale(
+        const params = cropParams[currentAsset.id] || { zoom: 0, offsetX: 0, offsetY: 0 };
+
+        // 🔐 FIX: Use fitScale as the BASE for the slider
+        const fitScale = calculateFitScale(
           size.width,
           size.height,
           cropBoxDimensions.width,
           cropBoxDimensions.height
         );
-        const maxScale = 5;
-        const normalizedValue = (params.zoom - minScale) / (maxScale - minScale);
+        const maxScale = Math.max(5, fitScale * 2);
+
+        // If not initialized yet, slider at 0
+        if (params.zoom === 0) {
+          setSliderValue(0);
+          return;
+        }
+
+        const normalizedValue = (params.zoom - fitScale) / (maxScale - fitScale);
         setSliderValue(Math.max(0, Math.min(1, normalizedValue)));
       }
     }
@@ -130,20 +161,20 @@ export default function UnifiedEditScreen({ navigation }: any) {
 
   const handleSliderChange = useCallback((value: number) => {
     if (!currentAsset) return;
-    
+
     const size = imageSizes[currentAsset.id];
     if (!size || size.width === 0) return;
 
-    const minScale = calculateMinScale(
+    const fitScale = calculateFitScale(
       size.width,
       size.height,
       cropBoxDimensions.width,
       cropBoxDimensions.height
     );
-    const maxScale = 5;
-    const newZoom = minScale + (maxScale - minScale) * value;
-    
-    const currentParams = cropParams[currentAsset.id] || { zoom: 1, offsetX: 0, offsetY: 0 };
+    const maxScale = Math.max(5, fitScale * 2);
+    const newZoom = fitScale + (maxScale - fitScale) * value;
+
+    const currentParams = cropParams[currentAsset.id] || { zoom: fitScale, offsetX: 0, offsetY: 0 };
     updateCropParams(currentAsset.id, {
       zoom: newZoom,
       offsetX: currentParams.offsetX,
@@ -151,12 +182,57 @@ export default function UnifiedEditScreen({ navigation }: any) {
     });
   }, [currentAsset, imageSizes, cropBoxDimensions, cropParams, updateCropParams]);
 
-  const handleNext = useCallback(() => {
+  const handleNext = useCallback(async () => {
     if (selectedImages.length === 0) return;
-    
-    // Navigate to AddDetailsScreen with locked preview data
-    navigateToScreen(navigation, 'AddDetails');
-  }, [selectedImages.length, navigation]);
+
+    setExporting(true);
+    try {
+      console.log('🖼️ [UnifiedEditScreen] Exporting all bitmaps before navigation...');
+
+      const updatedMedia = [];
+
+      for (let i = 0; i < selectedImages.length; i++) {
+        const asset = selectedImages[i];
+        const params = cropParams[asset.id] || { zoom: 1, offsetX: 0, offsetY: 0 };
+
+        const croppedBitmapPath = await exportFinalBitmap({
+          imageUri: asset.uri,
+          cropParams: params,
+          frameWidth: cropBoxDimensions.width,
+          frameHeight: cropBoxDimensions.height,
+          ratio: globalRatio,
+        });
+
+        // Update STORE with finalUri
+        updateAsset(asset.id, { finalUri: croppedBitmapPath });
+
+        updatedMedia.push({
+          ...asset,
+          finalUri: croppedBitmapPath,
+          ratio: globalRatio,
+          cropData: {
+            ratio: globalRatio,
+            zoomScale: params.zoom,
+            offsetX: params.offsetX,
+            offsetY: params.offsetY,
+            frameWidth: cropBoxDimensions.width,
+            frameHeight: cropBoxDimensions.height,
+          },
+          type: 'image' as const,
+        });
+      }
+
+      console.log('✅ [UnifiedEditScreen] All bitmaps exported, navigating to AddDetails...');
+      setExporting(false);
+
+      // Navigate to AddDetailsScreen
+      navigateToScreen(navigation, 'AddDetails');
+    } catch (error: any) {
+      setExporting(false);
+      console.error('❌ [UnifiedEditScreen] Export error:', error);
+      Alert.alert('Error', 'Failed to process images: ' + error.message);
+    }
+  }, [selectedImages, cropParams, globalRatio, cropBoxDimensions, navigation, updateAsset]);
 
   const handleThumbnailPress = useCallback((index: number) => {
     setCurrentIndex(index);
@@ -170,12 +246,12 @@ export default function UnifiedEditScreen({ navigation }: any) {
 
     return (
       <View style={styles.feedPreviewContainer}>
-        <Text style={styles.feedPreviewLabel}>Feed Preview</Text>
+        <Text style={[styles.feedPreviewLabel, { color: subTextColor }]}>Feed Preview</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.feedPreviewList}>
           {selectedImages.map((asset, index) => {
             const size = imageSizes[asset.id];
             const params = cropParams[asset.id] || { zoom: 1, offsetX: 0, offsetY: 0 };
-            
+
             if (!size || size.width === 0) {
               return (
                 <View key={asset.id} style={[styles.feedPreviewItem, { width: previewWidth, height: previewHeight }]}>
@@ -184,17 +260,36 @@ export default function UnifiedEditScreen({ navigation }: any) {
               );
             }
 
-            // Calculate transform for preview (scaled down)
+            // 🔐 FIX 3: LIVE PREVIEW MATCHING
+            // If finalUri is available, use it (pixel perfect)
+            // If not, use original URI with a correctly scaled live transform
             const scaleFactor = previewWidth / cropBoxDimensions.width;
-            const previewCropWidth = cropBoxDimensions.width * scaleFactor;
-            const previewCropHeight = cropBoxDimensions.height * scaleFactor;
-            
-            const transform = getImageTransform(
-              params,
-              size.width,
-              size.height,
-              previewCropWidth,
-              previewCropHeight
+
+            if (asset.finalUri) {
+              return (
+                <View key={asset.id} style={[styles.feedPreviewItem, { width: previewWidth, height: previewHeight, backgroundColor: isDark ? Colors.black.secondary : Colors.white.tertiary }]}>
+                  <Image
+                    source={{ uri: asset.finalUri }}
+                    style={{ width: previewWidth, height: previewHeight }}
+                    resizeMode="contain"
+                  />
+                </View>
+              );
+            }
+
+            // Live transform for thumbnail
+            const thumbParams = {
+              zoom: params.zoom,
+              offsetX: params.offsetX * scaleFactor,
+              offsetY: params.offsetY * scaleFactor,
+            };
+
+            const thumbTransform = getImageTransform(
+              thumbParams,
+              size.width * scaleFactor,
+              size.height * scaleFactor,
+              previewWidth,
+              previewHeight
             );
 
             return (
@@ -205,6 +300,7 @@ export default function UnifiedEditScreen({ navigation }: any) {
                   {
                     width: previewWidth,
                     height: previewHeight,
+                    backgroundColor: isDark ? Colors.black.secondary : Colors.white.tertiary,
                   },
                 ]}
               >
@@ -214,10 +310,10 @@ export default function UnifiedEditScreen({ navigation }: any) {
                       source={{ uri: asset.uri }}
                       style={[
                         {
-                          width: size.width,
-                          height: size.height,
+                          width: size.width * scaleFactor,
+                          height: size.height * scaleFactor,
                         },
-                        transform,
+                        thumbTransform,
                       ]}
                       resizeMode="contain"
                     />
@@ -229,7 +325,7 @@ export default function UnifiedEditScreen({ navigation }: any) {
         </ScrollView>
       </View>
     );
-  }, [selectedImages, imageSizes, cropParams, cropBoxDimensions]);
+  }, [selectedImages, imageSizes, cropParams, cropBoxDimensions, isDark]);
 
   if (loading || selectedImages.length === 0) {
     return (
@@ -246,16 +342,16 @@ export default function UnifiedEditScreen({ navigation }: any) {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: bgColor }]} edges={['top']}>
         {/* Header - Fixed at top */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: bgColor }]}>
           <TouchableOpacity
             style={styles.headerButton}
             onPress={() => navigation.goBack()}
           >
-            <Icon name="arrow-back" size={24} color={Colors.white.primary} />
+            <Icon name="arrow-back" size={24} color={textColor} />
           </TouchableOpacity>
-          
+
           {/* Ratio Picker */}
           <View style={styles.ratioPicker}>
             {(['1:1', '4:5', '16:9'] as AspectRatio[]).map((ratio) => (
@@ -264,6 +360,7 @@ export default function UnifiedEditScreen({ navigation }: any) {
                 style={[
                   styles.ratioButton,
                   globalRatio === ratio && styles.ratioButtonActive,
+                  { backgroundColor: globalRatio === ratio ? Colors.brand.primary : isDark ? Colors.black.secondary : Colors.white.tertiary }
                 ]}
                 onPress={() => handleRatioChange(ratio)}
               >
@@ -271,6 +368,7 @@ export default function UnifiedEditScreen({ navigation }: any) {
                   style={[
                     styles.ratioText,
                     globalRatio === ratio && styles.ratioTextActive,
+                    { color: globalRatio === ratio ? Colors.white.primary : textColor }
                   ]}
                 >
                   {ratio === '1:1' ? 'Square' : ratio === '4:5' ? '4:5' : 'Landscape'}
@@ -282,19 +380,24 @@ export default function UnifiedEditScreen({ navigation }: any) {
           <TouchableOpacity
             style={styles.headerButton}
             onPress={handleNext}
+            disabled={exporting}
           >
-            <Text style={styles.nextButton}>Next</Text>
+            {exporting ? (
+              <ActivityIndicator size="small" color={Colors.brand.primary} />
+            ) : (
+              <Text style={styles.nextButton}>Next</Text>
+            )}
           </TouchableOpacity>
         </View>
 
         {/* Scrollable Content Area */}
-        <ScrollView 
+        <ScrollView
           style={styles.scrollContent}
-          contentContainerStyle={styles.scrollContentContainer}
+          contentContainerStyle={[styles.scrollContentContainer, { backgroundColor: bgColor }]}
           showsVerticalScrollIndicator={false}
         >
           {/* Crop Area */}
-          <View style={[styles.cropContainer, { minHeight: cropBoxDimensions.height }]}>
+          <View style={[styles.cropContainer, { minHeight: cropBoxDimensions.height, backgroundColor: bgColor }]}>
             {currentSize.width > 0 ? (
               <EditCropBox
                 imageUri={currentAsset.uri}
@@ -314,18 +417,18 @@ export default function UnifiedEditScreen({ navigation }: any) {
 
           {/* Zoom Slider */}
           {currentSize.width > 0 && (
-            <View style={styles.sliderContainer}>
+            <View style={[styles.sliderContainer, { backgroundColor: bgColor }]}>
               <TouchableOpacity
-                style={styles.zoomButton}
+                style={[styles.zoomButton, { backgroundColor: isDark ? Colors.black.secondary : Colors.white.tertiary }]}
                 onPress={() => {
-                  const minScale = calculateMinScale(
+                  const fitScale = calculateFitScale(
                     currentSize.width,
                     currentSize.height,
                     cropBoxDimensions.width,
                     cropBoxDimensions.height
                   );
-                  const step = (5 - minScale) / 10;
-                  const newZoom = Math.max(minScale, currentParams.zoom - step);
+                  const step = 0.1;
+                  const newZoom = Math.max(fitScale, currentParams.zoom - step);
                   updateCropParams(currentAsset.id, {
                     zoom: newZoom,
                     offsetX: currentParams.offsetX,
@@ -333,9 +436,9 @@ export default function UnifiedEditScreen({ navigation }: any) {
                   });
                 }}
               >
-                <Icon name="remove-outline" size={24} color={Colors.white.primary} />
+                <Icon name="remove-outline" size={24} color={textColor} />
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={styles.sliderWrapper}
                 activeOpacity={1}
@@ -346,7 +449,7 @@ export default function UnifiedEditScreen({ navigation }: any) {
                   handleSliderChange(newValue);
                 }}
               >
-                <View style={styles.sliderTrack}>
+                <View style={[styles.sliderTrack, { backgroundColor: isDark ? Colors.black.tertiary : Colors.white.tertiary }]}>
                   <View
                     style={[
                       styles.sliderFill,
@@ -363,16 +466,17 @@ export default function UnifiedEditScreen({ navigation }: any) {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.zoomButton}
+                style={[styles.zoomButton, { backgroundColor: isDark ? Colors.black.secondary : Colors.white.tertiary }]}
                 onPress={() => {
-                  const minScale = calculateMinScale(
+                  const fitScale = calculateFitScale(
                     currentSize.width,
                     currentSize.height,
                     cropBoxDimensions.width,
                     cropBoxDimensions.height
                   );
-                  const step = (5 - minScale) / 10;
-                  const newZoom = Math.min(5, currentParams.zoom + step);
+                  const maxScale = Math.max(5, fitScale * 2);
+                  const step = 0.1;
+                  const newZoom = Math.min(maxScale, currentParams.zoom + step);
                   updateCropParams(currentAsset.id, {
                     zoom: newZoom,
                     offsetX: currentParams.offsetX,
@@ -380,7 +484,7 @@ export default function UnifiedEditScreen({ navigation }: any) {
                   });
                 }}
               >
-                <Icon name="add-outline" size={24} color={Colors.white.primary} />
+                <Icon name="add-outline" size={24} color={textColor} />
               </TouchableOpacity>
             </View>
           )}
@@ -390,7 +494,7 @@ export default function UnifiedEditScreen({ navigation }: any) {
         </ScrollView>
 
         {/* Thumbnail Strip - Fixed at bottom */}
-        <View style={styles.thumbnailContainer}>
+        <View style={[styles.thumbnailContainer, { backgroundColor: bgColor, borderTopColor: isDark ? Colors.black.tertiary : Colors.white.tertiary }]}>
           <FlatList
             horizontal
             data={selectedImages}
@@ -402,13 +506,14 @@ export default function UnifiedEditScreen({ navigation }: any) {
                   style={[
                     styles.thumbnail,
                     isActive && styles.thumbnailActive,
+                    { backgroundColor: isDark ? Colors.black.secondary : Colors.white.tertiary }
                   ]}
                   onPress={() => handleThumbnailPress(index)}
                 >
                   <Image
-                    source={{ uri: item.uri }}
+                    source={{ uri: item.finalUri || item.uri }}
                     style={styles.thumbnailImage}
-                    resizeMode="cover"
+                    resizeMode="contain" // 🔐 FIX: Consistency
                   />
                   <View style={styles.thumbnailBadge}>
                     <Text style={styles.thumbnailBadgeText}>{index + 1}</Text>
@@ -537,12 +642,11 @@ const styles = StyleSheet.create({
   feedPreviewContainer: {
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: Colors.black.primary,
+    backgroundColor: 'transparent',
   },
   feedPreviewLabel: {
     fontFamily: Fonts.medium,
     fontSize: 12,
-    color: Colors.white.secondary,
     marginBottom: 8,
   },
   feedPreviewList: {

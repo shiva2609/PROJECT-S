@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -22,8 +22,13 @@ import { useProfilePhoto } from '../../hooks/useProfilePhoto';
 import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/users/userProfilePhotoService';
 import * as PostInteractions from '../../global/services/posts/post.interactions.service';
 import { getUserPublicInfo } from '../../global/services/user/user.service';
-import { Timestamp } from '../../core/firebase/compat';
+import { Timestamp, doc, collection } from '../../core/firebase/compat';
+import { db } from '../../core/firebase';
 import UserAvatar from '../../components/user/UserAvatar';
+import { useSingleFlight } from '../../hooks/useSingleFlight';
+import { checkNetworkStatus } from '../../hooks/useNetworkState';
+import { AppError, ErrorType, withTimeout } from '../../utils/AppError';
+import CommentItem from '../../components/comments/CommentItem';
 
 interface Comment {
   id: string;
@@ -44,6 +49,13 @@ export default function CommentsScreen({ navigation, route }: any) {
   const [error, setError] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const userProfilePhoto = useProfilePhoto(user?.uid || '');
+
+  // 🔐 IDEMPOTENCY: Store comment ID for retries
+  // If a submission fails, we reuse this ID so the retry doesn't create a duplicate
+  const commentIdRef = useRef<string | null>(null);
+
+  // 🔐 SINGLE FLIGHT GUARD
+  const singleFlight = useSingleFlight();
 
   // Animation for send button
   const sendScale = useRef(new Animated.Value(1)).current;
@@ -82,77 +94,86 @@ export default function CommentsScreen({ navigation, route }: any) {
       Animated.timing(sendScale, { toValue: 1, duration: 100, useNativeDriver: true }),
     ]).start();
 
-    setSubmitting(true);
-    try {
-      // Fetch current user profile to get accurate username
-      const userProfile = await getUserPublicInfo(user.uid);
-      const username = userProfile?.username || user.displayName || user.email?.split('@')[0] || 'User';
-      const photoURL = userProfile?.photoURL || user.photoURL || userProfilePhoto || null;
+    // 🔐 SINGLE FLIGHT GUARD
+    await singleFlight.execute(`comment:${postId}`, async () => {
+      setSubmitting(true);
+      setError(null);
 
-      await PostInteractions.addComment(postId, user.uid, username, photoURL, text);
-      setCommentText('');
+      // 🔐 PRE-FLIGHT CHECK
+      const isConnected = await checkNetworkStatus();
+      if (!isConnected) {
+        Alert.alert('No Internet', 'Please check your connection and try again.');
+        setSubmitting(false);
+        return;
+      }
 
-      // Scroll to top to see the new comment
-      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-    } catch (error: any) {
-      setError(error.message || 'Failed to add comment');
-      Alert.alert('Error', error.message || 'Failed to add comment');
-    } finally {
-      setSubmitting(false);
-    }
+      try {
+        // Fetch current user profile to get accurate username
+        const userProfile = await getUserPublicInfo(user.uid);
+        const username = userProfile?.username || user.displayName || user.email?.split('@')[0] || 'User';
+        const photoURL = userProfile?.photoURL || user.photoURL || userProfilePhoto || null;
+
+        // 🔐 IDEMPOTENCY: Generate ID if needed, reuse if retrying
+        if (!commentIdRef.current) {
+          commentIdRef.current = doc(collection(db, 'posts', postId, 'comments')).id;
+        }
+        const commentId = commentIdRef.current;
+
+        // 🔐 TIMEOUT: Wrap network call
+        await withTimeout(
+          PostInteractions.addComment(postId, user.uid, username, photoURL, text, commentId || undefined),
+          15000
+        );
+
+        // Success: Clear text and ID
+        setCommentText('');
+        commentIdRef.current = null;
+
+        // Scroll to top to see the new comment
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+      } catch (error: any) {
+        console.error('❌ [CommentsScreen] Error adding comment:', error);
+
+        const appError = AppError.fromError(error);
+        if (appError.type === ErrorType.TIMEOUT) {
+          setError('Request timed out. Please try again.');
+        } else {
+          setError(error.message || 'Failed to add comment');
+          Alert.alert('Error', error.message || 'Failed to add comment');
+        }
+        // NOTE: We DO NOT clear commentIdRef here, so next try uses same ID
+      } finally {
+        setSubmitting(false);
+      }
+    });
+
   };
 
-  const renderComment = useCallback(({ item }: { item: Comment }) => {
-    const timestampValue = item.createdAt
-      ? (item.createdAt.toMillis?.() || (item.createdAt as any).seconds * 1000 || Date.now())
-      : Date.now();
-    const timestamp = formatTimestamp(timestampValue);
+  const keyExtractor = useCallback((item: Comment) => item.id, []);
 
-    return (
-      <View style={styles.commentItem}>
-        {/* Avatar */}
-        <View style={styles.avatarContainer}>
-          <UserAvatar
-            uri={item.photoURL || undefined}
-            size="sm"
-          />
-        </View>
-
-        {/* Content Stack */}
-        <View style={styles.commentContent}>
-          {/* Username */}
-          <Text style={styles.commentUsername} numberOfLines={1}>
-            {item.username}
-          </Text>
-
-          {/* Comment Text */}
-          <Text style={styles.commentText}>
-            {item.text}
-          </Text>
-
-          {/* Footer Row: Time + Reply + Like */}
-          <View style={styles.commentFooter}>
-            <Text style={styles.commentTimestamp}>{timestamp}</Text>
-            <TouchableOpacity activeOpacity={0.7} style={styles.footerAction}>
-              <Text style={styles.replyText}>Reply</Text>
-            </TouchableOpacity>
-
-            {/* Spacer */}
-            <View style={{ flex: 1 }} />
-
-            {/* Like Icon 
-            <TouchableOpacity
-              style={styles.likeButton}
-              activeOpacity={0.6}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Icon name="heart-outline" size={16} color={Colors.black.qua} />
-            </TouchableOpacity> */}
-          </View>
-        </View>
-      </View>
-    );
+  const handleReply = useCallback((comment: Comment) => {
+    // Reply logic placeholder
+    setCommentText(`@${comment.username} `);
   }, []);
+
+  const renderCommentItem = useCallback(({ item }: { item: Comment }) => (
+    <CommentItem
+      item={item}
+      onReply={handleReply}
+    />
+  ), [handleReply]);
+
+  const EmptyComponent = useMemo(() => (
+    <View style={styles.emptyContainer}>
+      <View style={styles.emptyIconCircle}>
+        <Icon name="chatbubbles-outline" size={48} color={Colors.brand.primary} />
+      </View>
+      <Text style={styles.emptyText}>No comments yet</Text>
+      <Text style={styles.emptySub}>Start the conversation.</Text>
+    </View>
+  ), []);
+
+  const Separator = useCallback(() => <View style={styles.separator} />, []);
 
   if (loading) {
     return (
@@ -190,27 +211,19 @@ export default function CommentsScreen({ navigation, route }: any) {
         <FlatList
           ref={flatListRef}
           data={comments}
-          renderItem={renderComment}
-          keyExtractor={(item) => item.id}
+          renderItem={renderCommentItem}
+          keyExtractor={keyExtractor}
           contentContainerStyle={[
             styles.commentsList,
             comments.length === 0 && styles.emptyListContainer
           ]}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <View style={styles.emptyIconCircle}>
-                <Icon name="chatbubbles-outline" size={48} color={Colors.brand.primary} />
-              </View>
-              <Text style={styles.emptyText}>No comments yet</Text>
-              <Text style={styles.emptySub}>Start the conversation.</Text>
-            </View>
-          }
+          ListEmptyComponent={EmptyComponent}
           showsVerticalScrollIndicator={false}
           initialNumToRender={15}
           maxToRenderPerBatch={10}
           windowSize={10}
           removeClippedSubviews={Platform.OS === 'android'}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ItemSeparatorComponent={Separator}
         />
 
         {/* Input Bar */}
@@ -309,55 +322,7 @@ const styles = StyleSheet.create({
   separator: {
     height: 16, // Vertical spacing between comments
   },
-  commentItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-  },
-  avatarContainer: {
-    marginRight: 12,
-    paddingTop: 4,
-  },
-  commentContent: {
-    flex: 1,
-  },
-  commentUsername: {
-    fontSize: 13,
-    fontFamily: Fonts.semibold,
-    color: Colors.black.primary,
-    marginBottom: 2,
-  },
-  commentText: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: Colors.black.secondary,
-    lineHeight: 20,
-    marginBottom: 4,
-  },
-  commentFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  commentTimestamp: {
-    fontSize: 12,
-    fontFamily: Fonts.regular,
-    color: Colors.black.qua,
-    marginRight: 16,
-  },
-  footerAction: {
-    paddingVertical: 2,
-    marginRight: 12,
-  },
-  replyText: {
-    fontSize: 12,
-    fontFamily: Fonts.semibold,
-    color: Colors.black.qua,
-  },
-  likeButton: {
-    padding: 4,
-  },
+
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',

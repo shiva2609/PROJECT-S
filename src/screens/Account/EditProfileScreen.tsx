@@ -18,7 +18,12 @@ import {
   Image,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { checkNetworkStatus } from '../../hooks/useNetworkState';
+import { useSingleFlight } from '../../hooks/useSingleFlight';
+import { AppError, ErrorType, withTimeout } from '../../utils/AppError';
+import { ScreenLayout } from '../../components/layout/ScreenLayout';
+import { useErrorHandler } from '../../hooks/useErrorHandler';
+import { LoadingState } from '../../components/common/LoadingState';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { doc, getDoc, updateDoc } from '../../core/firebase/compat';
@@ -307,7 +312,12 @@ interface ProfileData {
 }
 
 export default function EditProfileScreen({ navigation, route }: any) {
-  const { user, authReady } = useAuth();
+  const { user, authReady, checkSession } = useAuth(); // 🔐 AUTH: Destructure checkSession
+  const { handleError } = useErrorHandler();
+
+  // 🔐 SINGLE FLIGHT GUARD
+  const singleFlight = useSingleFlight();
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -326,6 +336,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
     interests: [],
   });
   const [previousProfilePhotoUrl, setPreviousProfilePhotoUrl] = useState<string | null>(null);
+  const [initialFormData, setInitialFormData] = useState<ProfileData | null>(null);
 
   // Fetch user data from Firestore - memoized with useCallback
   const fetchUserData = useCallback(async () => {
@@ -353,7 +364,8 @@ export default function EditProfileScreen({ navigation, route }: any) {
 
         const currentProfilePhoto = data.profilePhoto || data.photoURL || data.profilePhotoUrl || '';
         setPreviousProfilePhotoUrl(currentProfilePhoto || null);
-        setFormData({
+
+        const loadedData: ProfileData = {
           profilePhoto: currentProfilePhoto,
           fullName: data.fullName || data.displayName || '',
           username: data.username || '',
@@ -411,7 +423,11 @@ export default function EditProfileScreen({ navigation, route }: any) {
           coursePriceRange: data.coursePriceRange || '',
           courseLocations: data.courseLocations || '',
           courseGallery: data.courseGallery || [],
-        });
+        };
+
+        setFormData(loadedData);
+        setInitialFormData(loadedData);
+
         console.log('✅ [EditProfileScreen] Form data updated with user data');
       } else {
         console.warn('⚠️ [EditProfileScreen] User document does not exist');
@@ -442,6 +458,9 @@ export default function EditProfileScreen({ navigation, route }: any) {
   );
 
   const handleProfilePhotoUpload = useCallback(async (finalImageUri: string) => {
+    // 🔐 AUTH GATE: Valid Session Check
+    checkSession();
+
     if (!user?.uid) {
       Alert.alert('Error', 'User not authenticated');
       return;
@@ -453,43 +472,56 @@ export default function EditProfileScreen({ navigation, route }: any) {
       return;
     }
 
-    try {
-      setUploadingPhoto(true);
+    // 🔐 SINGLE FLIGHT GUARD
+    await singleFlight.execute('upload_profile_photo', async () => {
+      // 🔐 RE-CHECK SESSION inside lock
+      checkSession();
 
-      console.log('📸 [EditProfileScreen] Starting profile photo upload:', {
-        userId: user.uid,
-        authReady,
-        imageUri: finalImageUri.substring(0, 50) + '...',
-      });
-
-      // Upload new profile photo (now includes auth checks and token refresh)
-      const downloadURL = await uploadProfilePhoto(finalImageUri, user.uid);
-      console.log('✅ [EditProfileScreen] Profile photo uploaded:', downloadURL);
-
-      // Delete old profile photo if exists
-      if (previousProfilePhotoUrl) {
-        await deleteOldProfilePhoto(previousProfilePhotoUrl);
-        console.log('✅ [EditProfileScreen] Old profile photo deleted');
+      // 🔐 NETWORK GATE
+      const isConnected = await checkNetworkStatus();
+      if (!isConnected) {
+        Alert.alert('No Internet Connection', 'Check your connection and try again.');
+        return;
       }
 
-      // Update Firestore
-      await updateProfilePhotoInDatabase(user.uid, downloadURL);
-      console.log('✅ [EditProfileScreen] Profile photo updated in database');
+      try {
+        setUploadingPhoto(true);
 
-      // Update local state
-      setFormData((prev) => ({ ...prev, profilePhoto: downloadURL }));
-      setPreviousProfilePhotoUrl(downloadURL);
+        console.log('📸 [EditProfileScreen] Starting profile photo upload:', {
+          userId: user.uid,
+          authReady,
+          imageUri: finalImageUri.substring(0, 50) + '...',
+        });
 
-      // Refetch user data to ensure everything is in sync
-      await fetchUserData();
+        // Upload new profile photo (now includes auth checks and token refresh)
+        const downloadURL = await uploadProfilePhoto(finalImageUri, user.uid);
+        console.log('✅ [EditProfileScreen] Profile photo uploaded:', downloadURL);
 
-      Alert.alert('Success', 'Profile photo updated successfully');
-    } catch (error: any) {
-      console.error('❌ [EditProfileScreen] Error uploading profile photo:', error);
-      Alert.alert('Error', error.message || 'Failed to upload profile photo');
-    } finally {
-      setUploadingPhoto(false);
-    }
+        // Delete old profile photo if exists
+        if (previousProfilePhotoUrl) {
+          await deleteOldProfilePhoto(previousProfilePhotoUrl);
+          console.log('✅ [EditProfileScreen] Old profile photo deleted');
+        }
+
+        // Update Firestore
+        await updateProfilePhotoInDatabase(user.uid, downloadURL);
+        console.log('✅ [EditProfileScreen] Profile photo updated in database');
+
+        // Update local state
+        setFormData((prev) => ({ ...prev, profilePhoto: downloadURL }));
+        setPreviousProfilePhotoUrl(downloadURL);
+
+        // Refetch user data to ensure everything is in sync
+        await fetchUserData();
+
+        Alert.alert('Success', 'Profile photo updated successfully');
+      } catch (error: any) {
+        console.error('❌ [EditProfileScreen] Error uploading profile photo:', error);
+        handleError(error, { title: 'Upload Failed' });
+      } finally {
+        setUploadingPhoto(false);
+      }
+    });
   }, [user, authReady, previousProfilePhotoUrl, fetchUserData]);
 
   // Handle finalProfilePhoto from ProfilePhotoCropScreen
@@ -552,104 +584,121 @@ export default function EditProfileScreen({ navigation, route }: any) {
       return;
     }
 
+    // 🔐 AUTH GATE: Valid Session Check
+    checkSession();
+
     if (!user?.uid) {
       Alert.alert('Error', 'User not authenticated');
       return;
     }
 
-    try {
-      setSaving(true);
-      const userRef = doc(db, 'users', user.uid);
+    // 🔐 SINGLE FLIGHT GUARD
+    // Prevent double-save or spam clicking
+    await singleFlight.execute('save_profile', async () => {
+      // 🔐 RE-CHECK SESSION inside lock
+      checkSession();
 
-      // Generate auto bio
-      const generatedBio = generateAutoBio(formData, accountType);
-
-      // Prepare update data (exclude readonly fields: username, email)
-      const updateData: any = {
-        fullName: formData.fullName.trim(),
-        phoneNumber: formData.phoneNumber.trim(),
-        country: formData.country.trim(),
-        state: formData.state.trim(),
-        city: formData.city.trim(),
-        languagesKnown: formData.languagesKnown.length > 0 ? formData.languagesKnown : null,
-        interests: formData.interests.length > 0 ? formData.interests : null,
-        bio: generatedBio, // Auto-generated bio
-        updatedAt: Date.now(),
-      };
-
-      // Add optional fields - set to null if empty
-      updateData.profilePhoto = formData.profilePhoto || null;
-      if (formData.profilePhoto) {
-        updateData.photoURL = formData.profilePhoto; // Also update legacy field
-      }
-      updateData.gender = formData.gender || null;
-      updateData.dob = formData.dob || null;
-      updateData.travelerType = formData.travelerType || null;
-      updateData.travelExperience = formData.travelExperience || null;
-      updateData.totalTripsDone = formData.totalTripsDone !== undefined ? formData.totalTripsDone : null;
-      updateData.favouriteDestinations = formData.favouriteDestinations?.trim() || null;
-      updateData.aboutMe = formData.aboutMe?.trim() || null;
-
-      // Role-specific fields - set to null if empty
-      if (accountType === 'Traveler') {
-        updateData.travelPreferences = formData.travelPreferences && formData.travelPreferences.length > 0 ? formData.travelPreferences : null;
-      } else if (accountType === 'Host') {
-        updateData.tripBrandName = formData.tripBrandName?.trim() || null;
-        updateData.tripCategories = formData.tripCategories && formData.tripCategories.length > 0 ? formData.tripCategories : null;
-        updateData.operatingRegions = formData.operatingRegions?.trim() || null;
-        updateData.yearsOfExperience = formData.yearsOfExperience !== undefined ? formData.yearsOfExperience : null;
-      } else if (accountType === 'Agency') {
-        updateData.agencyName = formData.agencyName?.trim() || null;
-        updateData.agencyCategory = formData.agencyCategory || null;
-        updateData.agencyLocation = formData.agencyLocation?.trim() || null;
-        updateData.servicesOffered = formData.servicesOffered && formData.servicesOffered.length > 0 ? formData.servicesOffered : null;
-        updateData.businessLogo = formData.businessLogo || null;
-      } else if (accountType === 'RideCreator') {
-        updateData.rentalBrandName = formData.rentalBrandName?.trim() || null;
-        updateData.vehicleTypesAvailable = formData.vehicleTypesAvailable && formData.vehicleTypesAvailable.length > 0 ? formData.vehicleTypesAvailable : null;
-        updateData.priceRangePerDay = formData.priceRangePerDay?.trim() || null;
-        updateData.pickupLocations = formData.pickupLocations?.trim() || null;
-        updateData.rentalTermsAndRules = formData.rentalTermsAndRules?.trim() || null;
-      } else if (accountType === 'StayHost') {
-        updateData.stayName = formData.stayName?.trim() || null;
-        updateData.stayLocation = formData.stayLocation?.trim() || null;
-        updateData.stayType = formData.stayType || null;
-        updateData.amenities = formData.amenities && formData.amenities.length > 0 ? formData.amenities : null;
-        updateData.pricePerNight = formData.pricePerNight !== undefined ? formData.pricePerNight : null;
-        updateData.maxGuests = formData.maxGuests !== undefined ? formData.maxGuests : null;
-        updateData.houseRules = formData.houseRules?.trim() || null;
-        updateData.stayPhotos = formData.stayPhotos && formData.stayPhotos.length > 0 ? formData.stayPhotos : null;
-      } else if (accountType === 'EventOrganizer') {
-        updateData.eventBrandName = formData.eventBrandName?.trim() || null;
-        updateData.eventCategories = formData.eventCategories && formData.eventCategories.length > 0 ? formData.eventCategories : null;
-        updateData.regionsOfOperation = formData.regionsOfOperation?.trim() || null;
-        updateData.yearsOfExperience = formData.yearsOfExperience !== undefined ? formData.yearsOfExperience : null;
-        updateData.audienceCapacity = formData.audienceCapacity !== undefined ? formData.audienceCapacity : null;
-        updateData.previousEventGallery = formData.previousEventGallery && formData.previousEventGallery.length > 0 ? formData.previousEventGallery : null;
-      } else if (accountType === 'AdventurePro') {
-        updateData.academyName = formData.academyName?.trim() || null;
-        updateData.adventureCategoriesOffered = formData.adventureCategoriesOffered && formData.adventureCategoriesOffered.length > 0 ? formData.adventureCategoriesOffered : null;
-        updateData.courseDuration = formData.courseDuration || null;
-        updateData.certificationProvided = formData.certificationProvided !== undefined ? formData.certificationProvided : null;
-        updateData.instructorExperience = formData.instructorExperience !== undefined ? formData.instructorExperience : null;
-        updateData.safetyStandardsFollowed = formData.safetyStandardsFollowed || null;
-        updateData.equipmentIncluded = formData.equipmentIncluded && formData.equipmentIncluded.length > 0 ? formData.equipmentIncluded : null;
-        updateData.coursePriceRange = formData.coursePriceRange?.trim() || null;
-        updateData.courseLocations = formData.courseLocations?.trim() || null;
-        updateData.courseGallery = formData.courseGallery && formData.courseGallery.length > 0 ? formData.courseGallery : null;
+      // 🔐 NETWORK GATE: Pre-flight Check
+      const isConnected = await checkNetworkStatus();
+      if (!isConnected) {
+        Alert.alert('No Internet Connection', 'Please check your network connection.');
+        return;
       }
 
-      await updateDoc(userRef, updateData);
+      try {
+        setSaving(true);
+        const userRef = doc(db, 'users', user.uid);
 
-      Alert.alert('Success', 'Profile updated successfully', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
-    } catch (error: any) {
-      console.error('Error saving profile:', error);
-      Alert.alert('Error', 'Failed to save profile. Please try again.');
-    } finally {
-      setSaving(false);
-    }
+        // Generate auto bio
+        const generatedBio = generateAutoBio(formData, accountType);
+
+        // Prepare update data (exclude readonly fields: username, email)
+        const updateData: any = {
+          fullName: formData.fullName.trim(),
+          phoneNumber: formData.phoneNumber.trim(),
+          country: formData.country.trim(),
+          state: formData.state.trim(),
+          city: formData.city.trim(),
+          languagesKnown: formData.languagesKnown.length > 0 ? formData.languagesKnown : null,
+          interests: formData.interests.length > 0 ? formData.interests : null,
+          bio: generatedBio, // Auto-generated bio
+          updatedAt: Date.now(),
+        };
+
+        // Add optional fields - set to null if empty
+        updateData.profilePhoto = formData.profilePhoto || null;
+        if (formData.profilePhoto) {
+          updateData.photoURL = formData.profilePhoto; // Also update legacy field
+        }
+        updateData.gender = formData.gender || null;
+        updateData.dob = formData.dob || null;
+        updateData.travelerType = formData.travelerType || null;
+        updateData.travelExperience = formData.travelExperience || null;
+        updateData.totalTripsDone = formData.totalTripsDone !== undefined ? formData.totalTripsDone : null;
+        updateData.favouriteDestinations = formData.favouriteDestinations?.trim() || null;
+        updateData.aboutMe = formData.aboutMe?.trim() || null;
+
+        // Role-specific fields - set to null if empty
+        if (accountType === 'Traveler') {
+          updateData.travelPreferences = formData.travelPreferences && formData.travelPreferences.length > 0 ? formData.travelPreferences : null;
+        } else if (accountType === 'Host') {
+          updateData.tripBrandName = formData.tripBrandName?.trim() || null;
+          updateData.tripCategories = formData.tripCategories && formData.tripCategories.length > 0 ? formData.tripCategories : null;
+          updateData.operatingRegions = formData.operatingRegions?.trim() || null;
+          updateData.yearsOfExperience = formData.yearsOfExperience !== undefined ? formData.yearsOfExperience : null;
+        } else if (accountType === 'Agency') {
+          updateData.agencyName = formData.agencyName?.trim() || null;
+          updateData.agencyCategory = formData.agencyCategory || null;
+          updateData.agencyLocation = formData.agencyLocation?.trim() || null;
+          updateData.servicesOffered = formData.servicesOffered && formData.servicesOffered.length > 0 ? formData.servicesOffered : null;
+          updateData.businessLogo = formData.businessLogo || null;
+        } else if (accountType === 'RideCreator') {
+          updateData.rentalBrandName = formData.rentalBrandName?.trim() || null;
+          updateData.vehicleTypesAvailable = formData.vehicleTypesAvailable && formData.vehicleTypesAvailable.length > 0 ? formData.vehicleTypesAvailable : null;
+          updateData.priceRangePerDay = formData.priceRangePerDay?.trim() || null;
+          updateData.pickupLocations = formData.pickupLocations?.trim() || null;
+          updateData.rentalTermsAndRules = formData.rentalTermsAndRules?.trim() || null;
+        } else if (accountType === 'StayHost') {
+          updateData.stayName = formData.stayName?.trim() || null;
+          updateData.stayLocation = formData.stayLocation?.trim() || null;
+          updateData.stayType = formData.stayType || null;
+          updateData.amenities = formData.amenities && formData.amenities.length > 0 ? formData.amenities : null;
+          updateData.pricePerNight = formData.pricePerNight !== undefined ? formData.pricePerNight : null;
+          updateData.maxGuests = formData.maxGuests !== undefined ? formData.maxGuests : null;
+          updateData.houseRules = formData.houseRules?.trim() || null;
+          updateData.stayPhotos = formData.stayPhotos && formData.stayPhotos.length > 0 ? formData.stayPhotos : null;
+        } else if (accountType === 'EventOrganizer') {
+          updateData.eventBrandName = formData.eventBrandName?.trim() || null;
+          updateData.eventCategories = formData.eventCategories && formData.eventCategories.length > 0 ? formData.eventCategories : null;
+          updateData.regionsOfOperation = formData.regionsOfOperation?.trim() || null;
+          updateData.yearsOfExperience = formData.yearsOfExperience !== undefined ? formData.yearsOfExperience : null;
+          updateData.audienceCapacity = formData.audienceCapacity !== undefined ? formData.audienceCapacity : null;
+          updateData.previousEventGallery = formData.previousEventGallery && formData.previousEventGallery.length > 0 ? formData.previousEventGallery : null;
+        } else if (accountType === 'AdventurePro') {
+          updateData.academyName = formData.academyName?.trim() || null;
+          updateData.adventureCategoriesOffered = formData.adventureCategoriesOffered && formData.adventureCategoriesOffered.length > 0 ? formData.adventureCategoriesOffered : null;
+          updateData.courseDuration = formData.courseDuration || null;
+          updateData.certificationProvided = formData.certificationProvided !== undefined ? formData.certificationProvided : null;
+          updateData.instructorExperience = formData.instructorExperience !== undefined ? formData.instructorExperience : null;
+          updateData.safetyStandardsFollowed = formData.safetyStandardsFollowed || null;
+          updateData.equipmentIncluded = formData.equipmentIncluded && formData.equipmentIncluded.length > 0 ? formData.equipmentIncluded : null;
+          updateData.coursePriceRange = formData.coursePriceRange?.trim() || null;
+          updateData.courseLocations = formData.courseLocations?.trim() || null;
+          updateData.courseGallery = formData.courseGallery && formData.courseGallery.length > 0 ? formData.courseGallery : null;
+        }
+
+        await updateDoc(userRef, updateData);
+
+        Alert.alert('Success', 'Profile updated successfully', [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
+      } catch (error: any) {
+        console.error('Error saving profile:', error);
+        handleError(error, { onRetry: handleSave });
+      } finally {
+        setSaving(false);
+      }
+    });
   };
 
 
@@ -695,20 +744,65 @@ export default function EditProfileScreen({ navigation, route }: any) {
     }));
   };
 
+  // 🔐 NAVIGATION GUARD
+  // Prevent accidental exit if "Dirty" or "Saving"
+  useEffect(() => {
+    // Only check dirtiness if we have initial data (avoid false positive on mount)
+    // Using simple JSON stringify as a quick deep compare for flat/simple objects is fine here.
+    const isDirty = initialFormData && JSON.stringify(initialFormData) !== JSON.stringify(formData);
+    const isBusy = saving || uploadingPhoto || uploadingGallery !== null;
+
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      if (!isDirty && !isBusy) return;
+
+      if (isBusy) {
+        e.preventDefault();
+        Alert.alert(
+          'Saving in Progress',
+          'Your profile is explicitly saving. Leaving now might result in partial data.',
+          [
+            { text: 'Stay', style: 'cancel', onPress: () => { } },
+            {
+              text: 'Leave',
+              style: 'destructive',
+              onPress: () => navigation.dispatch(e.data.action),
+            },
+          ]
+        );
+        return;
+      }
+
+      if (isDirty) {
+        e.preventDefault();
+        Alert.alert(
+          'Discard Changes?',
+          'You have unsaved changes to your profile. Are you sure you want to discard them?',
+          [
+            { text: 'Keep Editing', style: 'cancel', onPress: () => { } },
+            {
+              text: 'Discard',
+              style: 'destructive',
+              onPress: () => navigation.dispatch(e.data.action),
+            },
+          ]
+        );
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, initialFormData, formData, saving, uploadingPhoto, uploadingGallery]);
+
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.brand.primary} />
-          <Text style={styles.loadingText}>Loading profile...</Text>
-        </View>
-      </SafeAreaView>
+      <ScreenLayout backgroundColor={Colors.white.secondary}>
+        <LoadingState message="Loading profile..." fullScreen />
+      </ScreenLayout>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <ScreenLayout backgroundColor={Colors.white.secondary} scrollable={false}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -1644,7 +1738,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
           )}
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </ScreenLayout>
   );
 }
 

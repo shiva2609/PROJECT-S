@@ -65,6 +65,29 @@ export function calculateMinScale(
 }
 
 /**
+ * Calculate scale to fit image entirely within crop box (fit-contain behavior)
+ */
+export function calculateFitScale(
+  imageWidth: number,
+  imageHeight: number,
+  cropWidth: number,
+  cropHeight: number
+): number {
+  if (imageWidth === 0 || imageHeight === 0) return 1;
+
+  const imageAspect = imageWidth / imageHeight;
+  const cropAspect = cropWidth / cropHeight;
+
+  if (imageAspect > cropAspect) {
+    // Image is wider - scale to fit width
+    return cropWidth / imageWidth;
+  } else {
+    // Image is taller - scale to fit height
+    return cropHeight / imageHeight;
+  }
+}
+
+/**
  * Clamp translation values to keep image covering crop box
  */
 export function clampTranslation(

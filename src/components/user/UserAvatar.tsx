@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Image, StyleSheet, ImageStyle } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Colors } from '../../theme/colors';
 import VerifiedBadge from './VerifiedBadge';
+import { SmartImage } from '../common/SmartImage';
 
 interface UserAvatarProps {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
@@ -78,18 +79,18 @@ export default function UserAvatar({
           <Icon name="person" size={iconSize} color={iconColor} />
         </View>
       ) : (
-        <Image
-          source={{ uri }}
-          style={[
-            styles.avatar,
-            {
-              width: avatarSize,
-              height: avatarSize,
-              borderRadius: avatarSize / 2,
-              borderWidth: 2,
-              borderColor: '#E0E0E0',
-            },
-          ]}
+        <SmartImage
+          uri={uri}
+          style={{
+            width: avatarSize,
+            height: avatarSize,
+            borderRadius: avatarSize / 2,
+            borderWidth: 2,
+            borderColor: '#E0E0E0',
+          }}
+          resizeMode="cover"
+          showPlaceholder={true}
+          borderRadius={avatarSize / 2}
         />
       )}
       {isVerified && (

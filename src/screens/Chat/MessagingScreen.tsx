@@ -8,10 +8,10 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
-  Image,
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { SmartImage } from '../../components/common/SmartImage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -238,14 +238,10 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
                 </Text>
               </View>
             ) : (
-              <Image
-                source={{ uri: profilePhoto }}
-                defaultSource={{ uri: getDefaultProfilePhoto() }}
-                onError={() => {
-                  // Offline/CDN failure - Image component will use defaultSource
-                }}
-                style={styles.messageAvatar}
-                resizeMode="cover"
+              <SmartImage
+                uri={profilePhoto}
+                style={styles.messageAvatar as any}
+                borderRadius={18}
               />
             )
           )}
@@ -325,9 +321,10 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
                 <Icon name="compass-outline" size={24} color="#FFFFFF" />
               </View>
             ) : profilePhoto ? (
-              <Image
-                source={{ uri: profilePhoto }}
+              <SmartImage
+                uri={profilePhoto}
                 style={styles.headerAvatar as any}
+                borderRadius={20}
               />
             ) : (
               <View style={[styles.headerAvatar, styles.headerAvatarPlaceholder]}>

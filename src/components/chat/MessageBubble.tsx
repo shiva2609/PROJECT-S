@@ -1,8 +1,9 @@
 import React, { memo } from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { formatTimestamp } from '../../utils/postHelpers';
+import { SmartImage } from '../common/SmartImage';
 
 interface MessageBubbleProps {
   type: 'sent' | 'received';
@@ -35,14 +36,22 @@ function MessageBubble({
         ]}
       >
         {imageUri && (
-          <Image source={{ uri: imageUri }} style={styles.media} resizeMode="cover" />
+          <SmartImage
+            uri={imageUri}
+            style={styles.media}
+            resizeMode="cover"
+            borderRadius={12}
+            showPlaceholder={true}
+          />
         )}
         {videoUri && (
           <View style={styles.videoContainer}>
-            <Image
-              source={{ uri: videoUri }}
+            <SmartImage
+              uri={videoUri} // Usually video thumbnail, if same url SmartImage handles it as image
               style={styles.media}
               resizeMode="cover"
+              borderRadius={12}
+              showPlaceholder={true}
             />
             <View style={styles.playIconOverlay}>
               <View style={styles.playIcon} />

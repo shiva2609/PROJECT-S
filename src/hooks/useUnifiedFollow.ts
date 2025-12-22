@@ -6,10 +6,13 @@
  * Ensures follow writes match feed listener reads
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { useAuth } from '../providers/AuthProvider';
 import { useUserRelations } from '../providers/UserRelationProvider';
 import * as FollowService from '../global/services/follow/follow.service';
+import { useSingleFlight } from './useSingleFlight';
+import { checkNetworkStatus } from './useNetworkState';
+import { AppError, ErrorType, withTimeout } from '../utils/AppError';
 
 interface UseUnifiedFollowReturn {
   followUser: (targetUserId: string) => Promise<void>;
@@ -23,7 +26,7 @@ interface UseUnifiedFollowReturn {
  * Updates global state and triggers feed refresh
  */
 export function useUnifiedFollow(): UseUnifiedFollowReturn {
-  const { user } = useAuth();
+  const { user, checkSession } = useAuth();
   const {
     following,
     addFollowing,
@@ -31,71 +34,89 @@ export function useUnifiedFollow(): UseUnifiedFollowReturn {
     refreshRelations,
   } = useUserRelations();
 
-  const processingRef = useRef<Set<string>>(new Set());
+  // 🔐 SINGLE FLIGHT GUARD
+  // Prevents rapid clicking/spamming follow buttons
+  const singleFlight = useSingleFlight();
 
   const isFollowing = useCallback((targetUserId: string): boolean => {
     return following.has(targetUserId);
   }, [following]);
 
   const followUser = useCallback(async (targetUserId: string): Promise<void> => {
+    // 🔐 AUTH GATE: Valid Session Check
+    checkSession();
+
     if (!user?.uid) {
       throw new Error('User must be authenticated');
     }
 
-    if (processingRef.current.has(targetUserId)) {
-      return;
-    }
+    // 🔐 1. NETWORK & FLIGHT CHECK
+    await singleFlight.execute(`follow:${targetUserId}`, async () => {
+      // 🔐 RE-CHECK SESSION inside lock
+      checkSession();
 
-    // Optimistic update - update global state immediately
-    addFollowing(targetUserId);
-    processingRef.current.add(targetUserId);
+      // Pre-flight network check
+      const isConnected = await checkNetworkStatus();
+      if (!isConnected) {
+        throw new AppError('No internet connection', ErrorType.NETWORK);
+      }
 
-    try {
-      // Use global follow service - writes to users/{uid}/following subcollection
-      await FollowService.followUser(user.uid, targetUserId);
+      // Optimistic update
+      addFollowing(targetUserId);
 
-      // Refresh relations to sync with backend
-      await refreshRelations(user.uid);
-    } catch (error: any) {
-      // Rollback optimistic update
-      removeFollowing(targetUserId);
-      console.error('Error following user:', error);
-      throw error;
-    } finally {
-      processingRef.current.delete(targetUserId);
-    }
-  }, [user?.uid, addFollowing, removeFollowing, refreshRelations]);
+      try {
+        // 🔐 TIMEOUT: Wrap network call
+        await withTimeout(FollowService.followUser(user.uid, targetUserId), 15000);
+        await refreshRelations(user.uid);
+      } catch (error: any) {
+        // Rollback on error
+        removeFollowing(targetUserId);
+
+        console.error('❌ [useUnifiedFollow] Error following user:', error);
+
+        // Use standard error normalization if needed for UI, 
+        // but here we just rethrow so the component can handle alert/toast
+        throw AppError.fromError(error);
+      }
+    });
+  }, [user?.uid, addFollowing, removeFollowing, refreshRelations, singleFlight, checkSession]);
 
   const unfollowUser = useCallback(async (targetUserId: string): Promise<void> => {
+    // 🔐 AUTH GATE: Valid Session Check
+    checkSession();
+
     if (!user?.uid) {
       throw new Error('User must be authenticated');
     }
 
-    if (processingRef.current.has(targetUserId)) {
-      return;
-    }
+    // 🔐 1. NETWORK & FLIGHT CHECK
+    await singleFlight.execute(`unfollow:${targetUserId}`, async () => {
+      checkSession();
 
-    // Optimistic update - update global state immediately
-    removeFollowing(targetUserId);
-    processingRef.current.add(targetUserId);
+      const isConnected = await checkNetworkStatus();
+      if (!isConnected) {
+        throw new AppError('No internet connection', ErrorType.NETWORK);
+      }
 
-    try {
-      // Use global follow service - writes to users/{uid}/following subcollection
-      await FollowService.unfollowUser(user.uid, targetUserId);
+      // Optimistic update
+      removeFollowing(targetUserId);
 
-      // Refresh relations to sync with backend
-      await refreshRelations(user.uid);
-    } catch (error: any) {
-      // Rollback optimistic update
-      addFollowing(targetUserId);
-      console.error('Error unfollowing user:', error);
-      throw error;
-    } finally {
-      processingRef.current.delete(targetUserId);
-    }
-  }, [user?.uid, addFollowing, removeFollowing, refreshRelations]);
+      try {
+        // 🔐 TIMEOUT: Wrap network call
+        await withTimeout(FollowService.unfollowUser(user.uid, targetUserId), 15000);
+        await refreshRelations(user.uid);
+      } catch (error: any) {
+        // Rollback
+        addFollowing(targetUserId);
+        console.error('❌ [useUnifiedFollow] Error unfollowing user:', error);
+        throw AppError.fromError(error);
+      }
+    });
+  }, [user?.uid, addFollowing, removeFollowing, refreshRelations, singleFlight, checkSession]);
 
   const toggleFollow = useCallback(async (targetUserId: string): Promise<void> => {
+    // If currently following, call unfollow. Otherwise follow.
+    // The individual functions handle the single flight locking efficiently.
     if (isFollowing(targetUserId)) {
       await unfollowUser(targetUserId);
     } else {

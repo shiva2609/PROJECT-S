@@ -18,6 +18,11 @@
  * - Cropping recalculated at preview/post time
  * - Transform params stored and re-applied later
  * - Feed cards applied transforms again
+ * 
+ * 🔐 INVARIANT ENFORCEMENT:
+ * - Original image URIs are ILLEGAL after crop completion
+ * - Only finalUri (exported bitmap) is used for preview/upload
+ * - Navigation forward is BLOCKED unless all images are finalized
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -32,7 +37,6 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
@@ -42,10 +46,26 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import ImagePicker from 'react-native-image-crop-picker';
+import { useColorScheme } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { navigateToScreen } from '../../utils/navigationHelpers';
 import { exportFinalBitmap } from '../../utils/cropUtils';
+import {
+  getCropBoxDimensions,
+  calculateMinScale,
+  calculateFitScale,
+  getImageTransform,
+  clampTranslation,
+} from '../../utils/cropMath';
+import {
+  assertIsFinalizedBitmap,
+  assertAllImagesFinalized,
+  sanitizeFinalMedia,
+  logInvariantCheck,
+} from '../../utils/imagePipelineInvariants';
+import { ScreenLayout } from '../../components/layout/ScreenLayout';
+import { useCreateFlowStore } from '../../store/stores/useCreateFlowStore'; // 🔐 USE STORE
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const FRAME_PADDING = 20;
@@ -91,8 +111,16 @@ interface CropAdjustScreenProps {
 }
 
 export default function CropAdjustScreen({ navigation, route }: CropAdjustScreenProps) {
-  const { selectedImages = [], contentType = 'post', currentImageIndex = 0, croppedMedia = [], lockedRatio } = route.params;
-  
+  const { selectedImages = [], contentType = 'post', currentImageIndex = 0, lockedRatio } = route.params;
+  const { updateAsset, updateCropParams } = useCreateFlowStore();
+  const theme = useColorScheme();
+  const isDark = theme === 'dark';
+
+  // Theme-aware colors
+  const bgColor = isDark ? Colors.black.primary : Colors.white.primary;
+  const textColor = isDark ? Colors.white.primary : Colors.black.primary;
+  const subTextColor = isDark ? Colors.white.secondary : Colors.black.qua;
+
   // Validate max items
   useEffect(() => {
     if (selectedImages.length > MAX_ITEMS) {
@@ -105,35 +133,57 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
   // INSTAGRAM LOGIC: Use locked ratio from PhotoSelectScreen (one ratio per post)
   // If no locked ratio provided, default based on contentType
   const defaultRatio: AspectRatio = lockedRatio || (contentType === 'post' ? '4:5' : '16:9');
-  
+
   const [currentIndex, setCurrentIndex] = useState(currentImageIndex);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>(defaultRatio);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const [loading, setLoading] = useState(false);
   const [cropping, setCropping] = useState(false);
-  const [savedCrops, setSavedCrops] = useState<CropData[]>(() => {
-    // If editing existing cropped media, use finalUri; otherwise use original
-    if (croppedMedia && croppedMedia.length > 0) {
-      return croppedMedia.map(item => ({
-        ...item,
-        id: item.id || item.finalUri,
-      }));
-    }
-    return [];
-  });
-  
+  const [savedCrops, setSavedCrops] = useState<CropData[]>([]);
+
   // INSTAGRAM LOGIC: Lock ratio - prevent changing it (all images in post use same ratio)
   // If lockedRatio is provided, aspect ratio cannot be changed
   const isRatioLocked = !!lockedRatio;
 
   // CRITICAL: Use ONLY final cropped bitmaps when editing existing crops
   // For new crops, use original image URI (will be replaced with final bitmap after export)
-  // After export, currentImageUri will be the final cropped bitmap path
   const currentImage = selectedImages[currentIndex];
+  // Check store for existing crops by ID
   const existingCrop = savedCrops[currentIndex];
-  // If editing existing crop, use finalUri (final cropped bitmap)
-  // If new crop, use original image URI (will be exported to final bitmap on "Next")
-  const currentImageUri = existingCrop?.finalUri || currentImage?.uri || route.params.imageUri || '';
+
+  // 🔐 INVARIANT ENFORCEMENT: If editing existing crop, ONLY finalUri is allowed
+  // Fallback chains (currentImage?.uri, route.params.imageUri) are FORBIDDEN after crop completion
+  let currentImageUri: string;
+
+  if (existingCrop?.finalUri) {
+    // Editing existing crop - MUST use finalUri only
+    currentImageUri = existingCrop.finalUri;
+
+    // 🔐 INVARIANT CHECK: Validate that we're not accidentally using an original URI
+    if (__DEV__) {
+      assertIsFinalizedBitmap(
+        currentImageUri,
+        `CropAdjustScreen.preview[existingCrop ${currentIndex}]`
+      );
+      logInvariantCheck(
+        `CropAdjustScreen.preview[${currentIndex}]`,
+        true,
+        `Using finalUri for existing crop`
+      );
+    }
+  } else {
+    // New crop - use original image URI (will be exported to final bitmap on "Next")
+    // This is the ONLY place where original URIs are allowed (before first export)
+    currentImageUri = currentImage?.uri || route.params.imageUri || '';
+
+    if (__DEV__ && currentImageUri) {
+      logInvariantCheck(
+        `CropAdjustScreen.preview[${currentIndex}]`,
+        true,
+        `Using original URI for NEW crop (will be finalized on Next)`
+      );
+    }
+  }
 
   // Calculate frame dimensions based on aspect ratio
   const getFrameDimensions = (ratio: AspectRatio) => {
@@ -180,7 +230,7 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
       currentImageUri,
       (width, height) => {
         setImageSize({ width, height });
-        
+
         // If editing existing crop, restore previous transform values
         if (existingCrop) {
           const prevCrop = existingCrop.cropData;
@@ -192,30 +242,23 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
           translateY.value = prevCrop.offsetY;
           setAspectRatio(prevCrop.ratio);
         } else {
-          // Calculate initial scale to fill crop area
-          const imageAspect = width / height;
-          const cropAspect = frameWidth / frameHeight;
-          
-          let initialScale: number;
-          if (imageAspect > cropAspect) {
-            // Image is wider - scale to fit height
-            initialScale = frameHeight / height;
-          } else {
-            // Image is taller - scale to fit width
-            initialScale = frameWidth / width;
-          }
-          
-          // Ensure image covers the frame
-          initialScale = Math.max(initialScale, 1);
-          
-          savedScale.value = initialScale;
-          scale.value = initialScale;
+          // 🔐 FIX 1: Default zoom = Fit (No unwanted zoom on entry)
+          // fully visible, centered
+          const fitScale = calculateFitScale(
+            width,
+            height,
+            frameWidth,
+            frameHeight
+          );
+
+          savedScale.value = fitScale;
+          scale.value = fitScale;
           translateX.value = 0;
           translateY.value = 0;
           savedTranslateX.value = 0;
           savedTranslateY.value = 0;
         }
-        
+
         setLoading(false);
       },
       (error) => {
@@ -231,29 +274,22 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
     if (imageSize.width === 0 || imageSize.height === 0) return;
     if (existingCrop) return; // Don't auto-adjust if editing existing crop
 
-    const imageAspect = imageSize.width / imageSize.height;
-    const cropAspect = frameWidth / frameHeight;
-    
-    let newScale: number;
-    if (imageAspect > cropAspect) {
-      newScale = frameHeight / imageSize.height;
-    } else {
-      newScale = frameWidth / imageSize.width;
-    }
-    
-    newScale = Math.max(newScale, savedScale.value);
-    
+    // 🔐 FIX 1: Prevent auto-scale when ratio changes
+    // Maintain scale = 1 or user-defined scale
+    const newScale = savedScale.value;
+
     // Maintain position if possible, otherwise center
     const scaledWidth = imageSize.width * newScale;
     const scaledHeight = imageSize.height * newScale;
-    
+
     if (scaledWidth < frameWidth || scaledHeight < frameHeight) {
+      // If image is too small for the new frame, center it
       translateX.value = 0;
       translateY.value = 0;
       savedTranslateX.value = 0;
       savedTranslateY.value = 0;
     }
-    
+
     savedScale.value = newScale;
     scale.value = newScale;
   }, [aspectRatio, frameWidth, frameHeight]);
@@ -268,13 +304,13 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
       // Constrain to bounds
       const scaledWidth = imageSize.width * scale.value;
       const scaledHeight = imageSize.height * scale.value;
-      
+
       const maxTranslateX = Math.max(0, (scaledWidth - frameWidth) / 2);
       const maxTranslateY = Math.max(0, (scaledHeight - frameHeight) / 2);
-      
+
       translateX.value = Math.max(-maxTranslateX, Math.min(maxTranslateX, translateX.value));
       translateY.value = Math.max(-maxTranslateY, Math.min(maxTranslateY, translateY.value));
-      
+
       savedTranslateX.value = translateX.value;
       savedTranslateY.value = translateY.value;
     });
@@ -292,17 +328,17 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
     })
     .onEnd(() => {
       savedScale.value = scale.value;
-      
+
       // Re-constrain position after zoom
       const scaledWidth = imageSize.width * scale.value;
       const scaledHeight = imageSize.height * scale.value;
-      
+
       const maxTranslateX = Math.max(0, (scaledWidth - frameWidth) / 2);
       const maxTranslateY = Math.max(0, (scaledHeight - frameHeight) / 2);
-      
+
       translateX.value = Math.max(-maxTranslateX, Math.min(maxTranslateX, translateX.value));
       translateY.value = Math.max(-maxTranslateY, Math.min(maxTranslateY, translateY.value));
-      
+
       savedTranslateX.value = translateX.value;
       savedTranslateY.value = translateY.value;
     });
@@ -314,13 +350,13 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
   const imageAnimatedStyle = useAnimatedStyle(() => {
     const scaledWidth = imageSize.width * scale.value;
     const scaledHeight = imageSize.height * scale.value;
-    
+
     const maxTranslateX = Math.max(0, (scaledWidth - frameWidth) / 2);
     const maxTranslateY = Math.max(0, (scaledHeight - frameHeight) / 2);
-    
+
     const constrainedX = Math.max(-maxTranslateX, Math.min(maxTranslateX, translateX.value));
     const constrainedY = Math.max(-maxTranslateY, Math.min(maxTranslateY, translateY.value));
-    
+
     return {
       transform: [
         { translateX: constrainedX },
@@ -358,7 +394,7 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
     let outputWidth: number;
     let outputHeight: number;
     let cropAspectRatio: number;
-    
+
     switch (aspectRatio) {
       case '1:1':
         outputWidth = 1080;
@@ -424,13 +460,13 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
         // User cancelled - return original URI
         return currentImageUri;
       }
-      
+
       // iOS safe mode: If cropping fails (e.g., native module not linked), fallback to original
       if (Platform.OS === 'ios') {
         console.warn('ImagePicker crop failed on iOS (native module may not be linked). Using original URI. Run: cd ios && pod install');
         return currentImageUri;
       }
-      
+
       // Android: Log error but still try to return original as fallback
       console.error('Crop error:', error);
       // Don't show alert on every error - just log and fallback
@@ -470,44 +506,58 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
 
       // INSTAGRAM LOGIC: Generate final bitmap IMMEDIATELY for current image
       console.log(`🖼️ [CropAdjustScreen] Generating final bitmap for image ${currentIndex + 1}/${selectedImages.length}...`);
-      
+
       const originalImage = selectedImages[currentIndex];
       if (!originalImage) {
         throw new Error('Original image not found');
       }
 
-            // CRITICAL: Export final cropped bitmap from original image
-            // After this, originalImage.uri is NEVER used again - only croppedBitmapPath
-            const croppedBitmapPath = await exportFinalBitmap({
-              imageUri: originalImage.uri, // Use original image URI for export (last time it's used)
-              cropParams: {
-                zoom: cropData.cropData.zoomScale,
-                offsetX: cropData.cropData.offsetX,
-                offsetY: cropData.cropData.offsetY,
-              },
-              frameWidth: cropData.cropData.frameWidth,
-              frameHeight: cropData.cropData.frameHeight,
-              ratio: cropData.ratio, // Use locked ratio
-            });
-            
-            // After export, croppedBitmapPath is the ONLY image URI used going forward
-            // originalImage.uri is NEVER used again in the pipeline
+      // CRITICAL: Export final cropped bitmap from original image
+      // After this, originalImage.uri is NEVER used again - only croppedBitmapPath
+      const croppedBitmapPath = await exportFinalBitmap({
+        imageUri: originalImage.uri, // Use original image URI for export (last time it's used)
+        cropParams: {
+          zoom: cropData.cropData.zoomScale,
+          offsetX: cropData.cropData.offsetX,
+          offsetY: cropData.cropData.offsetY,
+        },
+        frameWidth: cropData.cropData.frameWidth,
+        frameHeight: cropData.cropData.frameHeight,
+        ratio: cropData.ratio, // Use locked ratio
+      });
+
+      // After export, croppedBitmapPath is the ONLY image URI used going forward
+      // originalImage.uri is NEVER used again in the pipeline
 
       console.log(`✅ [CropAdjustScreen] Bitmap ${currentIndex + 1} generated:`, croppedBitmapPath.substring(0, 50) + '...');
 
-      // Update saved crop with REAL final bitmap path
+      // 🔐 INVARIANT ENFORCEMENT: Validate that exported bitmap is valid
+      assertIsFinalizedBitmap(
+        croppedBitmapPath,
+        `CropAdjustScreen.handleNext[image ${currentIndex + 1}/${selectedImages.length}]`
+      );
+
+      // 🔐 FIX 4: Update STORE with finalUri (One source of truth)
+      if (originalImage?.id) {
+        updateAsset(originalImage.id, { finalUri: croppedBitmapPath });
+        updateCropParams(originalImage.id, {
+          zoom: cropData.cropData.zoomScale,
+          offsetX: cropData.cropData.offsetX,
+          offsetY: cropData.cropData.offsetY,
+        });
+      }
+
+      // Update saved crop state
       updatedCrops[currentIndex] = {
         ...cropData,
-        finalUri: croppedBitmapPath, // REAL cropped bitmap - no fallback to original
+        finalUri: croppedBitmapPath,
       };
       setSavedCrops(updatedCrops);
 
       // Check if there are more images to process
       if (currentIndex < selectedImages.length - 1) {
-        // Move to next image - ratio stays locked, generate bitmap for next image
         setCurrentIndex(currentIndex + 1);
         setCropping(false);
-        // Reset transforms for next image (but keep same ratio)
         translateX.value = 0;
         translateY.value = 0;
         scale.value = 1;
@@ -515,41 +565,57 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
         savedTranslateY.value = 0;
         savedScale.value = 1;
       } else {
-        // All images processed - all final bitmaps are ready
-        console.log('✅ [CropAdjustScreen] All final bitmaps generated, navigating to AddPostDetails...');
+        console.log('✅ [CropAdjustScreen] All final bitmaps generated, navigating to AddDetails...');
+
+        // 🔐 INVARIANT ENFORCEMENT: Validate ALL images before navigation
+        assertAllImagesFinalized(
+          updatedCrops,
+          selectedImages.length,
+          'CropAdjustScreen.handleNext.beforeNavigation'
+        );
+
         setCropping(false);
-        
-        // Navigate with processed media containing REAL cropped bitmaps
-        // CRITICAL: All images use the SAME locked ratio (Instagram-style)
-        navigateToScreen(navigation, 'AddPostDetails', {
-          finalMedia: updatedCrops, // All final bitmaps ready
+
+        // 🔐 FIX 4: Navigate to AddDetails (Correct screen name from AppNavigator)
+        navigateToScreen(navigation, 'AddDetails', {
+          croppedMedia: updatedCrops,
           contentType: contentType,
         });
       }
     } catch (error: any) {
       setCropping(false);
       console.error('❌ [CropAdjustScreen] Error in handleNext:', error);
-      Alert.alert('Error', error.message || 'Failed to process image');
+
+      // In development, show detailed error for invariant violations
+      if (__DEV__ && error.message?.includes('INVARIANT VIOLATION')) {
+        Alert.alert(
+          'Development Error: Invariant Violation',
+          error.message,
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Error', error.message || 'Failed to process image');
+      }
     }
   };
 
   const canProceed = imageSize.width > 0 && imageSize.height > 0 && !cropping;
-  const progressText = selectedImages.length > 1 
+  const progressText = selectedImages.length > 1
     ? `${currentIndex + 1} / ${selectedImages.length}`
     : '';
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <ScreenLayout scrollable={false} includeBottomInset={false} backgroundColor={bgColor}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: bgColor }]}>
           <TouchableOpacity
             style={styles.headerButton}
             onPress={() => navigation.goBack()}
           >
-            <Icon name="arrow-back" size={24} color={Colors.white.primary} />
+            <Icon name="arrow-back" size={24} color={textColor} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { fontFamily: Fonts.medium }]}>Adjust {progressText}</Text>
+          <Text style={[styles.headerTitle, { fontFamily: Fonts.medium, color: textColor }]}>Adjust {progressText}</Text>
           <TouchableOpacity
             style={styles.headerButton}
             onPress={handleNext}
@@ -566,17 +632,17 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
         </View>
 
         {/* Crop Area */}
-        <View style={styles.cropContainer}>
+        <View style={[styles.cropContainer, { backgroundColor: bgColor }]}>
           {loading || cropping ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={Colors.white.primary} />
-              {cropping && <Text style={styles.croppingText}>Processing image...</Text>}
+              <ActivityIndicator size="large" color={textColor} />
+              {cropping && <Text style={[styles.croppingText, { color: subTextColor }]}>Processing image...</Text>}
             </View>
           ) : (
             <>
               <View style={styles.cropArea}>
                 <View style={styles.cropAreaInner}>
-                  <Animated.View 
+                  <Animated.View
                     style={[styles.frameContainer, frameAnimatedStyle]}
                   >
                     <GestureDetector gesture={composedGesture}>
@@ -614,7 +680,7 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
         </View>
 
         {/* Ratio Selector - Disabled if ratio is locked (Instagram-style) */}
-        <View style={styles.ratioContainer}>
+        <View style={[styles.ratioContainer, { backgroundColor: bgColor }]}>
           {(['1:1', '4:5', '16:9'] as AspectRatio[]).map((ratio) => (
             <TouchableOpacity
               key={ratio}
@@ -622,6 +688,7 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
                 styles.ratioButton,
                 aspectRatio === ratio && styles.ratioButtonActive,
                 isRatioLocked && styles.ratioButtonLocked, // Visual indicator when locked
+                { backgroundColor: aspectRatio === ratio ? Colors.brand.primary : isDark ? Colors.black.secondary : Colors.white.tertiary }
               ]}
               onPress={() => handleRatioChange(ratio)}
               disabled={isRatioLocked} // Disable if locked
@@ -631,6 +698,7 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
                   styles.ratioText,
                   aspectRatio === ratio && styles.ratioTextActive,
                   isRatioLocked && aspectRatio !== ratio && styles.ratioTextLocked,
+                  { color: aspectRatio === ratio ? Colors.white.primary : textColor }
                 ]}
               >
                 {ratio}
@@ -638,21 +706,17 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
             </TouchableOpacity>
           ))}
           {isRatioLocked && (
-            <Text style={styles.lockedRatioHint}>
+            <Text style={[styles.lockedRatioHint, { color: subTextColor }]}>
               Ratio locked for all images
             </Text>
           )}
         </View>
-      </SafeAreaView>
+      </ScreenLayout>
     </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.black.primary,
-  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

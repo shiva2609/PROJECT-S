@@ -5,30 +5,14 @@ import * as UserService from '../global/services/user/user.service';
 import * as FollowService from '../global/services/follow/follow.service';
 import * as UsersAPI from '../services/users/usersService';
 import { segmentFollowersAndSuggestions } from '../global/services/follow/follow.segmentation';
-
-export interface SuggestionUser {
-  id: string;
-  username: string;
-  displayName?: string;
-  avatarUri?: string;
-  isVerified?: boolean;
-  followerCount?: number;
-  mutualFollowers?: number;
-  reason?: 'popular' | 'mutual' | 'new' | 'second_degree';
-  name?: string;
-  profilePic?: string;
-  profilePhoto?: string;
-}
-
-export interface SuggestionCategory {
-  title: string;
-  users: SuggestionUser[];
-}
+import { withTimeout } from '../utils/AppError';
+import { useSuggestionsStore, SuggestionUser, SuggestionCategory } from '../store/stores/useSuggestionsStore';
+export type { SuggestionUser, SuggestionCategory };
 
 interface UseSuggestionsReturn {
   categories: SuggestionCategory[];
   loading: boolean;
-  refresh: () => Promise<void>;
+  refresh: (force?: boolean) => Promise<void>;
   updateSuggestionFollowState: (userId: string, isFollowing: boolean) => void;
   followers: SuggestionUser[];
   suggestions: SuggestionUser[];
@@ -39,125 +23,45 @@ interface UseSuggestionsReturn {
   contactSuggestions: SuggestionUser[];
 }
 
-/**
- * User discovery engine for generating personalized suggestions
- * Returns categorized suggestions: People Who Follow You, Popular, Mutual Followers, etc.
- */
 export function useSuggestions(): UseSuggestionsReturn {
   const { user } = useAuth();
   const { following } = useUserRelations();
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [categories, setCategories] = useState<SuggestionCategory[]>([]);
-  const [suggestionUsers, setSuggestionUsers] = useState<Map<string, SuggestionUser>>(new Map());
+  const {
+    categories,
+    suggestionUsers,
+    isLoading,
+    lastFetched,
+    setCategories,
+    setSuggestionUsers,
+    setIsLoading,
+    updateLocalFollow
+  } = useSuggestionsStore();
 
-  // Contacts state
   const [contactsPermissionGranted, setContactsPermissionGranted] = useState(false);
   const [contactsProcessed, setContactsProcessed] = useState(false);
-  const [contactSuggestions, setContactSuggestions] = useState<SuggestionUser[]>([]);
+  const [contactSuggestions, setContactSuggestionsState] = useState<SuggestionUser[]>([]);
 
-  /**
-   * Check contacts state on mount or refresh
-   */
-  const checkContactsState = useCallback(async () => {
-    if (!user?.uid) return;
-
-    try {
-      // Check permission (async)
-      const contactsService = await import('../services/contacts/contactsService');
-      const hasPermission = await contactsService.checkContactsPermission();
-      setContactsPermissionGranted(hasPermission);
-
-      // Check if hashes uploaded (async)
-      const hasUploaded = await contactsService.hasUploadedContacts(user.uid);
-      setContactsProcessed(hasUploaded);
-
-      // If permission granted and uploaded, fetch matches (placeholder)
-      if (hasPermission && hasUploaded) {
-        setContactSuggestions([]);
-      }
-    } catch (err) {
-      console.warn('Error checking contacts state:', err);
-    }
-  }, [user?.uid]);
-
-  /**
-   * Update follow state in local suggestions (optimistic update)
-   */
   const updateSuggestionFollowState = useCallback((userId: string, isFollowing: boolean) => {
-    setSuggestionUsers(prev => {
-      const updated = new Map(prev);
-      const user = updated.get(userId);
-      if (user) {
-        updated.set(userId, { ...user, isFollowing });
-      }
-      return updated;
-    });
-  }, []);
+    updateLocalFollow(userId, isFollowing);
+  }, [updateLocalFollow]);
 
-  /**
-   * Fetch users who follow the current user using global service
-   */
-  const fetchPeopleWhoFollowYou = useCallback(async (currentUserId: string): Promise<SuggestionUser[]> => {
-    try {
-      // Use global follow service to get follower IDs
-      const followerIds = await FollowService.getFollowersIds(currentUserId);
-
-      if (followerIds.length === 0) return [];
-
-      // Batch fetch user documents using global service
-      const userIdsToFetch = followerIds.slice(0, 50); // Increased limit for segmentation
-      const userInfos = await UserService.getUsersPublicInfo(userIdsToFetch);
-
-      // Transform to SuggestionUser format
-      const users: SuggestionUser[] = userInfos.map(userInfo => ({
-        id: userInfo.uid,
-        username: userInfo.username || '',
-        displayName: userInfo.displayName || userInfo.username || '',
-        name: userInfo.displayName || userInfo.username || '',
-        avatarUri: userInfo.photoURL || undefined,
-        profilePic: userInfo.photoURL || undefined,
-        profilePhoto: userInfo.photoURL || undefined,
-        isVerified: userInfo.verified || false,
-        followerCount: userInfo.followersCount || 0,
-        mutualFollowers: 0, // Will be calculated
-        reason: 'mutual' as const,
-      } as SuggestionUser));
-
-      return users;
-    } catch (error) {
-      console.error('Error fetching people who follow you:', error);
-      return [];
-    }
-  }, []);
-
-  /**
-   * Fetch general suggestions from API
-   */
   const fetchGeneralSuggestions = useCallback(async (currentUserId: string): Promise<SuggestionUser[]> => {
     try {
-      // Get suggested users from API (returns User objects with IDs)
-      const suggestedUsers = await UsersAPI.getSuggested(currentUserId, {
+      const suggestedUsers = await withTimeout(UsersAPI.getSuggested(currentUserId, {
         excludeFollowing: Array.from(following),
         limit: 30,
-      });
+      }), 7000).catch(() => []);
 
-      if (suggestedUsers.length === 0) {
-        return [];
-      }
+      if (suggestedUsers.length === 0) return [];
 
-      // Extract user IDs and batch fetch fresh data using global service
       const userIds = suggestedUsers.map(u => u.id).filter(Boolean);
-      const userInfos = await UserService.getUsersPublicInfo(userIds);
+      const userInfos = await withTimeout(UserService.getUsersPublicInfo(userIds), 7000).catch(() => []);
 
-      // Create a map for quick lookup of follower counts from original data
       const followerCountMap = new Map<string, number>();
       suggestedUsers.forEach(u => {
-        if (u.followersCount) {
-          followerCountMap.set(u.id, u.followersCount);
-        }
+        if (u.followersCount) followerCountMap.set(u.id, u.followersCount);
       });
 
-      // Transform to SuggestionUser format using fresh Firestore data
       return userInfos.map(userInfo => ({
         id: userInfo.uid,
         username: userInfo.username || '',
@@ -177,93 +81,81 @@ export function useSuggestions(): UseSuggestionsReturn {
     }
   }, [following]);
 
-  /**
-   * Refresh suggestions using global segmentation
-   */
-  const refresh = useCallback(async (): Promise<void> => {
+  const refresh = useCallback(async (force = false): Promise<void> => {
     if (!user?.uid || isLoading) return;
 
+    // Use cached data if fresh (5 mins) and not forced
+    const fiveMinutes = 5 * 60 * 1000;
+    if (!force && categories.length > 0 && (Date.now() - lastFetched < fiveMinutes)) {
+      console.log('📦 [useSuggestions] Using cached suggestions');
+      return;
+    }
+
     setIsLoading(true);
+    console.log('🔄 [useSuggestions] Starting refresh for:', user.uid);
+    let fetchedContacts: SuggestionUser[] = [];
+
+    const safetyTimeoutId = setTimeout(() => {
+      console.warn('⚠️ [useSuggestions] Refresh safety timeout triggered!');
+      setIsLoading(false);
+    }, 20000);
+
     try {
-      // Check contacts state and fetch matches
-      let fetchedContacts: SuggestionUser[] = [];
       try {
-        const contactsService = await import('../services/contacts/contactsService');
-        const hasPermission = await contactsService.checkContactsPermission();
-        setContactsPermissionGranted(hasPermission);
+        await withTimeout((async () => {
+          const contactsService = await import('../services/contacts/contactsService');
+          const hasPermission = await contactsService.checkContactsPermission();
+          setContactsPermissionGranted(hasPermission);
 
-        const hasUploaded = await contactsService.hasUploadedContacts(user.uid);
-        setContactsProcessed(hasUploaded);
+          const hasUploaded = await contactsService.hasUploadedContacts(user?.uid || '');
+          setContactsProcessed(hasUploaded);
 
-        if (hasPermission && hasUploaded) {
-          console.log('📞 Fetching contact matches...');
+          if (hasPermission && hasUploaded) {
+            const fIds = await withTimeout(FollowService.getFollowingIds(user?.uid || ''), 5000).catch(() => []);
+            const matches = await contactsService.findContactMatches(user?.uid || '', fIds);
 
-          // Get following IDs to exclude
-          const followingIds = await FollowService.getFollowingIds(user.uid);
-
-          // Find users who match contacts
-          const matches = await contactsService.findContactMatches(user.uid, followingIds);
-
-          // Transform to SuggestionUser format
-          fetchedContacts = matches.map((match): SuggestionUser => ({
-            id: match.id,
-            username: match.username || '',
-            displayName: match.displayName || match.username || '',
-            name: match.displayName || match.username || '',
-            avatarUri: match.photoURL || undefined,
-            profilePic: match.photoURL || undefined,
-            profilePhoto: match.photoURL || undefined,
-            isVerified: match.verified || false,
-            followerCount: match.followersCount || 0,
-            mutualFollowers: 0,
-            reason: 'mutual' as const,
-          }));
-
-          console.log(`✅ Found ${fetchedContacts.length} contact suggestions`);
-        }
-        setContactSuggestions(fetchedContacts);
+            fetchedContacts = matches.map((match): SuggestionUser => ({
+              id: match.id,
+              username: match.username || '',
+              displayName: match.displayName || match.username || '',
+              name: match.displayName || match.username || '',
+              avatarUri: match.photoURL || undefined,
+              profilePic: match.photoURL || undefined,
+              profilePhoto: match.photoURL || undefined,
+              isVerified: match.verified || false,
+              followerCount: match.followersCount || 0,
+              mutualFollowers: 0,
+              reason: 'mutual' as const,
+            }));
+          }
+        })(), 12000);
+        setContactSuggestionsState(fetchedContacts);
       } catch (err) {
-        console.warn('⚠️ Error fetching contact suggestions:', err);
-        setContactSuggestions([]);
+        console.warn('⚠️ Error fetching contact suggestions or timeout:', err);
       }
 
-      // STEP 1: Fetch raw data in parallel
+      // STEP 1: Fetch raw data in parallel with timeouts
       const [followerIds, generalSuggestions] = await Promise.all([
-        FollowService.getFollowersIds(user.uid),
-        fetchGeneralSuggestions(user.uid),
+        withTimeout(FollowService.getFollowersIds(user.uid), 8000).catch(() => []),
+        withTimeout(fetchGeneralSuggestions(user.uid), 8000).catch(() => []),
       ]);
+      console.log(`📊 [useSuggestions] Raw data fetched - Followers: ${followerIds.length}, Suggested: ${generalSuggestions.length}`);
 
-      // STEP 2: Get following IDs for segmentation
-      const followingIds = await FollowService.getFollowingIds(user.uid);
-
-      // STEP 3: Fetch full user data for followers
+      const followingIds = await withTimeout(FollowService.getFollowingIds(user.uid), 5000).catch(() => []);
       const followerUserInfos = followerIds.length > 0
-        ? await UserService.getUsersPublicInfo(followerIds.slice(0, 50))
+        ? await withTimeout(UserService.getUsersPublicInfo(followerIds.slice(0, 50)), 5000).catch(() => [])
         : [];
 
-      // STEP 4: Transform to common format for segmentation
-      const followersAsUsers = followerUserInfos.map(userInfo => ({
-        uid: userInfo.uid,
-        id: userInfo.uid,
-        ...userInfo,
-      }));
+      const followersAsUsers = followerUserInfos.map(userInfo => ({ ...userInfo, uid: userInfo.uid }));
+      const suggestedAsUsers = generalSuggestions.map(s => ({ ...s, uid: s.id }));
 
-      const suggestedAsUsers = generalSuggestions.map(s => ({
-        uid: s.id,
-        id: s.id,
-        ...s,
-      }));
+      const { followersSection, suggestedSection } = segmentFollowersAndSuggestions({
+        followers: followersAsUsers,
+        followingIds,
+        suggestedUsers: suggestedAsUsers,
+        loggedUserId: user.uid,
+      });
 
-      // STEP 5: Use global segmentation service
-      const { followersSection, suggestedSection, followersCount, suggestionsCount } =
-        segmentFollowersAndSuggestions({
-          followers: followersAsUsers,
-          followingIds,
-          suggestedUsers: suggestedAsUsers,
-          loggedUserId: user.uid,
-        });
-
-      // STEP 6: Transform segmented results back to SuggestionUser format
       const segmentedFollowers: SuggestionUser[] = followersSection.map(f => ({
         id: f.uid || f.id,
         username: f.username || '',
@@ -275,7 +167,7 @@ export function useSuggestions(): UseSuggestionsReturn {
         isVerified: f.verified || false,
         followerCount: f.followersCount || 0,
         mutualFollowers: 0,
-        reason: 'mutual' as const,
+        reason: 'mutual',
       }));
 
       const segmentedSuggestions: SuggestionUser[] = suggestedSection.map(s => ({
@@ -289,74 +181,88 @@ export function useSuggestions(): UseSuggestionsReturn {
         isVerified: s.verified || false,
         followerCount: s.followerCount || 0,
         mutualFollowers: 0,
-        reason: s.reason || 'popular' as const,
+        reason: s.reason || 'popular',
       }));
 
-      // STEP 7: Update suggestion users map
       const userMap = new Map<string, SuggestionUser>();
-      [...segmentedFollowers, ...segmentedSuggestions, ...fetchedContacts].forEach(u => {
-        userMap.set(u.id, u);
-      });
+      [...segmentedFollowers, ...segmentedSuggestions, ...fetchedContacts].forEach(u => userMap.set(u.id, u));
       setSuggestionUsers(userMap);
 
-      // STEP 8: Build categories with proper headers
-      const newCategories: SuggestionCategory[] = [];
+      let newCategories: SuggestionCategory[] = [];
+      if (fetchedContacts.length > 0) newCategories.push({ title: 'Contacts You May Know', users: fetchedContacts });
+      if (segmentedFollowers.length > 0) newCategories.push({ title: 'People Who Follow You', users: segmentedFollowers });
+      if (segmentedSuggestions.length > 0) newCategories.push({ title: 'People You Might Know', users: segmentedSuggestions });
 
-      // Category 0: Contacts (High Priority)
-      if (fetchedContacts.length > 0) {
-        newCategories.push({
-          title: 'People you may know',
-          users: fetchedContacts,
-        });
-      }
-
-      // Category 1: People Who Follow You
-      if (segmentedFollowers.length > 0) {
-        newCategories.push({
-          title: 'People Who Follow You',
-          users: segmentedFollowers,
-        });
-      }
-
-      // Category 2: Suggested Accounts
-      if (segmentedSuggestions.length > 0) {
-        newCategories.push({
-          title: 'Suggested Accounts',
-          users: segmentedSuggestions,
-        });
+      if (newCategories.length === 0) {
+        console.log('🔄 All suggestions empty, fetching popular fallback...');
+        const popularUsers = await withTimeout(UsersAPI.getSuggested(user.uid, {
+          limit: 10,
+          excludeFollowing: Array.from(following)
+        }), 5000).catch(() => []);
+        if (popularUsers.length > 0) {
+          const transformed = popularUsers.map(u => ({
+            id: u.id,
+            username: u.username || '',
+            displayName: u.name || u.username || '',
+            name: u.name || u.username || '',
+            avatarUri: u.photoUrl,
+            profilePic: u.photoUrl,
+            profilePhoto: u.photoUrl,
+            isVerified: u.verified || false,
+            followerCount: u.followersCount || 0,
+            mutualFollowers: 0,
+            reason: 'popular' as const,
+          }));
+          transformed.forEach(u => userMap.set(u.id, u));
+          setSuggestionUsers(new Map(userMap));
+          newCategories.push({ title: 'People You Might Know', users: transformed });
+        }
       }
 
       setCategories(newCategories);
+      console.log('✅ [useSuggestions] Refresh completed successfully');
     } catch (error) {
-      console.error('Error refreshing suggestions:', error);
+      console.error('❌ [useSuggestions] Error refreshing suggestions:', error);
     } finally {
+      clearTimeout(safetyTimeoutId);
       setIsLoading(false);
     }
-  }, [user?.uid, isLoading, fetchGeneralSuggestions]);
+  }, [user?.uid, fetchGeneralSuggestions, setIsLoading, setCategories, setSuggestionUsers, updateLocalFollow]); // Removed categories.length and lastFetched
 
-  // Auto-fetch on mount
   useEffect(() => {
     if (user?.uid) {
-      refresh();
+      refresh(false);
     }
-  }, [user?.uid]); // Only depend on user.uid, refresh will be stable
+  }, [user?.uid, refresh]);
 
-  // Update categories when suggestionUsers change (for follow state updates)
   const updatedCategories = useMemo(() => {
+    // Audit: Centralized filtering happens here before rendering
+    // Rule: Suggestions = ALL_USERS − FOLLOWING − SELF
     return categories.map(category => ({
       ...category,
-      users: category.users.map(user => {
-        const updated = suggestionUsers.get(user.id);
-        return updated ? { ...user, ...updated } : user;
-      }),
-    }));
-  }, [categories, suggestionUsers]);
+      users: category.users
+        .map(u => {
+          const updated = suggestionUsers.get(u.id);
+          return updated ? { ...u, ...updated } : u;
+        })
+        .filter(u => {
+          const isFollowed = following.has(u.id);
+          const isSelf = u.id === user?.uid;
 
-  // Extract followers and suggestions from categories
+          if (__DEV__ && (isFollowed || isSelf)) {
+            console.log(`[useSuggestions] Filtering out user ${u.username} (${u.id}) - Followed: ${isFollowed}, Self: ${isSelf}`);
+          }
+
+          return !isFollowed && !isSelf;
+        }),
+    }))
+      .filter(category => category.users.length > 0); // Remove empty categories after filtering
+  }, [categories, suggestionUsers, following, user?.uid]);
+
   const followersCategory = updatedCategories.find(c => c.title === 'People Who Follow You');
-  const suggestionsCategory = updatedCategories.find(c => c.title === 'Suggested Accounts');
-
-  const contactsCategory = updatedCategories.find(c => c.title === 'People you may know');
+  // Handle both "People You Might Know" and "Suggested Accounts" for compatibility
+  const suggestionsCategory = updatedCategories.find(c => c.title === 'People You Might Know' || c.title === 'Suggested Accounts');
+  const contactsCategory = updatedCategories.find(c => c.title === 'Contacts You May Know');
 
   return {
     categories: updatedCategories,
@@ -367,7 +273,6 @@ export function useSuggestions(): UseSuggestionsReturn {
     suggestions: suggestionsCategory?.users || [],
     followersCount: followersCategory?.users.length || 0,
     suggestionsCount: suggestionsCategory?.users.length || 0,
-    // Expose contacts state for UI logic
     contactsPermissionGranted,
     contactsProcessed,
     contactSuggestions: contactsCategory?.users || [],

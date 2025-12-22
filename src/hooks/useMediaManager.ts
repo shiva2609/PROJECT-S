@@ -1,6 +1,15 @@
 import { useCallback } from 'react';
 import { launchImageLibrary, launchCamera, ImagePickerResponse, MediaType } from 'react-native-image-picker';
-import { Platform, PermissionsAndroid } from 'react-native';
+import { Platform, Alert } from 'react-native';
+import {
+  resolveMediaPermissionState,
+  requestMediaPermission,
+  showPermissionDialog,
+  validateImageOnly,
+  MediaPermissionType,
+  MediaPermissionState,
+  PermissionAction,
+} from '../utils/mediaPermissions';
 
 export interface MediaFile {
   uri: string;
@@ -12,7 +21,6 @@ export interface MediaFile {
 }
 
 interface UseMediaManagerReturn {
-  requestPermissions: () => Promise<boolean>;
   pickImage: (options?: { fromCamera?: boolean }) => Promise<MediaFile | null>;
   pickVideo: (options?: { fromCamera?: boolean }) => Promise<MediaFile | null>;
   compressImage: (file: MediaFile) => Promise<MediaFile>;
@@ -20,41 +28,58 @@ interface UseMediaManagerReturn {
 }
 
 /**
- * Global hook for managing media operations
- * Handles image/video picking, compression, and thumbnails
+ * 🔐 CONSOLIDATED MEDIA MANAGER
+ * 
+ * ALL permission handling delegated to mediaPermissions.ts
+ * 
+ * Responsibilities:
+ * - Media picking orchestration
+ * - Image-only validation (video exclusion)
+ * - Clean asset returns
+ * 
+ * NOT responsible for:
+ * - Permission requests (delegated to resolveMediaPermissionState)
+ * - Permission checks (delegated to requestMediaPermission)
+ * - Recovery UX (delegated to showPermissionDialog)
  */
 export function useMediaManager(): UseMediaManagerReturn {
-  const requestPermissions = useCallback(async (): Promise<boolean> => {
-    if (Platform.OS === 'android') {
-      try {
-        const granted = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
-          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-        ]);
-        
-        return (
-          granted['android.permission.CAMERA'] === PermissionsAndroid.RESULTS.GRANTED &&
-          granted['android.permission.READ_EXTERNAL_STORAGE'] === PermissionsAndroid.RESULTS.GRANTED
-        );
-      } catch (error) {
-        console.error('Error requesting permissions:', error);
-        return false;
+  /**
+   * Pick image with canonical permission handling
+   * 
+   * 🔐 INVARIANT: NO direct permission checks
+   * ALL permission logic delegated to mediaPermissions.ts
+   */
+  const pickImage = useCallback(async (options?: { fromCamera?: boolean }): Promise<MediaFile | null> => {
+    // 🔐 STEP 1: Resolve permission state through canonical resolver
+    const permissionType = options?.fromCamera
+      ? MediaPermissionType.CAMERA
+      : MediaPermissionType.GALLERY;
+
+    const resolution = await resolveMediaPermissionState(permissionType);
+
+    // 🔐 STEP 2: If no access, show recovery UX and BLOCK
+    if (!resolution.canAccess) {
+      // Check if we should request permission
+      if (resolution.action === PermissionAction.REQUEST) {
+        const requestResult = await requestMediaPermission(permissionType);
+
+        if (!requestResult.canAccess) {
+          // Still no access - show recovery dialog
+          showPermissionDialog(requestResult);
+          return null;
+        }
+        // Permission granted - proceed
+      } else {
+        // Blocked or other state - show recovery dialog
+        showPermissionDialog(resolution);
+        return null;
       }
     }
-    // iOS permissions are handled automatically by the picker
-    return true;
-  }, []);
 
-  const pickImage = useCallback(async (options?: { fromCamera?: boolean }): Promise<MediaFile | null> => {
-    const hasPermissions = await requestPermissions();
-    if (!hasPermissions) {
-      throw new Error('Camera or storage permissions not granted');
-    }
-
+    // 🔐 STEP 3: Permission granted - proceed with picker
     return new Promise((resolve, reject) => {
       const pickerOptions = {
-        mediaType: 'photo' as MediaType,
+        mediaType: 'photo' as MediaType, // 🔐 PRIMARY VIDEO EXCLUSION
         quality: 0.8,
         includeBase64: false,
       };
@@ -66,12 +91,41 @@ export function useMediaManager(): UseMediaManagerReturn {
         }
 
         if (response.errorCode) {
+          // Handle permission errors from picker
+          if (response.errorCode === 'permission' || response.errorCode === 'camera_unavailable') {
+            if (__DEV__) {
+              console.error('[useMediaManager] Picker permission error:', response.errorMessage);
+            }
+
+            // Show recovery UX
+            Alert.alert(
+              'Permission Required',
+              response.errorMessage || 'Unable to access media. Please check permissions in Settings.',
+              [
+                { text: 'OK' }
+              ]
+            );
+            resolve(null);
+            return;
+          }
+
           reject(new Error(response.errorMessage || 'Image picker error'));
           return;
         }
 
         const asset = response.assets?.[0];
         if (!asset) {
+          resolve(null);
+          return;
+        }
+
+        // 🔐 SECONDARY VIDEO EXCLUSION: Validate asset is image-only
+        if (!validateImageOnly(asset)) {
+          Alert.alert(
+            'Invalid Selection',
+            'Videos are not supported. Please select an image.',
+            [{ text: 'OK' }]
+          );
           resolve(null);
           return;
         }
@@ -91,14 +145,37 @@ export function useMediaManager(): UseMediaManagerReturn {
         launchImageLibrary(pickerOptions, callback);
       }
     });
-  }, [requestPermissions]);
+  }, []);
 
+  /**
+   * Pick video with canonical permission handling
+   * 
+   * 🔐 INVARIANT: NO direct permission checks
+   */
   const pickVideo = useCallback(async (options?: { fromCamera?: boolean }): Promise<MediaFile | null> => {
-    const hasPermissions = await requestPermissions();
-    if (!hasPermissions) {
-      throw new Error('Camera or storage permissions not granted');
+    // 🔐 STEP 1: Resolve permission state through canonical resolver
+    const permissionType = options?.fromCamera
+      ? MediaPermissionType.CAMERA
+      : MediaPermissionType.GALLERY;
+
+    const resolution = await resolveMediaPermissionState(permissionType);
+
+    // 🔐 STEP 2: If no access, show recovery UX and BLOCK
+    if (!resolution.canAccess) {
+      if (resolution.action === PermissionAction.REQUEST) {
+        const requestResult = await requestMediaPermission(permissionType);
+
+        if (!requestResult.canAccess) {
+          showPermissionDialog(requestResult);
+          return null;
+        }
+      } else {
+        showPermissionDialog(resolution);
+        return null;
+      }
     }
 
+    // 🔐 STEP 3: Permission granted - proceed with picker
     return new Promise((resolve, reject) => {
       const pickerOptions = {
         mediaType: 'video' as MediaType,
@@ -114,6 +191,20 @@ export function useMediaManager(): UseMediaManagerReturn {
         }
 
         if (response.errorCode) {
+          if (response.errorCode === 'permission' || response.errorCode === 'camera_unavailable') {
+            if (__DEV__) {
+              console.error('[useMediaManager] Picker permission error:', response.errorMessage);
+            }
+
+            Alert.alert(
+              'Permission Required',
+              response.errorMessage || 'Unable to access media. Please check permissions in Settings.',
+              [{ text: 'OK' }]
+            );
+            resolve(null);
+            return;
+          }
+
           reject(new Error(response.errorMessage || 'Video picker error'));
           return;
         }
@@ -140,7 +231,7 @@ export function useMediaManager(): UseMediaManagerReturn {
         launchImageLibrary(pickerOptions, callback);
       }
     });
-  }, [requestPermissions]);
+  }, []);
 
   const compressImage = useCallback(async (file: MediaFile): Promise<MediaFile> => {
     // Placeholder for compression logic
@@ -157,7 +248,6 @@ export function useMediaManager(): UseMediaManagerReturn {
   }, []);
 
   return {
-    requestPermissions,
     pickImage,
     pickVideo,
     compressImage,
@@ -165,3 +255,16 @@ export function useMediaManager(): UseMediaManagerReturn {
   };
 }
 
+// 🔐 DEPRECATED: Legacy permission API
+// This function is DEPRECATED and should NOT be used
+// Use resolveMediaPermissionState() from mediaPermissions.ts instead
+export function requestPermissions(): never {
+  if (__DEV__) {
+    throw new Error(
+      '🚨 DEPRECATED API VIOLATION: requestPermissions() is deprecated.\n' +
+      'Use resolveMediaPermissionState() from mediaPermissions.ts instead.\n' +
+      'This ensures consistent permission handling across the app.'
+    );
+  }
+  throw new Error('Deprecated API');
+}

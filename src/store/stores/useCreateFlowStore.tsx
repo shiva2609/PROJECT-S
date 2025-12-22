@@ -5,6 +5,7 @@ export type AspectRatio = '1:1' | '4:5' | '16:9';
 export interface Asset {
   id: string;
   uri: string;
+  finalUri?: string; // 🔐 ONE source of truth for previews
   width?: number;
   height?: number;
   createdAt?: number;
@@ -20,17 +21,18 @@ interface CreateFlowState {
   selectedImages: Asset[];
   globalRatio: AspectRatio;
   cropParams: { [id: string]: CropParams };
-  
+
   // Actions
   setSelectedImages: (images: Asset[]) => void;
   toggleSelectImage: (asset: Asset) => void;
   setGlobalRatio: (ratio: AspectRatio) => void;
   updateCropParams: (assetId: string, params: CropParams) => void;
+  updateAsset: (id: string, updates: Partial<Asset>) => void;
   resetCreateFlow: () => void;
 }
 
 const defaultCropParams = (): CropParams => ({
-  zoom: 1,
+  zoom: 0, // Sentinel for uninitialized
   offsetX: 0,
   offsetY: 0,
 });
@@ -60,7 +62,7 @@ export function CreateFlowProvider({ children }: { children: ReactNode }) {
     setSelectedImagesState((prev) => {
       const exists = prev.some((img) => img.id === asset.id);
       let newSelected: Asset[];
-      
+
       if (exists) {
         // Deselect
         newSelected = prev.filter((img) => img.id !== asset.id);
@@ -92,14 +94,16 @@ export function CreateFlowProvider({ children }: { children: ReactNode }) {
       const ratioChangeFactor = getRatioChangeFactor(prevRatio, ratio);
       setCropParamsState((prev) => {
         const newCropParams: { [id: string]: CropParams } = {};
-        
+
         Object.keys(prev).forEach((id) => {
           const params = prev[id];
-          newCropParams[id] = {
-            zoom: params.zoom,
-            offsetX: params.offsetX * ratioChangeFactor.x,
-            offsetY: params.offsetY * ratioChangeFactor.y,
-          };
+          if (params) {
+            newCropParams[id] = {
+              zoom: params.zoom,
+              offsetX: params.offsetX * ratioChangeFactor.x,
+              offsetY: params.offsetY * ratioChangeFactor.y,
+            };
+          }
         });
 
         return newCropParams;
@@ -113,6 +117,12 @@ export function CreateFlowProvider({ children }: { children: ReactNode }) {
       ...prev,
       [assetId]: params,
     }));
+  }, []);
+
+  const updateAsset = useCallback((id: string, updates: Partial<Asset>) => {
+    setSelectedImagesState((prev) =>
+      prev.map((img) => (img.id === id ? { ...img, ...updates } : img))
+    );
   }, []);
 
   const resetCreateFlow = useCallback(() => {
@@ -129,6 +139,7 @@ export function CreateFlowProvider({ children }: { children: ReactNode }) {
     toggleSelectImage,
     setGlobalRatio,
     updateCropParams,
+    updateAsset,
     resetCreateFlow,
   };
 

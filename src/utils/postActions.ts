@@ -27,6 +27,9 @@ import { useAuth } from '../providers/AuthProvider';
 import { useLikesManager } from '../hooks/useLikesManager';
 import { useSaveManager } from '../hooks/useSaveManager';
 import { useCommentsManager } from '../hooks/useCommentsManager';
+import { checkNetworkStatus } from '../hooks/useNetworkState';
+import { useSingleFlight } from '../hooks/useSingleFlight';
+import { AppError, ErrorType, withTimeout } from './AppError';
 import * as PostsAPI from '../services/posts/postsService';
 
 export interface PostActions {
@@ -58,10 +61,11 @@ export function usePostActions(
     commentCount?: number | ((prev: number) => number);
   }) => void
 ): PostActions {
-  const { user } = useAuth();
+  const { user, checkSession } = useAuth();
   const { toggleLike: toggleLikeInternal, isLiked: isLikedInternal } = useLikesManager();
   const { toggleSave: toggleSaveInternal, isSaved: isSavedInternal } = useSaveManager();
   const { addComment: addCommentInternal, deleteComment: deleteCommentInternal, getCommentCount } = useCommentsManager();
+  const singleFlight = useSingleFlight();
 
   /**
    * Toggle like with optimistic update
@@ -71,6 +75,9 @@ export function usePostActions(
     currentIsLiked?: boolean,
     onUpdate?: (isLiked: boolean, newCount: number) => void
   ): Promise<void> => {
+    // 🔐 AUTH GATE: Valid Session Check
+    checkSession();
+
     if (!user?.uid) {
       throw new Error('User must be authenticated');
     }
@@ -87,24 +94,46 @@ export function usePostActions(
       });
     }
 
-    try {
-      // Pass explicit state to manager to ensure atomic toggle
-      await toggleLikeInternal(postId, wasLiked);
-
-      // Final update after backend sync
-      if (onUpdate) {
-        onUpdate(!wasLiked, optimisticCount);
-      }
-    } catch (error) {
-      // Rollback on error
+    // 🔐 NETWORK GATE: Pre-flight Check
+    const isConnected = await checkNetworkStatus();
+    if (!isConnected) {
+      // Revert optimistic update immediately
       if (onPostUpdate) {
         onPostUpdate(postId, {
           isLiked: wasLiked,
           likeCount: (prev: number) => Math.max(0, prev - optimisticCount),
         });
       }
-      throw error;
+      throw new AppError('No internet connection', ErrorType.NETWORK);
     }
+
+    // 🔐 2. SINGLE FLIGHT GUARD: Prevent race conditions
+    // Use semantic key to block duplicate toggles for this specific post
+    const result = await singleFlight.execute(`like:${postId}`, async () => {
+      // 🔐 RE-CHECK SESSION inside lock (just in case)
+      checkSession();
+
+      try {
+        // Pass explicit state to manager to ensure atomic toggle
+        // 🔐 TIMEOUT: Wrap network call with 15s timeout
+        await withTimeout(toggleLikeInternal(postId, wasLiked), 15000);
+
+        // Final update after backend sync
+        if (onUpdate) {
+          onUpdate(!wasLiked, optimisticCount);
+        }
+      } catch (error) {
+        // Rollback on error
+        if (onPostUpdate) {
+          onPostUpdate(postId, {
+            isLiked: wasLiked,
+            likeCount: (prev: number) => Math.max(0, prev - optimisticCount),
+          });
+        }
+        // 🔐 ERROR: Normalize error
+        throw AppError.fromError(error);
+      }
+    });
   };
 
   /**
@@ -115,6 +144,9 @@ export function usePostActions(
     currentIsSaved?: boolean,
     onUpdate?: (isSaved: boolean) => void
   ): Promise<void> => {
+    // 🔐 AUTH GATE: Valid Session Check
+    checkSession();
+
     if (!user?.uid) {
       throw new Error('User must be authenticated');
     }
@@ -128,21 +160,38 @@ export function usePostActions(
       });
     }
 
-    try {
-      await toggleSaveInternal(postId, wasSaved);
-
-      if (onUpdate) {
-        onUpdate(!wasSaved);
-      }
-    } catch (error) {
-      // Rollback on error
+    // 🔐 NETWORK GATE: Pre-flight Check
+    const isConnected = await checkNetworkStatus();
+    if (!isConnected) {
       if (onPostUpdate) {
-        onPostUpdate(postId, {
-          isSaved: wasSaved,
-        });
+        onPostUpdate(postId, { isSaved: wasSaved });
       }
-      throw error;
+      throw new AppError('No internet connection', ErrorType.NETWORK);
     }
+
+    // 🔐 2. SINGLE FLIGHT GUARD
+    await singleFlight.execute(`save:${postId}`, async () => {
+      // 🔐 RE-CHECK SESSION inside lock
+      checkSession();
+
+      try {
+        // 🔐 TIMEOUT: Wrap network call
+        await withTimeout(toggleSaveInternal(postId, wasSaved), 15000);
+
+        if (onUpdate) {
+          onUpdate(!wasSaved);
+        }
+      } catch (error) {
+        // Rollback on error
+        if (onPostUpdate) {
+          onPostUpdate(postId, {
+            isSaved: wasSaved,
+          });
+        }
+        // 🔐 ERROR: Normalize error
+        throw AppError.fromError(error);
+      }
+    });
   };
 
   /**
@@ -153,6 +202,9 @@ export function usePostActions(
     text: string,
     onUpdate?: (newCount: number) => void
   ): Promise<void> => {
+    // 🔐 AUTH GATE: Valid Session Check
+    checkSession();
+
     if (!user?.uid) {
       throw new Error('User must be authenticated');
     }
@@ -164,22 +216,39 @@ export function usePostActions(
       });
     }
 
-    try {
-      await addCommentInternal(postId, text);
-
-      const newCount = getCommentCount(postId);
-      if (onUpdate) {
-        onUpdate(newCount);
-      }
-    } catch (error) {
-      // Rollback on error
+    // 🔐 NETWORK GATE
+    const isConnected = await checkNetworkStatus();
+    if (!isConnected) {
       if (onPostUpdate) {
         onPostUpdate(postId, {
           commentCount: (prev: number) => Math.max(0, prev - 1),
         });
       }
-      throw error;
+      throw new AppError('No internet connection. Cannot post comment.', ErrorType.NETWORK);
     }
+
+    // 🔐 1. SINGLE FLIGHT GUARD (Comments)
+    // Block duplicate submissions of the same text to the same post
+    await singleFlight.execute(`comment:${postId}`, async () => {
+      checkSession();
+
+      try {
+        await addCommentInternal(postId, text);
+
+        const newCount = getCommentCount(postId);
+        if (onUpdate) {
+          onUpdate(newCount);
+        }
+      } catch (error) {
+        // Rollback on error
+        if (onPostUpdate) {
+          onPostUpdate(postId, {
+            commentCount: (prev: number) => Math.max(0, prev - 1),
+          });
+        }
+        throw error;
+      }
+    });
   };
 
   /**

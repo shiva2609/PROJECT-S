@@ -51,8 +51,8 @@ export default function SuggestionCarousel({
 
   return (
     <View style={styles.container}>
-      {/* Category Header - Always show for "People Who Follow You", otherwise only if not compact */}
-      {(!compact || title === 'People Who Follow You') && (
+      {/* Category Header */}
+      {(true) && (
         <View style={styles.categoryHeader}>
           <Text style={styles.categoryTitle}>{title}</Text>
           {hasMore && (
@@ -60,7 +60,7 @@ export default function SuggestionCarousel({
               onPress={() => onViewMore && onViewMore(title, users)}
               style={styles.viewMoreButton}
             >
-              <Text style={styles.viewMoreText}>View More</Text>
+              <Text style={styles.viewMoreText}>View All</Text>
               <Icon name="chevron-forward" size={16} color={Colors.brand.primary} />
             </TouchableOpacity>
           )}
@@ -97,7 +97,7 @@ export default function SuggestionCarousel({
             >
               <View style={styles.viewMoreCardContent}>
                 <Icon name="arrow-forward-circle" size={32} color={Colors.brand.primary} />
-                <Text style={styles.viewMoreCardText}>View More</Text>
+                <Text style={styles.viewMoreCardText}>View All</Text>
               </View>
             </TouchableOpacity>
           ) : null

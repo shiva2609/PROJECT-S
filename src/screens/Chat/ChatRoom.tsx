@@ -24,6 +24,7 @@ import { Colors } from '../../theme/colors';
 // Replaced V1 imports with V2 MessagesAPI
 import { sendMessage, listenToMessages, setReadReceipt, Message } from '../../services/chat/MessagesAPI';
 import { markChatAsRead } from '../../services/notifications/notificationService';
+import { useProfilePhoto } from '../../hooks/useProfilePhoto';
 
 interface ChatRoomScreenProps {
   navigation: any;
@@ -64,8 +65,14 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
-  const [otherUserData, setOtherUserData] = useState<any>(null);
+  const [otherUserData, setOtherUserData] = useState<any>({
+    username: route?.params?.username || 'User',
+    photoUrl: route?.params?.profilePhoto
+  });
   const flatListRef = useRef<FlatList>(null);
+
+  // Smart caching for profile photo
+  const avatarUri = useProfilePhoto(otherUserId);
 
   useEffect(() => {
     if (otherUserId) {
@@ -135,30 +142,32 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
 
 
   // Auto-scroll to latest message when messages change
+  // Auto-scroll to latest message when messages change
   useEffect(() => {
+    let scrollTimer: NodeJS.Timeout;
+
     if (messages.length > 0 && flatListRef.current && !loading) {
       console.log('[ChatRoom] Auto-scrolling to latest message, count:', messages.length);
-      console.log('[ChatRoom] First message (latest):', messages[0]?.text?.substring(0, 50));
 
       // For inverted FlatList, index 0 is the latest message
       // Use a small delay to ensure FlatList has rendered
-      setTimeout(() => {
+      scrollTimer = setTimeout(() => {
         try {
-          console.log('[ChatRoom] Attempting scrollToIndex(0)');
           flatListRef.current?.scrollToIndex({
             index: 0,
-            animated: false, // Changed to false for immediate scroll
+            animated: false,
             viewPosition: 0,
           });
-          console.log('[ChatRoom] scrollToIndex successful');
         } catch (error) {
           console.log('[ChatRoom] scrollToIndex failed, using scrollToOffset');
-          // Fallback: scroll to offset 0 (top of inverted list = latest message)
+          // Fallback
           flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
         }
-      }, 150); // Increased delay for better reliability
+      }, 150);
     }
-  }, [messages, loading]); // Changed from messages.length to messages to fire on any change
+
+    return () => clearTimeout(scrollTimer);
+  }, [messages, loading]);
 
   const handleSendText = useCallback(async () => {
     if (!messageText.trim() || !user?.uid || !chatId) return;
@@ -237,16 +246,14 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
     );
   }, [user?.uid]);
 
-  // Fallback Rule: Name > Username > 'User'
-  const username = otherUserData?.name || otherUserData?.username || 'User';
-  const avatarUri = otherUserData?.photoUrl;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <GlassHeader
-        title={username}
+        title={otherUserData?.name || otherUserData?.username || 'User'}
         showBack={true}
         onBack={() => navigation.goBack()}
+        avatarUri={avatarUri}
         // V1: No call/video icons - calling not supported
         actions={[]}
       />
@@ -264,7 +271,7 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
           <View style={styles.emptyState}>
             <Icon name="chatbubbles-outline" size={64} color={Colors.black.qua} />
             <Text style={styles.emptyText}>No messages yet</Text>
-            <Text style={styles.emptySubtext}>Start your first conversation with {username}.</Text>
+            <Text style={styles.emptySubtext}>Start your first conversation with {otherUserData?.name || otherUserData?.username || 'User'}.</Text>
           </View>
         ) : (
           <FlatList

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView, ActivityIndicator, PermissionsAndroid, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { launchImageLibrary, launchCamera, MediaType } from 'react-native-image-picker';
 import storage from '@react-native-firebase/storage';
 import firestore from '@react-native-firebase/firestore';
@@ -7,6 +7,13 @@ import auth from '@react-native-firebase/auth';
 import { colors } from '../../utils/colors';
 import { useAuth } from '../../providers/AuthProvider';
 import Icon from 'react-native-vector-icons/Ionicons';
+import {
+  resolveMediaPermissionState,
+  requestMediaPermission,
+  showPermissionDialog,
+  MediaPermissionType,
+  PermissionAction,
+} from '../../utils/mediaPermissions';
 
 export default function CreateReelScreen({ navigation }: any) {
   const { user, authReady } = useAuth();
@@ -15,45 +22,9 @@ export default function CreateReelScreen({ navigation }: any) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  // Request storage permission for Android
-  const requestStoragePermission = async (): Promise<boolean> => {
-    if (Platform.OS === 'android') {
-      try {
-        // Android 13+ (API 33+) uses READ_MEDIA_VIDEO
-        if (Platform.Version >= 33) {
-          const granted = await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
-            {
-              title: 'Access Videos',
-              message: 'Sanchari needs access to your gallery to upload videos.',
-              buttonNeutral: 'Ask Me Later',
-              buttonNegative: 'Cancel',
-              buttonPositive: 'OK',
-            },
-          );
-          return granted === PermissionsAndroid.RESULTS.GRANTED;
-        } else {
-          // Android 12 and below use READ_EXTERNAL_STORAGE
-          const granted = await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
-            {
-              title: 'Access Videos',
-              message: 'Sanchari needs access to your gallery to upload videos.',
-              buttonNeutral: 'Ask Me Later',
-              buttonNegative: 'Cancel',
-              buttonPositive: 'OK',
-            },
-          );
-          return granted === PermissionsAndroid.RESULTS.GRANTED;
-        }
-      } catch (error) {
-        console.error('❌ Permission request error:', error);
-        return false;
-      }
-    }
-    // iOS permissions are handled automatically by react-native-image-picker
-    return true;
-  };
+  // 🔐 DEPRECATED: Custom permission logic removed
+  // ALL permission handling now delegated to mediaPermissions.ts
+  // See handleSelectVideo() for canonical permission flow
 
   // Wait for auth initialization BEFORE rendering any content
   if (!authReady) {
@@ -77,10 +48,25 @@ export default function CreateReelScreen({ navigation }: any) {
 
   const handleSelectVideo = async () => {
     try {
-      const granted = await requestStoragePermission();
-      if (!granted) {
-        Alert.alert('Permission Required', 'Please allow access to videos to upload reels.');
-        return;
+      // 🔐 STEP 1: Resolve permission state through canonical resolver
+      const resolution = await resolveMediaPermissionState(MediaPermissionType.GALLERY);
+
+      // 🔐 STEP 2: Handle permission state
+      if (!resolution.canAccess) {
+        if (resolution.action === PermissionAction.REQUEST) {
+          const requestResult = await requestMediaPermission(MediaPermissionType.GALLERY);
+
+          if (!requestResult.canAccess) {
+            // Still no access - show recovery dialog
+            showPermissionDialog(requestResult);
+            return;
+          }
+          // Permission granted - proceed
+        } else {
+          // Blocked or other state - show recovery dialog
+          showPermissionDialog(resolution);
+          return;
+        }
       }
 
       const result = await launchImageLibrary({

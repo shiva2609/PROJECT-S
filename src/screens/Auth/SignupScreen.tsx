@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { ScreenLayout } from '../../components/layout/ScreenLayout';
 import { colors } from '../../utils/colors';
 import { useDispatch } from 'react-redux';
 import { FontFamily } from '../../GlobalStyles';
@@ -153,88 +153,94 @@ export default function SignupScreen({ navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Text style={styles.welcometitle}>Welocome to Sanchari!</Text>
-        <Text style={styles.title}>Register to get started</Text>
+    <ScreenLayout
+      scrollable
+      keyboardAvoiding
+      backgroundColor={colors.surface}
+      scrollViewProps={{
+        contentContainerStyle: styles.scroll,
+        keyboardShouldPersistTaps: 'handled'
+      }}
+    >
+      <Text style={styles.welcometitle}>Welocome to Sanchari!</Text>
+      <Text style={styles.title}>Register to get started</Text>
 
-        <TextInput
-          placeholder="Username"
-          placeholderTextColor={colors.mutedText}
-          style={styles.input}
-          autoCapitalize="none"
-          value={form.username}
-          onChangeText={(text) => setForm(prev => ({ ...prev, username: text }))}
-        />
-        {validation.username === 'available' ? (
-          <Text style={styles.validText}> Username available</Text>
-        ) : validation.username === 'taken' ? (
-          <Text style={styles.errorText}> Username not available</Text>
-        ) : validation.username === 'invalid' ? (
-          <Text style={styles.errorText}> Username cannot contain @</Text>
-        ) : validation.username === 'checking' ? (
-          <Text style={styles.mutedSmall}>Checking availability…</Text>
-        ) : null}
+      <TextInput
+        placeholder="Username"
+        placeholderTextColor={colors.mutedText}
+        style={styles.input}
+        autoCapitalize="none"
+        value={form.username}
+        onChangeText={(text) => setForm(prev => ({ ...prev, username: text }))}
+      />
+      {validation.username === 'available' ? (
+        <Text style={styles.validText}> Username available</Text>
+      ) : validation.username === 'taken' ? (
+        <Text style={styles.errorText}> Username not available</Text>
+      ) : validation.username === 'invalid' ? (
+        <Text style={styles.errorText}> Username cannot contain @</Text>
+      ) : validation.username === 'checking' ? (
+        <Text style={styles.mutedSmall}>Checking availability…</Text>
+      ) : null}
 
-        <TextInput
-          placeholder="Email"
-          placeholderTextColor={colors.mutedText}
-          style={styles.input}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          value={form.email}
-          onChangeText={(text) => setForm(prev => ({ ...prev, email: text }))}
-        />
-        {validation.email === 'valid' ? (
-          <Text style={styles.validText}> Valid email</Text>
-        ) : validation.email === 'invalid' ? (
-          <Text style={styles.errorText}> Please enter a valid email address.</Text>
-        ) : null}
+      <TextInput
+        placeholder="Email"
+        placeholderTextColor={colors.mutedText}
+        style={styles.input}
+        autoCapitalize="none"
+        keyboardType="email-address"
+        value={form.email}
+        onChangeText={(text) => setForm(prev => ({ ...prev, email: text }))}
+      />
+      {validation.email === 'valid' ? (
+        <Text style={styles.validText}> Valid email</Text>
+      ) : validation.email === 'invalid' ? (
+        <Text style={styles.errorText}> Please enter a valid email address.</Text>
+      ) : null}
 
-        <TextInput
-          placeholder="Password"
-          placeholderTextColor={colors.mutedText}
-          style={styles.input}
-          secureTextEntry
-          value={form.password}
-          onChangeText={(text) => setForm(prev => ({ ...prev, password: text }))}
-        />
-        {validation.password === 'invalid' ? (
-          <Text style={styles.errorText}> Password must be at least 8 alphanumeric characters</Text>
-        ) : validation.password === 'valid' ? (
-          <Text style={styles.validText}> Strong password</Text>
-        ) : null}
+      <TextInput
+        placeholder="Password"
+        placeholderTextColor={colors.mutedText}
+        style={styles.input}
+        secureTextEntry
+        value={form.password}
+        onChangeText={(text) => setForm(prev => ({ ...prev, password: text }))}
+      />
+      {validation.password === 'invalid' ? (
+        <Text style={styles.errorText}> Password must be at least 8 alphanumeric characters</Text>
+      ) : validation.password === 'valid' ? (
+        <Text style={styles.validText}> Strong password</Text>
+      ) : null}
 
-        <TextInput
-          placeholder="Confirm password"
-          placeholderTextColor={colors.mutedText}
-          style={styles.input}
-          secureTextEntry
-          value={form.confirmPassword}
-          onChangeText={(text) => setForm(prev => ({ ...prev, confirmPassword: text }))}
-        />
-        {validation.confirmPassword === 'mismatch' ? (
-          <Text style={styles.errorText}> Passwords do not match</Text>
-        ) : validation.confirmPassword === 'match' ? (
-          <Text style={styles.validText}> Passwords match</Text>
-        ) : null}
+      <TextInput
+        placeholder="Confirm password"
+        placeholderTextColor={colors.mutedText}
+        style={styles.input}
+        secureTextEntry
+        value={form.confirmPassword}
+        onChangeText={(text) => setForm(prev => ({ ...prev, confirmPassword: text }))}
+      />
+      {validation.confirmPassword === 'mismatch' ? (
+        <Text style={styles.errorText}> Passwords do not match</Text>
+      ) : validation.confirmPassword === 'match' ? (
+        <Text style={styles.validText}> Passwords match</Text>
+      ) : null}
 
-        <TouchableOpacity
-          style={[styles.primaryBtn, (!isFormValid || loading) && styles.primaryBtnDisabled]}
-          onPress={onSignup}
-          disabled={!isFormValid || loading}
-        >
-          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Register</Text>}
+      <TouchableOpacity
+        style={[styles.primaryBtn, (!isFormValid || loading) && styles.primaryBtnDisabled]}
+        onPress={onSignup}
+        disabled={!isFormValid || loading}
+      >
+        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Register</Text>}
+      </TouchableOpacity>
+
+      <View style={styles.bottomRow}>
+        <Text style={styles.muted}>Already have an account? </Text>
+        <TouchableOpacity onPress={() => navigation.navigate('AuthLogin')}>
+          <Text style={styles.linkStrong}>Login Now</Text>
         </TouchableOpacity>
-
-        <View style={styles.bottomRow}>
-          <Text style={styles.muted}>Already have an account? </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('AuthLogin')}>
-            <Text style={styles.linkStrong}>Login Now</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </ScreenLayout>
   );
 }
 

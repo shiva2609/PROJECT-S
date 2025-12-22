@@ -12,10 +12,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useColorScheme } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { navigateToScreen } from '../../utils/navigationHelpers';
 import { useAuth } from '../../providers/AuthProvider';
+import {
+  validateFinalMediaArray,
+  assertIsFinalizedBitmap,
+  logInvariantCheck,
+} from '../../utils/imagePipelineInvariants';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const PREVIEW_HEIGHT = SCREEN_HEIGHT - 200;
@@ -57,19 +63,54 @@ export default function PostPreviewScreen({ navigation, route }: PostPreviewScre
   console.log('🟡 [PostPreviewScreen] Navigation state:', {
     canGoBack: navigation.canGoBack?.(),
   });
-  
+
   const { croppedMedia, postType, currentIndex: initialIndex = 0 } = route.params;
   const { user } = useAuth();
+  const theme = useColorScheme();
+  const isDark = theme === 'dark';
+
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
+
+  // Theme-aware colors
+  const bgColor = isDark ? Colors.black.primary : Colors.white.primary;
+  const textColor = isDark ? Colors.white.primary : Colors.black.primary;
+  const subBgColor = isDark ? '#262626' : Colors.white.secondary;
   const scrollViewRef = useRef<ScrollView>(null);
-  
+
   useEffect(() => {
     console.log('🟡 [PostPreviewScreen] useEffect - Component mounted');
     console.trace('🟡 [PostPreviewScreen] Stack trace of where this screen was navigated from:');
+
+    // 🔐 INVARIANT ENFORCEMENT: Validate finalMedia array on mount
+    // This ensures we NEVER render preview with invalid/missing finalUri
+    if (__DEV__) {
+      try {
+        validateFinalMediaArray(croppedMedia, 'PostPreviewScreen.mount');
+        logInvariantCheck(
+          'PostPreviewScreen.mount',
+          true,
+          `All ${croppedMedia?.length || 0} media items validated`
+        );
+      } catch (error: any) {
+        // Invariant violation - block rendering and show error
+        console.error('🚨 [PostPreviewScreen] INVARIANT VIOLATION:', error.message);
+        Alert.alert(
+          'Development Error: Invalid Media',
+          error.message + '\n\nPreview cannot be rendered. Please check crop completion.',
+          [
+            {
+              text: 'Go Back',
+              onPress: () => navigation.goBack(),
+            },
+          ]
+        );
+      }
+    }
+
     return () => {
       console.log('🔴 [PostPreviewScreen] useEffect cleanup - Component unmounting');
     };
-  }, []);
+  }, [croppedMedia, navigation]);
 
   useEffect(() => {
     if (initialIndex > 0) {
@@ -125,8 +166,33 @@ export default function PostPreviewScreen({ navigation, route }: PostPreviewScre
     const isVideo = item.type === 'video';
     const ratio = item.ratio || item.cropData?.ratio || '4:5';
     const previewHeight = getPreviewHeight(ratio);
-    const imageUri = item.finalUri; // Use only finalUri
-    
+
+    // 🔐 INVARIANT ENFORCEMENT: ONLY finalUri is allowed for rendering
+    // No fallbacks, no original URIs
+    const imageUri = item.finalUri;
+
+    // 🔐 INVARIANT CHECK: Validate finalUri before rendering
+    if (__DEV__) {
+      assertIsFinalizedBitmap(
+        imageUri,
+        `PostPreviewScreen.renderMediaItem[${index}]`
+      );
+    }
+
+    // Block rendering if finalUri is missing (should never happen after validation)
+    if (!imageUri) {
+      if (__DEV__) {
+        console.error(`🚨 [PostPreviewScreen] Item ${index} missing finalUri - cannot render`);
+      }
+      return (
+        <View key={index} style={[styles.mediaItem, { height: previewHeight }]}>
+          <Text style={{ color: Colors.white.primary, textAlign: 'center' }}>
+            Error: Missing finalUri
+          </Text>
+        </View>
+      );
+    }
+
     return (
       <View key={index} style={[styles.mediaItem, { height: previewHeight }]}>
         <Image
@@ -144,16 +210,16 @@ export default function PostPreviewScreen({ navigation, route }: PostPreviewScre
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: bgColor }]} edges={['top']}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: bgColor, borderBottomColor: isDark ? Colors.black.tertiary : Colors.white.tertiary, borderBottomWidth: 1 }]}>
         <TouchableOpacity
           style={styles.headerButton}
           onPress={() => navigation.goBack()}
         >
-          <Icon name="arrow-back" size={24} color={Colors.black.primary} />
+          <Icon name="arrow-back" size={24} color={textColor} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Preview</Text>
+        <Text style={[styles.headerTitle, { color: textColor }]}>Preview</Text>
         <TouchableOpacity
           style={styles.headerButton}
           onPress={handleEdit}
@@ -180,7 +246,7 @@ export default function PostPreviewScreen({ navigation, route }: PostPreviewScre
 
       {/* Thumbnail Strip */}
       {croppedMedia.length > 1 && (
-        <View style={styles.thumbnailContainer}>
+        <View style={[styles.thumbnailContainer, { backgroundColor: bgColor }]}>
           <FlatList
             data={croppedMedia}
             horizontal
@@ -191,13 +257,14 @@ export default function PostPreviewScreen({ navigation, route }: PostPreviewScre
                 style={[
                   styles.thumbnail,
                   currentIndex === index && styles.thumbnailActive,
+                  { backgroundColor: subBgColor }
                 ]}
                 onPress={() => handleThumbnailPress(index)}
               >
                 <Image
                   source={{ uri: item.finalUri }}
                   style={styles.thumbnailImage}
-                  resizeMode="cover"
+                  resizeMode="contain" // 🔐 FIX: Consistency
                 />
                 {item.type === 'video' && (
                   <View style={styles.thumbnailVideoIcon}>

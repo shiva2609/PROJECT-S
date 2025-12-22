@@ -10,6 +10,7 @@ import Animated, {
 import { Colors } from '../../theme/colors';
 import type { CropParams } from '../../store/stores/useCreateFlowStore';
 import { calculateMinScale } from '../../utils/cropMath';
+import { useColorScheme } from 'react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -32,6 +33,10 @@ export default function EditCropBox({
   initialParams,
   onParamsChange,
 }: EditCropBoxProps) {
+  const theme = useColorScheme();
+  const isDark = theme === 'dark';
+  const frameColor = Colors.brand.primary;
+
   const translateX = useSharedValue(initialParams.offsetX);
   const translateY = useSharedValue(initialParams.offsetY);
   const scale = useSharedValue(initialParams.zoom);
@@ -74,7 +79,7 @@ export default function EditCropBox({
       const scaledHeight = imageHeight * scale.value;
       const maxTranslateX = Math.max(0, (scaledWidth - cropWidth) / 2);
       const maxTranslateY = Math.max(0, (scaledHeight - cropHeight) / 2);
-      
+
       const clampedX = Math.max(-maxTranslateX, Math.min(maxTranslateX, translateX.value));
       const clampedY = Math.max(-maxTranslateY, Math.min(maxTranslateY, translateY.value));
 
@@ -105,7 +110,7 @@ export default function EditCropBox({
       const scaledHeight = imageHeight * scale.value;
       const maxTranslateX = Math.max(0, (scaledWidth - cropWidth) / 2);
       const maxTranslateY = Math.max(0, (scaledHeight - cropHeight) / 2);
-      
+
       const clampedX = Math.max(-maxTranslateX, Math.min(maxTranslateX, translateX.value));
       const clampedY = Math.max(-maxTranslateY, Math.min(maxTranslateY, translateY.value));
 
@@ -150,7 +155,7 @@ export default function EditCropBox({
     const scaledHeight = imageHeight * scale.value;
     const maxTranslateX = Math.max(0, (scaledWidth - cropWidth) / 2);
     const maxTranslateY = Math.max(0, (scaledHeight - cropHeight) / 2);
-    
+
     const clampedX = Math.max(-maxTranslateX, Math.min(maxTranslateX, translateX.value));
     const clampedY = Math.max(-maxTranslateY, Math.min(maxTranslateY, translateY.value));
 
@@ -186,16 +191,18 @@ export default function EditCropBox({
           </Animated.View>
         </GestureDetector>
       </View>
-      {/* Crop overlay */}
-      <View style={styles.overlay} pointerEvents="none">
-        <View style={styles.overlayTop} />
-        <View style={styles.overlayMiddle}>
-          <View style={styles.overlayLeft} />
-          <View style={[styles.cropFrame, { width: cropWidth, height: cropHeight }]} />
-          <View style={styles.overlayRight} />
-        </View>
-        <View style={styles.overlayBottom} />
-      </View>
+      {/* 🔐 Simple Frame Overlay - Consistency Fixed */}
+      <View
+        style={[
+          styles.cropFrame,
+          {
+            width: cropWidth,
+            height: cropHeight,
+            borderColor: frameColor
+          }
+        ]}
+        pointerEvents="none"
+      />
     </View>
   );
 }
@@ -217,36 +224,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  overlayTop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '50%',
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-  },
-  overlayMiddle: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: '100%',
-  },
-  overlayLeft: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-  },
   cropFrame: {
+    ...StyleSheet.absoluteFillObject,
     borderWidth: 2,
     borderColor: Colors.white.primary,
   },
   overlayRight: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
   },
   overlayBottom: {
     position: 'absolute',
@@ -254,7 +238,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: '50%',
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
   },
 });
 

@@ -46,8 +46,14 @@ export default function FollowingSuggestions({
   } = useSuggestions();
   const [contactsModalVisible, setContactsModalVisible] = useState(false);
 
+  useEffect(() => {
+    console.log('✅ [FollowingSuggestions] COMPONENT MOUNTED');
+  }, []);
+
   // Safety check: Ensure categories is always an array
   const safeCategories = Array.isArray(categories) ? categories : [];
+
+  console.log('🔍 [FollowingSuggestions] RENDER - categories:', safeCategories.length, 'loading:', loading);
 
   // Handle follow state change from SuggestionCard - memoized to prevent infinite loops
   const handleFollowChange = useCallback((userId: string, isFollowing: boolean) => {
@@ -107,34 +113,29 @@ export default function FollowingSuggestions({
     console.log('[FollowingSuggestions] Categories to render:', categoriesToRender.length, categoriesToRender.map(c => ({ title: c.title, count: c.users?.length || 0 })));
   }
 
-  // Show loading state only if loading and no categories yet
+  // Show subtle loading state if no categories yet
   if (loading && safeCategories.length === 0) {
-    return null; // Don't show loading placeholders - wait for actual suggestions
+    return (
+      <View style={[styles.container, { paddingVertical: 40, alignItems: 'center' }]}>
+        <ActivityIndicator size="small" color={Colors.brand.primary} />
+      </View>
+    );
   }
 
   // Determine if we should show the persistent permission card
-  // Rule: Show ONLY if permission NOT granted AND NOT processed
-  const shouldShowContactsCard = showContactsCard && !contactsPermissionGranted && !contactsProcessed;
+  // Show if: (a) Explicitly requested AND (b) Contacts haven't been fully processed/uploaded yet
+  const shouldShowContactsCard = showContactsCard && !contactsProcessed;
 
-  // CRITICAL: If no suggestions and allowed to show permission card
+  // If no recommendations and we have the contacts card to show, show it
   if (categoriesToRender.length === 0) {
     if (shouldShowContactsCard) {
-      console.log('[FollowingSuggestions] No suggestions - showing contacts card');
       return (
         <View style={[styles.container, compact && styles.compactContainer]}>
-          <ContactsPermissionCard onSuccess={refresh} />
+          <ContactsPermissionCard onSuccess={() => refresh(true)} />
         </View>
       );
     } else {
-      console.log('[FollowingSuggestions] No suggestions available - not rendering component');
-      // If we have contact suggestions, they would be in categoriesToRender.
-      // If categoriesToRender is empty, and we shouldn't show permission card -> Empty state or null.
-      if (contactsPermissionGranted && contactsProcessed) {
-        // Optional: Render specific empty state "No contacts found"
-        // But for now, returning null is standard behavior for empty suggestions
-        // A placeholder could be added here if desired.
-        return null;
-      }
+      console.log('🔍 [FollowingSuggestions] NO SUGGESTIONS PATH TAKEN');
       return null;
     }
   }
@@ -161,7 +162,7 @@ export default function FollowingSuggestions({
         console.log('[FollowingSuggestions] Rendering category:', category.title, 'with', category.users.length, 'users');
 
         // Convert SuggestionUser to SuggestionCandidate
-        const candidateUsers: SuggestionCandidate[] = category.users.map((user) => ({
+        const candidateUsers: SuggestionCandidate[] = category.users.map((user: any) => ({
           id: user.id,
           name: user.displayName || user.name || user.username || 'User',
           username: user.username || '',
@@ -208,9 +209,8 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     backgroundColor: Colors.white.secondary,
-    paddingTop: 0, // Start immediately below header - no top padding
-    paddingBottom: 20,
-    // NO flex:1, NO bottom alignment - stays at top
+    paddingTop: 0,
+    paddingBottom: 0,
   },
   compactContainer: {
     paddingTop: 0,
@@ -246,10 +246,21 @@ const styles = StyleSheet.create({
     color: Colors.brand.primary,
   },
   categoryWrapper: {
-    marginBottom: 16,
+    marginBottom: 8,
   },
   contactsCardWrapper: {
     marginTop: 8,
     marginBottom: 8,
+  },
+  loadingWrapper: {
+    paddingVertical: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: Colors.black.qua,
   },
 });
