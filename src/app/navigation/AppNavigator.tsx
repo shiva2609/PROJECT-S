@@ -104,16 +104,12 @@ export function Tabs() {
   );
 }
 
-import { useBootGate } from '../../providers/BootGate';
 
 // ... imports
 
 export default function AppNavigator() {
   const { user } = useAuth();
-  const { isAppReady } = useBootGate();
-
-  // Legacy loading logic removed as BootGate handles global loading state.
-  // The navigator is only mounted when BootGate allows it (APP_READY or NEW_USER).
+  // The navigator is only mounted when AppBootstrap allows it.
 
   // Determine initial route based on explicit user state
   // Route all users (new or existing) to MainTabs

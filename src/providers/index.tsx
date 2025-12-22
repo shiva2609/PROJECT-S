@@ -18,7 +18,7 @@ import { ThemeProvider } from './ThemeProvider';
 import { ErrorBoundary } from './ErrorBoundary';
 import { CreateFlowProvider } from '../store/stores/useCreateFlowStore';
 import { SuggestionsProvider } from '../store/stores/useSuggestionsStore';
-import { BootGate } from './BootGate';
+import { AppBootstrap } from '../app/AppBootstrap';
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -35,7 +35,7 @@ export function AppProviders({ children }: AppProvidersProps) {
         <GestureHandlerRootView style={{ flex: 1 }}>
           <Provider store={store}>
             <AuthProvider>
-              <BootGate>
+              <AppBootstrap>
                 <UserProvider>
                   <UserRelationProvider>
                     <MessageProvider>
@@ -49,7 +49,7 @@ export function AppProviders({ children }: AppProvidersProps) {
                     </MessageProvider>
                   </UserRelationProvider>
                 </UserProvider>
-              </BootGate>
+              </AppBootstrap>
             </AuthProvider>
           </Provider>
         </GestureHandlerRootView>
