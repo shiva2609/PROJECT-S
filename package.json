@@ -17,7 +17,6 @@
     "docs:dev": "node documentation-site/server.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-camera-roll/camera-roll": "^7.10.2",
     "@react-native-community/blur": "^4.4.1",
@@ -25,6 +24,7 @@
     "@react-native-firebase/app": "^23.5.0",
     "@react-native-firebase/auth": "^23.5.0",
     "@react-native-firebase/firestore": "^23.5.0",
+    "@react-native-firebase/functions": "^23.7.0",
     "@react-native-firebase/storage": "^23.5.0",
     "@react-navigation/bottom-tabs": "^7.6.0",
     "@react-navigation/drawer": "^7.7.2",

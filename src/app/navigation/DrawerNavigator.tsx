@@ -60,15 +60,15 @@ export default function DrawerNavigator() {
       }}
     >
       {/* Main Tabs as the initial screen */}
-      <Drawer.Screen 
-        name="MainTabsContent" 
+      <Drawer.Screen
+        name="MainTabsContent"
         component={Tabs}
         options={{
           drawerLabel: 'Home',
           drawerItemStyle: { display: 'none' }, // Hide from drawer menu
         }}
       />
-      
+
       {/* Drawer Menu Screens */}
       <Drawer.Screen name="Dashboard" component={DashboardScreen} />
       <Drawer.Screen name="Host Tools" component={HostToolsScreen} />
@@ -82,10 +82,10 @@ export default function DrawerNavigator() {
       <Drawer.Screen name="Help & Support" component={HelpSupportScreen} />
       <Drawer.Screen name="Terms & Policies" component={TermsPoliciesScreen} />
       <Drawer.Screen name="Logout" component={LogoutScreen} />
-      
+
       {/* Super Admin Dashboard */}
-      <Drawer.Screen 
-        name="SuperAdminDashboard" 
+      <Drawer.Screen
+        name="SuperAdminDashboard"
         component={SuperAdminDashboardScreen}
         options={{
           drawerItemStyle: { display: 'none' }, // Hide from drawer menu (shown conditionally in CustomDrawerContent)

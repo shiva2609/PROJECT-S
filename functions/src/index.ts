@@ -1,14 +1,28 @@
 /**
- * Cloud Functions for Account Change Approval
+ * Cloud Functions for Account Change Approval and AI Services
  * 
- * This function handles the final approval of account change requests
- * and updates the user's accountType in Firestore.
+ * Environment Configuration:
+ * - Local: Uses .env file (via dotenv)
+ * - Production: Uses Firebase Functions config
  */
 
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 
+// Load environment variables for local development
+// In production, Firebase Functions config takes precedence
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require('dotenv').config();
+  } catch (error) {
+    // dotenv not installed or .env file missing - that's okay
+    console.log('Running without .env file');
+  }
+}
+
 admin.initializeApp();
+
 
 /**
  * When an upgrade request is approved, update the user's accountType
@@ -148,5 +162,242 @@ export const autoVerifyStep = functions.https.onCall(async (data, context) => {
   // For example, validate PAN number via third-party API
 
   return { success: true, stepKey };
+});
+
+/**
+ * Build AI-Powered Itinerary
+ * 
+ * Generates travel itineraries using Google Gemini AI
+ * 
+ * Security:
+ * - Requires authentication
+ * - API key stored in environment variable
+ * - Input validation and sanitization
+ * - Error sanitization (no sensitive data leaked)
+ * 
+ * @param data - Itinerary request parameters
+ * @param context - Firebase callable context
+ * @returns { itineraryText: string }
+ */
+export const buildItinerary = functions.https.onCall(async (data, context) => {
+  // 1. Authentication Check
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'Authentication required to generate itineraries'
+    );
+  }
+
+  const userId = context.auth.uid;
+  console.log(`Itinerary request from user: ${userId}`);
+
+  // 2. Input Validation
+  const { destination, startDate, endDate, travelers, preferences } = data;
+
+  // Validate destination
+  if (!destination || typeof destination !== 'string') {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Destination is required and must be a string'
+    );
+  }
+  if (destination.trim().length === 0) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Destination cannot be empty'
+    );
+  }
+  if (destination.length > 100) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Destination must be 100 characters or less'
+    );
+  }
+
+  // Validate dates
+  if (!startDate || typeof startDate !== 'string') {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Start date is required and must be an ISO string'
+    );
+  }
+  if (!endDate || typeof endDate !== 'string') {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'End date is required and must be an ISO string'
+    );
+  }
+
+  const startDateObj = new Date(startDate);
+  const endDateObj = new Date(endDate);
+
+  if (isNaN(startDateObj.getTime())) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Start date is not a valid ISO date string'
+    );
+  }
+  if (isNaN(endDateObj.getTime())) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'End date is not a valid ISO date string'
+    );
+  }
+  if (endDateObj <= startDateObj) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'End date must be after start date'
+    );
+  }
+
+  // Validate travelers
+  if (typeof travelers !== 'number') {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Travelers must be a number'
+    );
+  }
+  if (!Number.isInteger(travelers)) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Travelers must be an integer'
+    );
+  }
+  if (travelers < 1 || travelers > 20) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Travelers must be between 1 and 20'
+    );
+  }
+
+  // Validate preferences (optional)
+  if (preferences !== undefined && preferences !== null) {
+    if (typeof preferences !== 'string') {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Preferences must be a string'
+      );
+    }
+    if (preferences.length > 300) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Preferences must be 300 characters or less'
+      );
+    }
+  }
+
+  // 3. Get API Key from Environment
+  // Local: process.env.GEMINI_API_KEY (from .env file)
+  // Production: functions.config().gemini.api_key
+  let apiKey: string | undefined;
+
+  try {
+    // Try Firebase Functions config first (production)
+    apiKey = functions.config().gemini?.api_key;
+  } catch (error) {
+    // Fallback to process.env for local development
+    apiKey = process.env.GEMINI_API_KEY;
+  }
+
+  // If still not found, try process.env directly (emulator)
+  if (!apiKey) {
+    apiKey = process.env.GEMINI_API_KEY;
+  }
+
+  if (!apiKey) {
+    console.error('GEMINI_API_KEY not configured in environment');
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'AI service is not properly configured. Please contact support.'
+    );
+  }
+
+  // 4. Generate Itinerary using Gemini AI
+  try {
+    // Import Gemini SDK (only in this function)
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+
+    // Use gemini-1.5-flash
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+    // Calculate trip duration
+    const durationDays = Math.ceil(
+      (endDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    // Build prompt
+    const prompt = `Create a detailed ${durationDays}-day travel itinerary for ${destination}.
+
+Trip Details:
+- Destination: ${destination}
+- Start Date: ${startDate}
+- End Date: ${endDate}
+- Number of Travelers: ${travelers}
+${preferences ? `- Preferences: ${preferences}` : ''}
+
+Please provide:
+1. A day-by-day breakdown with morning, afternoon, and evening activities
+2. Recommended places to visit
+3. Local cuisine suggestions
+4. Transportation tips
+5. Budget-friendly options where applicable
+
+Format the response in a clear, structured manner with headings for each day.`;
+
+    console.log(`Generating itinerary for ${destination} (${durationDays} days)`);
+
+    // Call Gemini API
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const itineraryText = response.text();
+
+    if (!itineraryText || itineraryText.trim().length === 0) {
+      throw new Error('AI returned empty response');
+    }
+
+    console.log(`Itinerary generated successfully (${itineraryText.length} chars)`);
+
+    // 5. Return sanitized response (ONLY the itinerary text)
+    return {
+      itineraryText: itineraryText.trim(),
+    };
+
+  } catch (error: any) {
+    // 6. Error Handling - Sanitize errors before returning
+    console.error('❌ Error in buildItinerary:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', JSON.stringify(error, null, 2));
+
+    // Don't expose internal error details to client
+    if (error.message?.includes('API key') || error.message?.includes('not found for API')) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'AI service authentication failed. Please contact support.'
+      );
+    }
+
+    if (error.message?.includes('quota') || error.message?.includes('rate limit')) {
+      throw new functions.https.HttpsError(
+        'resource-exhausted',
+        'AI service is temporarily unavailable. Please try again later.'
+      );
+    }
+
+    if (error.message?.includes('timeout')) {
+      throw new functions.https.HttpsError(
+        'deadline-exceeded',
+        'Request timed out. Please try again.'
+      );
+    }
+
+    // Generic error for anything else
+    throw new functions.https.HttpsError(
+      'internal',
+      'Failed to generate itinerary. Please try again later.'
+    );
+  }
 });
 

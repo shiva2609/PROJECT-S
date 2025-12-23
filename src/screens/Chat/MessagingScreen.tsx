@@ -20,8 +20,6 @@ import { listenToDirectMessages, sendMessage, ChatMessage } from '../../services
 import { getCopilotChatMessages } from '../../services/chat/chatService';
 import { collection, query, orderBy, onSnapshot } from '../../core/firebase/compat';
 import { db } from '../../core/firebase';
-import ItineraryCard from '../../components/itinerary/ItineraryCard';
-import { ItineraryResponse } from '../../services/itinerary/generateItinerary';
 import { markChatAsRead } from '../../services/notifications/notificationService';
 import { useProfilePhoto } from '../../hooks/useProfilePhoto';
 import { getDefaultProfilePhoto, isDefaultProfilePhoto } from '../../services/users/userProfilePhotoService';
@@ -46,10 +44,10 @@ interface CopilotMessage {
   messageType?: string;
   text?: string;
   content?: string;
-  itineraryData?: ItineraryResponse;
   timestamp?: number;
   createdAt?: any;
 }
+
 
 export default function MessagingScreen({ navigation, route }: MessagingScreenProps) {
   const { user } = useAuth();
@@ -165,7 +163,6 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
 
   const renderMessage = ({ item, index }: { item: ChatMessage | CopilotMessage; index: number }) => {
     const isUserMessage = item.senderId === user?.uid;
-    const isCopilotMessage = (item as CopilotMessage).messageType === 'itinerary';
     const nextMessage = index < messages.length - 1 ? messages[index + 1] : undefined;
 
     // Get timestamp properly
@@ -190,31 +187,6 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
 
     const showTimestamp = index === messages.length - 1 ||
       (Math.abs(nextTimestamp - itemTimestamp) > 300000); // 5 minutes
-
-    // Render itinerary message
-    if (isCopilotMessage && (item as CopilotMessage).itineraryData) {
-      const copilotItem = item as CopilotMessage;
-      return (
-        <View key={item.id}>
-          <View style={[styles.messageContainer, styles.otherMessageContainer]}>
-            <View style={[styles.messageAvatar, { backgroundColor: '#FF5C02' }]}>
-              <Icon name="compass-outline" size={20} color="#FFFFFF" />
-            </View>
-            <View style={[styles.messageBubble, styles.otherBubble, { maxWidth: '85%' }]}>
-              <ItineraryCard
-                itinerary={copilotItem.itineraryData!}
-                onSave={undefined} // Already saved
-              />
-            </View>
-          </View>
-          {showTimestamp && (
-            <Text style={[styles.timestamp, styles.timestampLeft]}>
-              {formatTime(itemTimestamp)}
-            </Text>
-          )}
-        </View>
-      );
-    }
 
     // Render regular message
     return (
@@ -269,6 +241,7 @@ export default function MessagingScreen({ navigation, route }: MessagingScreenPr
       </View>
     );
   };
+
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>

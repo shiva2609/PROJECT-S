@@ -317,6 +317,7 @@ export default function SideMenu({ visible, onClose, onNavigate, navigation }: S
     { label: 'Itinerary Builder', icon: 'map-outline', route: 'ItineraryBuilder' },
   ];
 
+
   const toolsItems: MenuItemData[] = [
     ...(showDashboard ? [{ label: 'Dashboard', icon: 'grid-outline', route: 'Dashboard' } as MenuItemData] : []),
     { label: "Sanchari's Near You", icon: 'location-outline', route: 'NearYou' },

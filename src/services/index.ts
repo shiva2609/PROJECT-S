@@ -36,10 +36,6 @@ export * from './notifications/topicNotificationService';
 // Like Services
 export * from './likes/likesService';
 
-// Itinerary Services
-export * from './itinerary/generateItinerary';
-export * from './itinerary/itineraryService';
-
 // Booking Services
 export * from './booking/bookingService';
 
