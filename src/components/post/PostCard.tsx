@@ -351,22 +351,57 @@ function PostCard({
   const isOwnPost = currentUserId === creatorId;
 
   const renderCaption = () => {
-    if (!post.caption) return null;
-    const parts = parseHashtags(post.caption);
+    // 🔐 REFACTORED: Render caption and host tags independently
+    // This ensures host tags appear even if caption is empty
+
+    const parts = post.caption ? parseHashtags(post.caption) : [];
+
+    // Check if we have tags to display
+    const postTags = (post as any).tags || [];
+    const hasTags = Array.isArray(postTags) && postTags.length > 0;
+
+    // DEBUG: Log to verify data
+    if (__DEV__) {
+      console.log('🔍 [PostCard] Post ID:', post.id);
+      console.log('🔍 [PostCard] Location:', location);
+      console.log('🔍 [PostCard] Post location:', post.location);
+      console.log('🔍 [PostCard] Post placeName:', (post as any).placeName);
+      console.log('🔍 [PostCard] Tags:', postTags);
+      console.log('🔍 [PostCard] Has tags:', hasTags);
+      console.log('🔍 [PostCard] All post keys:', Object.keys(post));
+    }
+
+    if (!post.caption && !hasTags) return null;
+
     return (
-      <View style={styles.captionContainer}>
-        <Text style={styles.captionText}>
-          {parts.map((part, index) => {
-            if (part.isHashtag) {
-              return (
-                <Text key={index} style={styles.hashtag}>
-                  {part.text}
-                </Text>
-              );
-            }
-            return <Text key={index}>{part.text}</Text>;
-          })}
-        </Text>
+      <View style={styles.contentContainer}>
+        {/* 1. Caption Block */}
+        {post.caption ? (
+          <Text style={styles.captionText}>
+            <Text style={styles.username}>{username} </Text>
+            {parts.map((part, index) => {
+              if (part.isHashtag) {
+                return (
+                  <Text key={index} style={styles.hashtag}>
+                    {part.text}
+                  </Text>
+                );
+              }
+              return <Text key={index}>{part.text}</Text>;
+            })}
+          </Text>
+        ) : null}
+
+        {/* 2. Tags Block */}
+        {hasTags && (
+          <View style={styles.tagsContainer}>
+            {postTags.map((tag: string, index: number) => (
+              <Text key={index} style={styles.tag}>
+                {tag}
+              </Text>
+            ))}
+          </View>
+        )}
       </View>
     );
   };
@@ -461,6 +496,9 @@ const styles = StyleSheet.create({
     marginVertical: 10,
   },
   captionContainer: {
+    // Removed specific padding, now handled by contentContainer
+  },
+  contentContainer: {
     paddingHorizontal: 16,
     paddingBottom: 8,
   },
@@ -469,6 +507,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#000000',
     lineHeight: 20,
+  },
+  username: {
+    fontFamily: Fonts.bold,
+    fontSize: 14,
+    color: '#000000',
+  },
+  hostTagsContainer: {
+    marginTop: 6,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  tagsContainer: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  tag: {
+    fontFamily: Fonts.regular,
+    fontSize: 13,
+    color: '#1F76FF',
+    backgroundColor: '#F0F7FF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   hashtag: {
     fontFamily: Fonts.regular,

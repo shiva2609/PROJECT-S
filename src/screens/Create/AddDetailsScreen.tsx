@@ -17,6 +17,7 @@ import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import storage from '@react-native-firebase/storage';
 import { Platform, InteractionManager, AppState } from 'react-native';
+import RNFS from 'react-native-fs'; // 🔐 IMPORT RNFS
 import { useCreateFlowStore } from '../../store/stores/useCreateFlowStore';
 import { processFinalCrops } from '../../utils/finalCropProcessor';
 import { getCropBoxDimensions, getImageTransform } from '../../utils/cropMath';
@@ -302,26 +303,99 @@ export default function AddDetailsScreen({ navigation }: any) {
         const uploadedMedia: Array<{ url: string; storagePath: string; type: 'image' }> = [];
 
         for (let i = 0; i < finalImageUris.length; i++) {
+          console.log(`\n📤 [AddDetails] ========== UPLOAD ${i + 1}/${finalImageUris.length} ==========`);
+
           const fileName = `media_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
           const storagePath = `users/${uid}/posts/${postId}/${fileName}`;
-
           const reference = storage().ref(storagePath);
 
           let uploadUri = finalImageUris[i];
-          if (!uploadUri) continue;
 
-          if (Platform.OS === 'ios' && uploadUri.startsWith('file://')) {
-            uploadUri = uploadUri.replace('file://', '');
+          console.log(`📤 [AddDetails] Original URI: ${uploadUri}`);
+
+          // CRITICAL: Validate URI exists
+          if (!uploadUri) {
+            throw new Error(`Missing URI for image ${i + 1}`);
           }
 
+          // Step 1: Normalize URI for file system check
+          let fsCheckUri = uploadUri;
+          if (fsCheckUri.startsWith('file://')) {
+            fsCheckUri = fsCheckUri.replace('file://', '');
+          }
+
+          console.log(`📤 [AddDetails] FS Check URI: ${fsCheckUri}`);
+
+          // Step 2: Verify file exists
           try {
-            await reference.putFile(uploadUri);
-          } catch (uploadError: any) {
-            console.error('Upload Error:', uploadError);
-            throw new Error(`Storage upload failed: ${uploadError.message}`);
+            const exists = await RNFS.exists(fsCheckUri);
+            console.log(`📤 [AddDetails] File exists: ${exists}`);
+
+            if (!exists) {
+              // Try decoding in case of URL encoding
+              const decodedUri = decodeURIComponent(fsCheckUri);
+              console.log(`📤 [AddDetails] Trying decoded URI: ${decodedUri}`);
+
+              const decodedExists = await RNFS.exists(decodedUri);
+              console.log(`📤 [AddDetails] Decoded file exists: ${decodedExists}`);
+
+              if (!decodedExists) {
+                throw new Error(`File not found at: ${fsCheckUri}`);
+              }
+
+              fsCheckUri = decodedUri;
+            }
+
+            // Get file stats
+            const stats = await RNFS.stat(fsCheckUri);
+            console.log(`📤 [AddDetails] File size: ${stats.size} bytes`);
+            console.log(`📤 [AddDetails] File path: ${stats.path}`);
+
+            if (stats.size === 0) {
+              throw new Error(`File is empty (0 bytes): ${fsCheckUri}`);
+            }
+
+          } catch (fsError: any) {
+            console.error(`❌ [AddDetails] File validation failed:`, fsError);
+            throw new Error(`File validation failed: ${fsError.message}`);
           }
 
+          // Step 3: Prepare URI for Firebase upload
+          // Firebase Storage putFile() expects local file path
+          // On iOS: can use file:// or absolute path
+          // On Android: prefers absolute path
+          let firebaseUploadUri = fsCheckUri; // Use the validated path
+
+          console.log(`📤 [AddDetails] Firebase upload URI: ${firebaseUploadUri}`);
+
+          // Step 4: Upload to Firebase
+          try {
+            console.log(`📤 [AddDetails] Starting Firebase upload...`);
+            await reference.putFile(firebaseUploadUri);
+            console.log(`✅ [AddDetails] Upload SUCCESS`);
+
+          } catch (uploadError: any) {
+            console.error(`❌ [AddDetails] Firebase upload FAILED`);
+            console.error(`❌ [AddDetails] Error code:`, uploadError.code);
+            console.error(`❌ [AddDetails] Error message:`, uploadError.message);
+            console.error(`❌ [AddDetails] Error name:`, uploadError.name);
+            console.error(`❌ [AddDetails] Error userInfo:`, uploadError.userInfo);
+            console.error(`❌ [AddDetails] Error nativeErrorCode:`, uploadError.nativeErrorCode);
+            console.error(`❌ [AddDetails] Error nativeErrorMessage:`, uploadError.nativeErrorMessage);
+
+            // Log all error properties
+            console.error(`❌ [AddDetails] All error keys:`, Object.keys(uploadError));
+            for (const key of Object.keys(uploadError)) {
+              console.error(`❌ [AddDetails] ${key}:`, uploadError[key]);
+            }
+
+            throw new Error(`Firebase upload failed [${uploadError.code}]: ${uploadError.message}`);
+          }
+
+          // Step 5: Get download URL
           const downloadUrl = await reference.getDownloadURL();
+          console.log(`✅ [AddDetails] Download URL obtained`);
+
           uploadedUrls.push(downloadUrl);
           uploadedMedia.push({
             url: downloadUrl,

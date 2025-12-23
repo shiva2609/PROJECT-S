@@ -1,4 +1,5 @@
 import { Platform, Image } from 'react-native';
+import ImageResizer from 'react-native-image-resizer';
 import type { AspectRatio } from '../hooks/useCropState';
 import { computeCropRect } from './cropMath';
 import type { CropParams } from '../store/stores/useCreateFlowStore';
@@ -145,45 +146,12 @@ export async function exportFinalBitmap({
   frameHeight,
   ratio,
 }: ExportBitmapOptions): Promise<string> {
-  console.log('🖼️ [exportFinalBitmap] Starting programmatic bitmap export');
-  console.log('🖼️ [exportFinalBitmap] Params:', {
-    imageUri: imageUri.substring(0, 50) + '...',
-    zoom: cropParams.zoom,
-    offsetX: cropParams.offsetX,
-    offsetY: cropParams.offsetY,
-    frameWidth,
-    frameHeight,
-    ratio,
-  });
+  console.log('🖼️ [exportFinalBitmap] ========== START ==========');
+  console.log('🖼️ [exportFinalBitmap] Input URI:', imageUri);
+  console.log('🖼️ [exportFinalBitmap] Crop params:', cropParams);
+  console.log('🖼️ [exportFinalBitmap] Frame:', { frameWidth, frameHeight, ratio });
 
   try {
-    // Get image dimensions
-    const imageSize = await new Promise<{ width: number; height: number }>((resolve, reject) => {
-      Image.getSize(
-        imageUri,
-        (width, height) => resolve({ width, height }),
-        (error) => reject(error)
-      );
-    });
-
-    console.log('🖼️ [exportFinalBitmap] Image size:', imageSize);
-
-    if (imageSize.width === 0 || imageSize.height === 0) {
-      throw new Error('Invalid image dimensions');
-    }
-
-    // Calculate the exact crop rectangle based on user's adjustments
-    const cropRect = computeCropRect(
-      imageSize.width,
-      imageSize.height,
-      cropParams,
-      frameWidth,
-      frameHeight,
-      ratio
-    );
-
-    console.log('🖼️ [exportFinalBitmap] Crop rect:', cropRect);
-
     // Calculate output dimensions based on ratio
     let outputWidth: number;
     let outputHeight: number;
@@ -205,123 +173,146 @@ export async function exportFinalBitmap({
         outputHeight = 1350;
     }
 
-    // Prepare image URI (remove file:// prefix)
-    let processedUri = imageUri;
-    if (Platform.OS === 'android' && processedUri.startsWith('file://')) {
-      processedUri = processedUri.replace('file://', '');
-    }
-    if (Platform.OS === 'ios' && processedUri.startsWith('file://')) {
-      processedUri = processedUri.replace('file://', '');
-    }
+    console.log('🖼️ [exportFinalBitmap] Target output:', { outputWidth, outputHeight });
 
-    // CRITICAL: Use image manipulation library that supports x/y crop coordinates
-    // This ensures offsetX/offsetY adjustments (e.g., moving person to left corner) are preserved
-    let finalImageUri: string;
-    
-    // Try multiple image manipulation libraries in order of preference (React Native CLI compatible)
-    let manipulationSuccess = false;
-    
-    // Method 1: Try react-native-photo-manipulator (React Native CLI - supports precise x/y crop)
-    try {
-      const RNPhotoManipulator = require('react-native-photo-manipulator').default;
-      
-      console.log('🖼️ [exportFinalBitmap] Using react-native-photo-manipulator for precise cropping...');
-      console.log('🖼️ [exportFinalBitmap] Crop rect (x, y, width, height):', {
-        x: Math.round(cropRect.x),
-        y: Math.round(cropRect.y),
-        width: Math.round(cropRect.width),
-        height: Math.round(cropRect.height),
-      });
-      
-      // Ensure crop rect is within image bounds
-      const safeCropRect = {
-        x: Math.max(0, Math.min(Math.round(cropRect.x), imageSize.width - 1)),
-        y: Math.max(0, Math.min(Math.round(cropRect.y), imageSize.height - 1)),
-        width: Math.min(Math.round(cropRect.width), imageSize.width - Math.max(0, Math.round(cropRect.x))),
-        height: Math.min(Math.round(cropRect.height), imageSize.height - Math.max(0, Math.round(cropRect.y))),
-      };
-
-      // Ensure width and height are positive and valid
-      if (safeCropRect.width <= 0 || safeCropRect.height <= 0) {
-        throw new Error('Invalid crop rectangle dimensions');
+    // Use ImageResizer to create a new file
+    // ImageResizer handles file:// prefix automatically
+    const response = await ImageResizer.createResizedImage(
+      imageUri, // Pass original URI as-is
+      outputWidth,
+      outputHeight,
+      'JPEG',
+      90, // quality
+      0, // rotation
+      undefined, // outputPath - let it generate
+      false, // keepMeta
+      {
+        mode: 'contain',
+        onlyScaleDown: false,
       }
-      
-      // Ensure crop rect doesn't exceed image bounds
-      if (safeCropRect.x + safeCropRect.width > imageSize.width) {
-        safeCropRect.width = imageSize.width - safeCropRect.x;
-      }
-      if (safeCropRect.y + safeCropRect.height > imageSize.height) {
-        safeCropRect.height = imageSize.height - safeCropRect.y;
-      }
-      
-      console.log('🖼️ [exportFinalBitmap] Safe crop rect:', safeCropRect);
-      
-      // react-native-photo-manipulator API: crop(imageUri, cropRegion, targetSize)
-      const targetSize = { width: outputWidth, height: outputHeight };
-      const croppedImageUri = await RNPhotoManipulator.crop(processedUri, safeCropRect, targetSize);
+    );
 
-      finalImageUri = croppedImageUri;
-      manipulationSuccess = true;
-      console.log('✅ [exportFinalBitmap] react-native-photo-manipulator crop complete:', finalImageUri.substring(0, 50) + '...');
-      console.log('✅ [exportFinalBitmap] EXACT adjusted frame exported (offsetX/offsetY preserved)');
-    } catch (photoManipError: any) {
-      console.log('⚠️ [exportFinalBitmap] react-native-photo-manipulator not available:', photoManipError.message);
-      
-      // Method 2: Try expo-image-manipulator (if using Expo)
-      try {
-        const ImageManipulator = require('expo-image-manipulator').default;
-        
-        console.log('🖼️ [exportFinalBitmap] Trying expo-image-manipulator...');
-        
-        const safeCropRect = {
-          originX: Math.max(0, Math.min(Math.round(cropRect.x), imageSize.width - 1)),
-          originY: Math.max(0, Math.min(Math.round(cropRect.y), imageSize.height - 1)),
-          width: Math.min(Math.round(cropRect.width), imageSize.width - Math.max(0, Math.round(cropRect.x))),
-          height: Math.min(Math.round(cropRect.height), imageSize.height - Math.max(0, Math.round(cropRect.y))),
-        };
+    console.log('✅ [exportFinalBitmap] Resizer SUCCESS');
+    console.log('✅ [exportFinalBitmap] Output URI:', response.uri);
+    console.log('✅ [exportFinalBitmap] Output size:', response.size);
+    console.log('✅ [exportFinalBitmap] Output dimensions:', { width: response.width, height: response.height });
 
-        if (safeCropRect.width <= 0 || safeCropRect.height <= 0) {
-          throw new Error('Invalid crop rectangle dimensions');
-        }
-        
-        const manipulatedImage = await ImageManipulator.manipulateAsync(
-          processedUri,
-          [
-            { crop: safeCropRect },
-            { resize: { width: outputWidth, height: outputHeight } },
-          ],
-          { compress: 0.9, format: 'jpeg' }
-        );
-
-        finalImageUri = manipulatedImage.uri;
-        manipulationSuccess = true;
-        console.log('✅ [exportFinalBitmap] expo-image-manipulator crop complete');
-      } catch (expoError: any) {
-        console.log('⚠️ [exportFinalBitmap] expo-image-manipulator not available:', expoError.message);
-      }
-    }
-    
-    // Method 3: If no image manipulator available, throw error (don't use inaccurate fallback)
-    if (!manipulationSuccess) {
-      throw new Error(
-        'Image manipulation library not available. ' +
-        'For React Native CLI, please install: npm install react-native-photo-manipulator && npx pod-install. ' +
-        'For Expo, install: npx expo install expo-image-manipulator. ' +
-        'This is required for precise cropping with position adjustments (offsetX/offsetY).'
-      );
+    // Validate output
+    if (!response.uri) {
+      throw new Error('ImageResizer returned empty URI');
     }
 
-    return finalImageUri;
+    if (response.size === 0) {
+      throw new Error('ImageResizer created empty file (0 bytes)');
+    }
+
+    // Return the URI exactly as ImageResizer provides it
+    // Do NOT strip file:// here - let the upload function handle it
+    return response.uri;
+
   } catch (error: any) {
-    console.error('❌ [exportFinalBitmap] Error exporting bitmap:', error);
-    console.error('❌ [exportFinalBitmap] Error details:', {
-      message: error.message,
-      stack: error.stack?.substring(0, 200),
+    console.error('❌ [exportFinalBitmap] FAILED');
+    console.error('❌ [exportFinalBitmap] Error:', error);
+    console.error('❌ [exportFinalBitmap] Error code:', error.code);
+    console.error('❌ [exportFinalBitmap] Error message:', error.message);
+    console.error('❌ [exportFinalBitmap] Error stack:', error.stack);
+
+    throw new Error(`Failed to export bitmap: ${error.message || 'Unknown error'}`);
+  }
+}
+
+/**
+ * Normalize image orientation and dimensions
+ * This creates a new file with standard orientation (1) and correct pixel dimensions
+ * helping to avoid issues with EXIF rotation on different devices (post-MIUI/WhatsApp)
+ */
+export async function normalizeImage(uri: string): Promise<{ uri: string; width: number; height: number }> {
+  try {
+    // Basic cleanup of URI
+    let imageUri = uri;
+    if (Platform.OS === 'android' && imageUri.startsWith('file://')) {
+      imageUri = imageUri.replace('file://', '');
+    }
+
+    // 1. Get original dimensions to establish baseline
+    // Note: Image.getSize might return swapped/unswapped dimensions depending on OS/version
+    // but the key is consistent behavior from ImageResizer
+    const originalSize = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      Image.getSize(
+        uri,
+        (width, height) => resolve({ width, height }),
+        (error) => reject(error)
+      );
     });
-    
-    // If export fails, throw error - don't fallback to original
-    // This ensures we know when cropping failed
-    throw new Error(`Failed to export cropped bitmap: ${error.message || 'Unknown error'}`);
+
+    // 2. Create a normalized copy using ImageResizer
+    // This forcibly applies EXIF orientation to the pixel data and resets the EXIF tag
+    // We use a large dimension to avoid quality loss, but 'onlyScaleDown' ensures we don't upscale
+    // Note: older ImageResizer versions might not support onlyScaleDown, so we use a safe large max
+    const MAX_DIMENSION = 4096; // 4K is sufficient for mobile uploads
+
+    // Calculate target dimensions that respect aspect ratio but stay within MAX_DIMENSION
+    let targetWidth = originalSize.width;
+    let targetHeight = originalSize.height;
+
+    // Optional: downscale if huge (saves memory during crop)
+    if (targetWidth > MAX_DIMENSION || targetHeight > MAX_DIMENSION) {
+      const aspectRatio = targetWidth / targetHeight;
+      if (targetWidth > targetHeight) {
+        targetWidth = MAX_DIMENSION;
+        targetHeight = MAX_DIMENSION / aspectRatio;
+      } else {
+        targetHeight = MAX_DIMENSION;
+        targetWidth = MAX_DIMENSION * aspectRatio;
+      }
+    }
+
+    // Use JPEG format with high quality to preserve details
+    // rotation=0 signals "don't add extra rotation", but createResizedImage SHOULD respect existing EXIF
+    const response = await ImageResizer.createResizedImage(
+      imageUri,
+      targetWidth,
+      targetHeight,
+      'JPEG', // Format
+      95,     // Quality
+      0,      // Rotation (we rely on auto-orientation of the library)
+      undefined, // Output path
+      false,  // Keep meta? NO -> We want to strip EXIF orientation by baking it in
+      {       // Options
+        mode: 'contain',
+        onlyScaleDown: true
+      }
+    );
+
+    // 3. Get exact dimensions of the NEW normalized file
+    // These are the dimensions we MUST use for all crop math
+    const normalizedSize = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      Image.getSize(
+        response.uri,
+        (width, height) => resolve({ width, height }),
+        (error) => reject(error)
+      );
+    });
+
+    console.log('✅ [normalizeImage] Normalized:', {
+      original: originalSize,
+      normalized: normalizedSize,
+      uri: response.uri.substring(response.uri.length - 20)
+    });
+
+    return {
+      uri: response.uri,
+      width: normalizedSize.width,
+      height: normalizedSize.height
+    };
+  } catch (error) {
+    console.error('❌ [normalizeImage] Failed:', error);
+    // Fallback: Return original info if normalization fails, but warn
+    // This risks the crop drift bug, but prevents app crash
+    const fallbackSize = await new Promise<{ width: number; height: number }>((resolve) => {
+      Image.getSize(uri, (width, height) => resolve({ width, height }), () => resolve({ width: 0, height: 0 }));
+    });
+    return { uri, width: fallbackSize.width, height: fallbackSize.height };
   }
 }
 

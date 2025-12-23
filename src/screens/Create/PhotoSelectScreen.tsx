@@ -27,6 +27,7 @@ import {
   MediaPermissionState,
   PermissionAction,
 } from '../../utils/mediaPermissions';
+import { markMediaPermissionGranted, markMediaPermissionRequested } from '../../utils/mediaPermissionMemory';
 import { ScreenLayout } from '../../components/layout/ScreenLayout';
 import { LoadingState } from '../../components/common/LoadingState';
 import { EmptyState } from '../../components/common/EmptyState';
@@ -66,6 +67,12 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
   const [previewImage, setPreviewImage] = useState<SelectedImage | null>(null);
   const [lockedRatio, setLockedRatio] = useState<'1:1' | '4:5' | '16:9' | null>(null);
   const [permissionState, setPermissionState] = useState<MediaPermissionState>(MediaPermissionState.GRANTED);
+
+  // Pagination State
+  const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
+  const [hasNextPage, setHasNextPage] = useState(true);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+
   const isMountedRef = useRef(true);
   const hasNavigatedFromCreateFlowRef = useRef(false);
 
@@ -95,7 +102,7 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
       setLockedRatio(null);
 
       // 🔄 RELOAD: Always reload photos on focus to ensure sync with OS
-      loadPhotos();
+      loadPhotos(true);
     }, [])
   );
 
@@ -108,7 +115,7 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
       // Add a small delay to ensure Activity is attached
       setTimeout(() => {
         if (isMountedRef.current) {
-          loadPhotos();
+          loadPhotos(true); // Initial load
         }
       }, 100);
     });
@@ -119,89 +126,123 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
     };
   }, []);
 
-  const loadPhotos = async (retryCount = 0) => {
+  // Modified loadPhotos to support pagination
+  const loadPhotos = async (reset: boolean = false) => {
     if (!isMountedRef.current) return;
 
+    // If not resetting and no next page, or already fetching, stop
+    if (!reset && (!hasNextPage || isFetchingMore)) return;
+
     try {
+      if (reset) {
+        setLoading(true);
+      } else {
+        setIsFetchingMore(true);
+      }
+
       // 🔐 STEP 1: Resolve permission state through canonical resolver
-      const resolution = await resolveMediaPermissionState(MediaPermissionType.GALLERY);
-      if (!isMountedRef.current) return;
+      // Only verify permission on initial load to avoid redundant checks during scroll
+      if (reset) {
+        const resolution = await resolveMediaPermissionState(MediaPermissionType.GALLERY);
+        if (!isMountedRef.current) return;
 
-      // 🔐 STEP 2: Handle permission state
-      if (!resolution.canAccess) {
-        if (resolution.action === PermissionAction.REQUEST) {
-          const requestResult = await requestMediaPermission(MediaPermissionType.GALLERY);
-
-          if (!requestResult.canAccess) {
-            // Still no access - show recovery dialog
+        if (!resolution.canAccess) {
+          // Handle permission denied flow (same as before)
+          if (resolution.action === PermissionAction.REQUEST) {
+            const requestResult = await requestMediaPermission(MediaPermissionType.GALLERY);
+            if (!requestResult.canAccess) {
+              if (isMountedRef.current) {
+                setLoading(false);
+                if (requestResult.state === MediaPermissionState.BLOCKED || requestResult.state === MediaPermissionState.DENIED) {
+                  showPermissionDialog(requestResult);
+                }
+              }
+              return;
+            }
+          } else {
             if (isMountedRef.current) {
-              showPermissionDialog(requestResult);
+              showPermissionDialog(resolution);
               setLoading(false);
             }
             return;
           }
-          // Permission granted - proceed
-        } else {
-          // Blocked or other state - show recovery dialog
-          if (isMountedRef.current) {
-            showPermissionDialog(resolution);
-            setLoading(false);
-          }
-          return;
         }
+        setPermissionState(resolution.state as MediaPermissionState);
       }
 
       // 🔐 STEP 3: Load photos with mandatory MIME-ONLY query (NO folder filtering)
-      const PAGE_SIZE = 500;
-      const result = await CameraRoll.getPhotos({
+      const PAGE_SIZE = 100; // Load 100 at a time for smooth scrolling
+      const fetchParams: any = {
         first: PAGE_SIZE,
-        assetType: 'Photos', // 🔐 STRIZCT VIDEO EXCLUSION
+        assetType: 'Photos', // 🔐 STRICT VIDEO EXCLUSION
         include: ['filename', 'fileSize', 'imageSize', 'location'],
         mimeTypes: ['image/jpeg', 'image/png', 'image/webp'], // Allow all standard image types
+      };
+
+      // If fetching more, add cursor
+      if (!reset && endCursor) {
+        fetchParams.after = endCursor;
+      }
+
+      const result = await CameraRoll.getPhotos(fetchParams);
+
+      // If we got here, permission was implicitely or explicitely granted
+      if (reset) {
+        await markMediaPermissionGranted();
+        await markMediaPermissionRequested();
+      }
+
+      const newPhotos = (result.edges || []).map((edge) => {
+        const photo = edge.node.image;
+        return {
+          uri: photo.uri,
+          width: photo.width || 0,
+          height: photo.height || 0,
+          timestamp: String(edge.node.timestamp || Date.now()),
+          type: 'image/jpeg',
+          fileName: photo.filename || `photo_${edge.node.timestamp || Date.now()}.jpg`,
+        } as any as Asset;
       });
 
-      if (result.edges && result.edges.length > 0) {
-        // Convert CameraRoll format to Asset format
-        const photos = result.edges.map((edge) => {
-          const photo = edge.node.image;
-          return {
-            uri: photo.uri,
-            width: photo.width || 0,
-            height: photo.height || 0,
-            timestamp: String(edge.node.timestamp || Date.now()),
-            type: 'image/jpeg',
-            fileName: photo.filename || `photo_${edge.node.timestamp || Date.now()}.jpg`,
-          } as any as Asset;
-        });
-
-        if (isMountedRef.current) {
-          setPhotos(photos);
-          setPermissionState(resolution.state);
-
-          // 🛠️ REGRESSION PROTECTION: Dev-only logging
-          if (__DEV__) {
-            console.log('📸 MEDIA FETCH COUNT:', photos.length);
-            console.log(
-              '📁 SAMPLE FILES:',
-              photos.slice(0, 5).map(a => a.fileName || (a.uri ? a.uri.split('/').pop() : 'unknown'))
-            );
-          }
+      if (isMountedRef.current) {
+        if (reset) {
+          setPhotos(newPhotos);
+        } else {
+          setPhotos(prev => [...prev, ...newPhotos]);
         }
-      } else {
-        if (isMountedRef.current) {
-          setPhotos([]);
+
+        setEndCursor(result.page_info.end_cursor);
+        setHasNextPage(result.page_info.has_next_page);
+
+        // 🛠️ REGRESSION PROTECTION: Dev-only logging
+        if (__DEV__ && reset) {
+          console.log('📸 MEDIA INITIAL FETCH:', newPhotos.length);
         }
       }
+
     } catch (error: any) {
       console.error('Error loading photos:', error);
-      if (isMountedRef.current) {
-        Alert.alert('Error', 'Failed to load photos. Please try again.');
+
+      if (reset) {
+        await markMediaPermissionRequested();
+        if (isMountedRef.current) {
+          if (error.message && (error.message.includes('permission') || error.message.includes('denied') || error.message.includes('Access'))) {
+            // Ignore
+          } else {
+            Alert.alert('Error', 'Failed to load photos. Please try again.');
+          }
+        }
       }
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
+        setIsFetchingMore(false);
       }
     }
+  };
+
+  const handleLoadMore = () => {
+    loadPhotos(false);
   };
 
   // TOGGLE SELECTION: First tap = select, second tap = deselect
@@ -410,7 +451,7 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
             style={styles.limitedButton}
             onPress={async () => {
               await requestMediaPermission(MediaPermissionType.GALLERY);
-              loadPhotos();
+              loadPhotos(true);
             }}
           >
             <Text style={styles.limitedButtonText}>Select More</Text>
@@ -482,6 +523,15 @@ export default function PhotoSelectScreen({ navigation, route }: PhotoSelectScre
         contentContainerStyle={styles.gridContainer}
         showsVerticalScrollIndicator={false}
         extraData={selectedImages} // Force re-render when selection changes
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          isFetchingMore ? (
+            <View style={{ padding: 20 }}>
+              <ActivityIndicator size="small" color="#FF7F4D" />
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           <EmptyState
             icon="images-outline"

@@ -50,7 +50,7 @@ import { useColorScheme } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { Fonts } from '../../theme/fonts';
 import { navigateToScreen } from '../../utils/navigationHelpers';
-import { exportFinalBitmap } from '../../utils/cropUtils';
+import { exportFinalBitmap, normalizeImage } from '../../utils/cropUtils';
 import {
   getCropBoxDimensions,
   calculateMinScale,
@@ -140,6 +140,8 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
   const [loading, setLoading] = useState(false);
   const [cropping, setCropping] = useState(false);
   const [savedCrops, setSavedCrops] = useState<CropData[]>([]);
+  // Store normalized versions of images (fixes EXIF rotation/drift issues)
+  const [normalizedImageMap, setNormalizedImageMap] = useState<Record<string, { uri: string; width: number; height: number }>>({});
 
   // INSTAGRAM LOGIC: Lock ratio - prevent changing it (all images in post use same ratio)
   // If lockedRatio is provided, aspect ratio cannot be changed
@@ -225,49 +227,79 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
   useEffect(() => {
     if (!currentImageUri) return;
 
-    setLoading(true);
-    Image.getSize(
-      currentImageUri,
-      (width, height) => {
-        setImageSize({ width, height });
+    const loadAndSetupImage = (uri: string, width: number, height: number, isNormalized: boolean) => {
+      setImageSize({ width, height });
 
-        // If editing existing crop, restore previous transform values
-        if (existingCrop) {
-          const prevCrop = existingCrop.cropData;
-          savedScale.value = prevCrop.zoomScale;
-          scale.value = prevCrop.zoomScale;
-          savedTranslateX.value = prevCrop.offsetX;
-          translateX.value = prevCrop.offsetX;
-          savedTranslateY.value = prevCrop.offsetY;
-          translateY.value = prevCrop.offsetY;
-          setAspectRatio(prevCrop.ratio);
-        } else {
-          // 🔐 FIX 1: Default zoom = Fit (No unwanted zoom on entry)
-          // fully visible, centered
-          const fitScale = calculateFitScale(
-            width,
-            height,
-            frameWidth,
-            frameHeight
-          );
+      // If editing existing crop, restore previous transform values
+      if (existingCrop) {
+        const prevCrop = existingCrop.cropData;
+        savedScale.value = prevCrop.zoomScale;
+        scale.value = prevCrop.zoomScale;
+        savedTranslateX.value = prevCrop.offsetX;
+        translateX.value = prevCrop.offsetX;
+        savedTranslateY.value = prevCrop.offsetY;
+        translateY.value = prevCrop.offsetY;
+        setAspectRatio(prevCrop.ratio);
+      } else {
+        // 🔐 FIX 1: Default zoom = Fit (No unwanted zoom on entry)
+        // fully visible, centered
+        const fitScale = calculateFitScale(
+          width,
+          height,
+          frameWidth,
+          frameHeight
+        );
 
-          savedScale.value = fitScale;
-          scale.value = fitScale;
-          translateX.value = 0;
-          translateY.value = 0;
-          savedTranslateX.value = 0;
-          savedTranslateY.value = 0;
-        }
-
-        setLoading(false);
-      },
-      (error) => {
-        console.error('Error getting image size:', error);
-        Alert.alert('Error', 'Failed to load image');
-        setLoading(false);
+        savedScale.value = fitScale;
+        scale.value = fitScale;
+        translateX.value = 0;
+        translateY.value = 0;
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
       }
-    );
-  }, [currentImageUri, frameWidth, frameHeight]);
+      setLoading(false);
+    };
+
+    setLoading(true);
+
+    // IF existing crop (finalUri), it is already consistent. Just load size.
+    if (existingCrop?.finalUri) {
+      Image.getSize(
+        currentImageUri,
+        (w, h) => loadAndSetupImage(currentImageUri, w, h, false),
+        (err) => {
+          console.error('Error loading existing crop:', err);
+          setLoading(false);
+        }
+      );
+      return;
+    }
+
+    // NEW CROP: Check if already normalized
+    const cachedNorm = normalizedImageMap[currentImageUri];
+    if (cachedNorm) {
+      loadAndSetupImage(cachedNorm.uri, cachedNorm.width, cachedNorm.height, true);
+      return;
+    }
+
+    // Perform Normalization
+    console.log('🔄 [CropAdjustScreen] Normalizing image to fix orientation/EXIF...');
+    normalizeImage(currentImageUri)
+      .then((norm) => {
+        setNormalizedImageMap(prev => ({ ...prev, [currentImageUri]: norm }));
+        loadAndSetupImage(norm.uri, norm.width, norm.height, true);
+      })
+      .catch((err) => {
+        console.error('Failed to normalize image:', err);
+        // Fallback to original
+        Image.getSize(
+          currentImageUri,
+          (w, h) => loadAndSetupImage(currentImageUri, w, h, false),
+          () => setLoading(false)
+        );
+      });
+
+  }, [currentImageUri, frameWidth, frameHeight, existingCrop]);
 
   // Update scale when aspect ratio changes
   useEffect(() => {
@@ -414,7 +446,14 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
     }
 
     // Prepare image URI
-    let imageUri = currentImageUri;
+    // Use normalized URI if available
+    let effectiveImageUri = currentImageUri;
+    const normForCrop = normalizedImageMap[currentImageUri];
+    if (!existingCrop && normForCrop) {
+      effectiveImageUri = normForCrop.uri;
+    }
+
+    let imageUri = effectiveImageUri;
     if (Platform.OS === 'android' && imageUri.startsWith('file://')) {
       imageUri = imageUri.replace('file://', '');
     }
@@ -425,15 +464,14 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
     try {
       // Check if ImagePicker is available (native module linked)
       if (!ImagePicker || typeof ImagePicker.openCropper !== 'function') {
-        console.warn('ImagePicker native module not available. Using original URI.');
-        return currentImageUri;
+        return effectiveImageUri;
       }
 
       // Use react-native-image-crop-picker to perform actual bitmap cropping
       // This library handles native module linking automatically
       // NOTE: This function is legacy - main flow now uses exportFinalBitmap
       const croppedImage = await ImagePicker.openCropper({
-        path: imageUri,
+        path: effectiveImageUri,
         width: outputWidth,
         height: outputHeight,
         cropping: true,
@@ -514,8 +552,17 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
 
       // CRITICAL: Export final cropped bitmap from original image
       // After this, originalImage.uri is NEVER used again - only croppedBitmapPath
+
+      // Use NORMALIZED URI for export to ensure crop coordinates match what user saw (WYSIWYG)
+      let sourceUriForExport = originalImage.uri;
+      const normForExport = normalizedImageMap[originalImage.uri];
+      if (normForExport) {
+        sourceUriForExport = normForExport.uri;
+        console.log('✅ [CropAdjustScreen] Using normalized URI for export to prevent drift');
+      }
+
       const croppedBitmapPath = await exportFinalBitmap({
-        imageUri: originalImage.uri, // Use original image URI for export (last time it's used)
+        imageUri: sourceUriForExport, // Use normalized URI
         cropParams: {
           zoom: cropData.cropData.zoomScale,
           offsetX: cropData.cropData.offsetX,
@@ -649,7 +696,8 @@ export default function CropAdjustScreen({ navigation, route }: CropAdjustScreen
                       <Animated.View style={styles.imageContainer}>
                         {imageSize.width > 0 && (
                           <Animated.Image
-                            source={{ uri: currentImageUri }}
+                            // Use normalized URI for display if available
+                            source={{ uri: (!existingCrop && normalizedImageMap[currentImageUri]?.uri) || currentImageUri }}
                             style={[
                               {
                                 width: imageSize.width,

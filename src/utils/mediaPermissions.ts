@@ -44,6 +44,9 @@ export enum MediaPermissionState {
 
     /** Permission state cannot be determined */
     UNAVAILABLE = 'unavailable',
+
+    /** Permission has not been requested yet */
+    NOT_DETERMINED = 'not_determined',
 }
 
 /**
@@ -143,23 +146,53 @@ export async function resolveMediaPermissionState(
  * - Limited access (iOS 14+ "Select Photos") - detected via picker behavior
  * - Denied/Blocked states - detected via picker error codes
  */
+
+import { hasMediaPermissionBeenGranted, hasMediaPermissionBeenRequested, markMediaPermissionRequested } from './mediaPermissionMemory';
+
 async function resolveIOSPermission(
     type: MediaPermissionType
 ): Promise<PermissionResolution> {
-    // iOS permissions are checked implicitly when picker is launched
-    // We return a "needs request" state and let the picker handle it
+    // Check if we have successfully accessed media before
+    const hasAccess = await hasMediaPermissionBeenGranted();
+
+    if (hasAccess) {
+        return {
+            state: MediaPermissionState.GRANTED,
+            canAccess: true,
+            message: 'Access granted',
+            action: PermissionAction.NONE,
+            debugInfo: { platform: 'ios', permissionType: type, rawStatus: 'memory_granted' },
+        };
+    }
+
+    // Check if we have asked before (and failed, since hasAccess is false)
+    const hasAsked = await hasMediaPermissionBeenRequested();
+    if (hasAsked) {
+        return {
+            state: MediaPermissionState.DENIED,
+            canAccess: false,
+            message: 'Photo access denied. Please enable in Settings.',
+            action: PermissionAction.NONE, // Don't auto-request
+            debugInfo: { platform: 'ios', permissionType: type, rawStatus: 'memory_denied' },
+        };
+    }
+
+    // If no history of access, we assume NOT_DETERMINED for CameraRoll
+    // This allows the app to attempt to load photos, which triggers the system prompt
+    // For Camera, we can't check, so we also assume NOT_DETERMINED/DENIED based on logic
+    // but better to let the picker trigger it.
 
     switch (type) {
         case MediaPermissionType.GALLERY:
-            // For gallery, we can't check status without launching picker
-            // Return a state that indicates we should try the picker
             return {
-                state: MediaPermissionState.DENIED, // Will be updated after picker attempt
-                canAccess: false,
-                message: 'Photo library access required',
-                action: PermissionAction.REQUEST,
+                state: MediaPermissionState.NOT_DETERMINED,
+                canAccess: true, // Allow attempt! CameraRoll will throw if actually denied
+                message: 'Photo library access needed',
+                action: PermissionAction.NONE, // Don't block! Let CameraRoll.getPhotos trigger prompt
                 debugInfo: { platform: 'ios', permissionType: type },
             };
+
+
 
         case MediaPermissionType.CAMERA:
             // Camera permission can be requested directly
@@ -310,8 +343,24 @@ async function resolveAndroidPermission(
         }
 
         // Permission not granted - need to determine if denied or blocked
-        // On Android, we can't distinguish between denied and blocked without requesting
-        // So we return DENIED state and let the request flow handle it
+
+        // 🔐 PERMISSION-MEDIA BRIDGING: Check if we have already asked for permission
+        const hasRequestedBefore = await hasMediaPermissionBeenRequested();
+
+        if (hasRequestedBefore) {
+            // We asked, and it's not granted => Denied by user
+            // Return DENIED but action: NONE (don't auto-request again)
+            // User must explicitly tap a button to request again
+            return {
+                state: MediaPermissionState.DENIED,
+                canAccess: false,
+                message: 'Permission previously denied',
+                action: PermissionAction.NONE, // Important: Stop the loop!
+                debugInfo: { platform: 'android', permissionType: type, androidVersion, rawStatus: 'denied_cached' },
+            };
+        }
+
+        // First time asking (or OS reset) => Return REQUEST
         return {
             state: MediaPermissionState.DENIED,
             canAccess: false,
@@ -369,9 +418,15 @@ export async function requestMediaPermission(
 async function requestIOSPermission(
     type: MediaPermissionType
 ): Promise<PermissionResolution> {
-    // iOS permissions are handled by the picker itself
-    // Just return the current state
-    return resolveIOSPermission(type);
+    // On iOS, usually strictly calling the API (Camera, CameraRoll) triggers the prompt.
+    // We just return NOT_DETERMINED to allow the caller to proceed to the API call.
+    return {
+        state: MediaPermissionState.NOT_DETERMINED,
+        canAccess: true,
+        message: 'Proceed to trigger system prompt',
+        action: PermissionAction.NONE,
+        debugInfo: { platform: 'ios', permissionType: type },
+    };
 }
 
 /**
@@ -433,6 +488,9 @@ async function requestAndroidPermission(
                 debugInfo: { platform: 'android', permissionType: type, androidVersion, rawStatus: 'granted' },
             };
         } else if (granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+            // Mark as requested
+            await markMediaPermissionRequested();
+
             // Permanently denied - user must use Settings
             return {
                 state: MediaPermissionState.BLOCKED,
@@ -446,6 +504,9 @@ async function requestAndroidPermission(
                 debugInfo: { platform: 'android', permissionType: type, androidVersion, rawStatus: 'never_ask_again' },
             };
         } else {
+            // Mark as requested
+            await markMediaPermissionRequested();
+
             // Denied - can retry
             return {
                 state: MediaPermissionState.DENIED,

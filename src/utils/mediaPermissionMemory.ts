@@ -16,6 +16,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const MEDIA_PERMISSION_KEY = 'MEDIA_PERMISSION_GRANTED_V1';
+const MEDIA_PERMISSION_REQUESTED_KEY = 'MEDIA_PERMISSION_REQUESTED_V1';
 
 /**
  * Mark that media permission has been successfully granted AND media was accessible
@@ -66,6 +67,29 @@ export async function hasMediaPermissionBeenGranted(): Promise<boolean> {
 }
 
 /**
+ * Mark that media permission has been requested (regardless of outcome)
+ */
+export async function markMediaPermissionRequested(): Promise<void> {
+    try {
+        await AsyncStorage.setItem(MEDIA_PERMISSION_REQUESTED_KEY, 'true');
+    } catch (error) {
+        console.error('[PermissionMemory] Error marking permission requested:', error);
+    }
+}
+
+/**
+ * Check if media permission has been requested before
+ */
+export async function hasMediaPermissionBeenRequested(): Promise<boolean> {
+    try {
+        const value = await AsyncStorage.getItem(MEDIA_PERMISSION_REQUESTED_KEY);
+        return value === 'true';
+    } catch (error) {
+        return false;
+    }
+}
+
+/**
  * Clear permission memory
  * 
  * 🔐 ONLY call this when:
@@ -80,6 +104,7 @@ export async function hasMediaPermissionBeenGranted(): Promise<boolean> {
 export async function clearMediaPermissionMemory(): Promise<void> {
     try {
         await AsyncStorage.removeItem(MEDIA_PERMISSION_KEY);
+        await AsyncStorage.removeItem(MEDIA_PERMISSION_REQUESTED_KEY);
         if (__DEV__) {
             console.log('[PermissionMemory] 🗑️ Media permission memory cleared');
         }

@@ -64,31 +64,7 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
     if (!isMountedRef.current) return;
 
     try {
-      // 🔐 STEP 1: Resolve permission state through canonical resolver
-      const resolution = await resolveMediaPermissionState(MediaPermissionType.GALLERY);
-      if (!isMountedRef.current) return;
-
-      // 🔐 STEP 2: Handle permission state
-      if (!resolution.canAccess) {
-        if (resolution.action === PermissionAction.REQUEST) {
-          const requestResult = await requestMediaPermission(MediaPermissionType.GALLERY);
-          if (!requestResult.canAccess) {
-            if (isMountedRef.current) {
-              showPermissionDialog(requestResult);
-              setLoading(false);
-            }
-            return;
-          }
-        } else {
-          if (isMountedRef.current) {
-            showPermissionDialog(resolution);
-            setLoading(false);
-          }
-          return;
-        }
-      }
-
-      // 🔐 STEP 3: Load photos with mandatory MIME-ONLY query (NO folder filtering)
+      // 🔐 STEP 1: Load photos with mandatory MIME-ONLY query (NO folder filtering)
       const PAGE_SIZE = 500;
       const result = await CameraRoll.getPhotos({
         first: PAGE_SIZE,
@@ -112,7 +88,7 @@ export default function CreatePostScreen({ navigation, route }: CreatePostScreen
 
         if (isMountedRef.current) {
           setPhotos(photos);
-          setPermissionState(resolution.state);
+          setPermissionState(MediaPermissionState.GRANTED); // Assuming granted if we got photos
 
           // 🛠️ REGRESSION PROTECTION: Dev-only logging
           if (__DEV__) {
