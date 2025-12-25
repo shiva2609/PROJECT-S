@@ -390,7 +390,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
             initialNumToRender={5}
             maxToRenderPerBatch={5}
             removeClippedSubviews={false}
-            contentContainerStyle={{ paddingTop: HEADER_HEIGHT + insets.top, paddingBottom: 20 }}
+            contentContainerStyle={{ paddingTop: HEADER_HEIGHT + insets.top + 20, paddingBottom: 20 }}
             onScroll={handleScroll}
             scrollEventThrottle={16}
             refreshControl={

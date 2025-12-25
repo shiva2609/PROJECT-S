@@ -16,7 +16,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../../providers/AuthProvider';
 // Removed unused imports
 import MessageBubble from '../../components/chat/MessageBubble';
-import MediaPicker from '../../components/create/MediaPicker';
+
 import GlassHeader from '../../components/layout/GlassHeader';
 import UserAvatar from '../../components/user/UserAvatar';
 import { Colors } from '../../theme/colors';

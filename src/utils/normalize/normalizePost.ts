@@ -115,6 +115,7 @@ export function normalizePost(raw: any): Post {
     aspectRatio: typeof raw.aspectRatio === 'number' ? raw.aspectRatio : undefined,
     ratio: typeof raw.ratio === 'string' ? raw.ratio : undefined,
     hashtags: Array.isArray(raw.hashtags) ? raw.hashtags : undefined,
+    location: raw.location || undefined,
   };
 }
 

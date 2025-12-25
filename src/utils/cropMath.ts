@@ -1,5 +1,11 @@
 import { Dimensions } from 'react-native';
-import type { AspectRatio, CropParams } from '../store/stores/useCreateFlowStore';
+export type AspectRatio = '1:1' | '4:5' | '16:9';
+
+export interface CropParams {
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
+}
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CROP_PADDING = 20;

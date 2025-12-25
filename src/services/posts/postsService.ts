@@ -72,6 +72,9 @@ export interface Post {
   authorId?: string;
   media: string[];
   caption?: string;
+  location?: string; // Added location
+  placeName?: string; // Added placeName (alias)
+  tags?: string[]; // Added tags
   createdAt: any;
   likeCount: number;
   commentCount: number;
@@ -144,6 +147,9 @@ function normalizePost(docSnap: QueryDocumentSnapshot<DocumentData>): Post {
     authorId: data.authorId || data.userId || data.createdBy || data.ownerId || '',
     media: mediaPath ? [mediaPath] : [],
     caption: data.caption || '',
+    location: data.location || data.placeName || undefined, // Extract location
+    placeName: data.placeName || data.location || undefined, // Extract placeName
+    tags: Array.isArray(data.tags) ? data.tags : undefined, // Extract tags
     createdAt,
     likeCount: Number(data.likeCount || 0),
     commentCount: Number(data.commentCount || 0),

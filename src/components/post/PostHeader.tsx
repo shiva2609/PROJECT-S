@@ -42,13 +42,15 @@ const PostHeader = ({
                 <ProfileAvatar
                     uri={profilePhoto}
                     size={38}
-                    borderColor="#FFE3D6"
-                    borderWidth={2}
+                    // REFACTORED: Removed story ring (borderColor) for PostCards
+                    // PostCard should just be clean profile image
+                    showBorder={false}
+                    borderWidth={0}
                     backgroundColor="#F5F5F5"
                     iconColor="#8E8E8E"
                     userId={userId}
                 />
-                <View style={styles.creatorInfo}>
+                <View style={[styles.creatorInfo, { justifyContent: location ? 'flex-start' : 'center' }]}>
                     <View style={styles.usernameRow}>
                         <Text style={styles.username} numberOfLines={1}>{username}</Text>
                         {isVerified && (
@@ -100,12 +102,13 @@ const styles = StyleSheet.create({
     },
     creatorInfo: {
         flex: 1,
+        marginLeft: 10,
+        justifyContent: 'center', // Default center if no location
     },
     usernameRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 5,
-        marginBottom: 2,
+        gap: 4,
     },
     username: {
         fontFamily: Fonts.bold,
@@ -120,7 +123,8 @@ const styles = StyleSheet.create({
     locationRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
+        gap: 2,
+        marginTop: 1, // Clean spacing below username
     },
     location: {
         fontFamily: Fonts.regular,

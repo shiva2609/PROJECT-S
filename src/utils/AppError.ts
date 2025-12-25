@@ -104,7 +104,13 @@ export class AppError extends Error {
         }
 
         // Handle Storage/Camera Permissions (Native)
-        if (message.includes('camera') || message.includes('storage') || message.includes('photo')) {
+        // 🔐 FIX: Be specific! Don't catch generic "storage" (Firebase) or "photo" (e.g. "failed to load photo") errors
+        if (
+            (message.toLowerCase().includes('permission') && (message.toLowerCase().includes('camera') || message.toLowerCase().includes('storage'))) ||
+            code === 'E_PERMISSION_MISSING' ||
+            code === 'E_PICKER_NO_CAMERA_PERMISSION' ||
+            code === 'E_PICKER_CANNOT_RUN_CAMERA_ON_SIMULATOR'
+        ) {
             return new AppError('We need access to your camera/photos to continue.', ErrorType.PERMISSION, {
                 title: 'Permission Required',
                 code: 'SYSTEM_PERMISSION',

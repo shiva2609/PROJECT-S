@@ -192,7 +192,7 @@ export async function checkUsernameAvailable(username: string): Promise<boolean>
 
 /**
  * Search users by username or name
- * V1: Client-side filtering since usernameLower field may not exist in all user documents
+ * V2: Improved client-side filtering with larger user pool to ensure all users are searchable
  * @param searchQuery - Search query string
  * @param limit - Maximum number of results (default: 20)
  * @returns Array of matching users
@@ -207,8 +207,9 @@ export async function searchUsers(searchQuery: string, limit: number = 20): Prom
 
     const usersRef = collection(db, 'users');
 
-    // V1: Try indexed search first (if usernameLower exists)
+    // V2: Try indexed search first (if usernameLower exists)
     try {
+      console.log(`[searchUsers] Attempting indexed search for: "${searchTerm}"`);
       const indexedQuery = query(
         usersRef,
         where('usernameLower', '>=', searchTerm),
@@ -218,34 +219,40 @@ export async function searchUsers(searchQuery: string, limit: number = 20): Prom
 
       const indexedResults = await getDocs(indexedQuery);
       if (indexedResults.docs.length > 0) {
+        console.log(`[searchUsers] ✅ Indexed search returned ${indexedResults.docs.length} results`);
         return indexedResults.docs.map(normalizeUser);
       }
+      console.log('[searchUsers] Indexed search returned 0 results, falling back to client-side filtering');
     } catch (indexError) {
       // Index doesn't exist or usernameLower field missing, fall through to client-side search
-      console.log('Indexed search failed, using client-side filtering');
+      console.log('[searchUsers] ⚠️ Indexed search failed, using client-side filtering:', indexError);
     }
 
-    // V1: Fallback to client-side filtering
-    // Fetch recent users (up to 100) and filter client-side
+    // V2: Fallback to client-side filtering with LARGER user pool
+    // CRITICAL FIX: Increased from 100 to 500 to include older accounts (followed users)
+    // This ensures that users who created accounts earlier are still searchable
+    console.log('[searchUsers] Fetching up to 500 users for client-side filtering...');
     const fallbackQuery = query(
       usersRef,
       orderBy('createdAt', 'desc'),
-      firestoreLimit(100)
+      firestoreLimit(500) // Increased from 100 to 500
     );
 
     const snapshot = await getDocs(fallbackQuery);
     const allUsers = snapshot.docs.map(normalizeUser);
+    console.log(`[searchUsers] Fetched ${allUsers.length} users for filtering`);
 
     // Client-side case-insensitive search
-    const filtered = allUsers.filter(user => {
+    const filtered = allUsers.filter((user: User) => {
       const username = (user.username || '').toLowerCase();
       const displayName = (user.name || '').toLowerCase();
       return username.includes(searchTerm) || displayName.includes(searchTerm);
     });
 
+    console.log(`[searchUsers] ✅ Client-side filtering found ${filtered.length} matches (returning top ${Math.min(filtered.length, limit)})`);
     return filtered.slice(0, limit);
   } catch (error: any) {
-    console.error('Error searching users:', error);
+    console.error('[searchUsers] ❌ Error searching users:', error);
     throw { code: 'search-users-failed', message: 'Failed to search users' };
   }
 }
