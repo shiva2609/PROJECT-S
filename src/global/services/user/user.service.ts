@@ -268,88 +268,95 @@ export function listenToUserPublicInfo(
 }
 
 /**
- * Get user posts (one-time fetch)
- * CRITICAL: Hydrates posts with author username and avatar to ensure PostCard renders correctly
- * @param userId - User ID to get posts for
- * @returns Array of posts (enriched with author data)
+ * Get user posts (Dual-Source Read)
+ * 🔬 Strategy: Fetches from both Global 'posts' and Legacy 'users/{id}/posts'
+ * Merges, deduplicates, and sorts to ensure full history visibility
  */
 export async function getUserPosts(userId: string): Promise<Post[]> {
   if (!userId) return [];
 
   try {
-    const postsCol = collection(db, 'posts');
-    let q;
+    // 1. Define Sources
+    const globalPostsQuery = query(
+      collection(db, 'posts'),
+      where('createdBy', '==', userId),
+      orderBy('createdAt', 'desc')
+    );
 
-    try {
-      q = query(
-        postsCol,
-        where('createdBy', '==', userId),
-        orderBy('createdAt', 'desc')
-      );
-    } catch (queryErr: any) {
-      // Fallback without orderBy
-      q = query(postsCol, where('createdBy', '==', userId));
-    }
+    // Legacy support: Some older data structures might use this path
+    const legacyPostsRef = collection(db, 'users', userId, 'posts');
 
-    const snapshot = await getDocs(q);
-    const posts: Post[] = [];
+    // 2. Execute Parallel Fetches
+    const [globalSnap, legacySnap] = await Promise.all([
+      getDocs(globalPostsQuery).catch(err => {
+        console.warn('[getUserPosts] Global query failed:', err);
+        return { docs: [] };
+      }),
+      getDocs(legacyPostsRef).catch(err => {
+        // Expected behavior if collection doesn't exist or permissions block it
+        // purely a compatibility probe
+        return { docs: [] };
+      })
+    ]);
 
-    snapshot.forEach((docSnap) => {
+    // 3. Normalize & Merge
+    const allPosts: Post[] = [];
+    const seenIds = new Set<string>();
+
+    const processDoc = (docSnap: any, source: string) => {
+      if (seenIds.has(docSnap.id)) return;
       try {
         const raw = { id: docSnap.id, ...docSnap.data() };
+        // Ensure critical fields exist for rendering
+        if (!raw.createdBy) raw.createdBy = userId;
+
         const normalized = normalizePost(raw);
-        if (normalized && normalized.id && normalized.createdBy) {
-          posts.push(normalized);
+        if (normalized && normalized.id) {
+          allPosts.push(normalized);
+          seenIds.add(normalized.id);
         }
-      } catch (docErr: any) {
-        console.warn('[getUserPosts] Error normalizing post:', docSnap.id, docErr);
+      } catch (e) {
+        console.warn(`[getUserPosts] Error normalizing ${source} post:`, e);
       }
+    };
+
+    // Priority to Global posts (Newer schema)
+    (globalSnap as any).docs?.forEach((d: any) => processDoc(d, 'global'));
+    (legacySnap as any).docs?.forEach((d: any) => processDoc(d, 'legacy'));
+
+    // 4. Sort (Newest First)
+    allPosts.sort((a, b) => {
+      const aTime = a.createdAt?.toMillis?.() || a.createdAt?.seconds * 1000 || 0;
+      const bTime = b.createdAt?.toMillis?.() || b.createdAt?.seconds * 1000 || 0;
+      return bTime - aTime;
     });
 
-    // Sort if needed
-    if (posts.length > 0) {
-      posts.sort((a, b) => {
-        const aTime = a.createdAt?.toMillis?.() || a.createdAt?.seconds * 1000 || 0;
-        const bTime = b.createdAt?.toMillis?.() || b.createdAt?.seconds * 1000 || 0;
-        return bTime - aTime;
-      });
-    }
-
-    // CRITICAL FIX: Hydrate posts with author data (matching post.service.ts pattern)
-    // This ensures PostCard always has username/avatar, preventing "User" fallback
+    // 5. Hydrate Author Data (CRITICAL for UI)
     try {
       const authorInfo = await getUserPublicInfo(userId);
-
       if (authorInfo) {
-        // Enrich all posts with author data
-        const enrichedPosts = posts.map(post => ({
+        return allPosts.map(post => ({
           ...post,
           authorUsername: authorInfo.username,
           authorAvatar: authorInfo.photoURL,
-          username: authorInfo.username, // Fallback field used by PostCard
+          username: authorInfo.username,
         } as any));
-
-        return enrichedPosts;
-      } else {
-        console.warn('[getUserPosts] Could not fetch author info for userId:', userId);
-        return posts;
       }
-    } catch (enrichErr: any) {
-      console.error('[getUserPosts] Error enriching posts with author data:', enrichErr);
-      return posts;
+    } catch (e) {
+      console.warn('[getUserPosts] Author hydration failed', e);
     }
+
+    return allPosts;
+
   } catch (error: any) {
-    console.error('[getUserPosts] Error:', error);
+    console.error('[getUserPosts] Critical Error:', error);
     return [];
   }
 }
 
 /**
- * Listen to user posts (realtime)
- * CRITICAL: Hydrates posts with author username and avatar to ensure PostCard renders correctly
- * @param userId - User ID to listen to posts for
- * @param callback - Callback with array of posts (enriched with author data)
- * @returns Unsubscribe function
+ * Listen to user posts (Dual-Source Realtime)
+ * 🎧 Subscribes to Global and Legacy paths simultaneously
  */
 export function listenToUserPosts(
   userId: string,
@@ -360,138 +367,102 @@ export function listenToUserPosts(
     return () => { };
   }
 
-  const postsCol = collection(db, 'posts');
+  // Local state to hold merged results from both listeners
+  let globalPosts: Post[] = [];
+  let legacyPosts: Post[] = [];
 
-  let q;
-  try {
-    q = query(
-      postsCol,
-      where('createdBy', '==', userId),
-      orderBy('createdAt', 'desc')
-    );
-  } catch (queryErr: any) {
-    q = query(postsCol, where('createdBy', '==', userId));
-  }
+  // Helper to merge, dedup, sort, and emit
+  const emitMerged = async () => {
+    const allPosts: Post[] = [];
+    const seenIds = new Set<string>();
 
-  try {
-    return onSnapshot(
-      q,
-      async (snapshot) => {
-        try {
-          const posts: Post[] = [];
-          snapshot.forEach((docSnap) => {
-            try {
-              const raw = { id: docSnap.id, ...docSnap.data() };
-              const normalized = normalizePost(raw);
-              if (normalized && normalized.id && normalized.createdBy) {
-                posts.push(normalized);
-              }
-            } catch (docErr: any) {
-              console.warn('[listenToUserPosts] Error normalizing post:', docSnap.id, docErr);
-            }
-          });
-
-          // Sort if needed
-          if (!q.toString().includes('orderBy')) {
-            posts.sort((a, b) => {
-              const aTime = a.createdAt?.toMillis?.() || a.createdAt?.seconds * 1000 || 0;
-              const bTime = b.createdAt?.toMillis?.() || b.createdAt?.seconds * 1000 || 0;
-              return bTime - aTime;
-            });
-          }
-
-          // CRITICAL FIX: Hydrate posts with author data (matching post.service.ts pattern)
-          // This ensures PostCard always has username/avatar, preventing "User" fallback
-          try {
-            // Fetch author info for the user (should be cached or fast since it's a single user)
-            const authorInfo = await getUserPublicInfo(userId);
-
-            if (authorInfo) {
-              // Enrich all posts with author data
-              const enrichedPosts = posts.map(post => ({
-                ...post,
-                authorUsername: authorInfo.username,
-                authorAvatar: authorInfo.photoURL,
-                username: authorInfo.username, // Fallback field used by PostCard
-              } as any));
-
-              callback(enrichedPosts);
-            } else {
-              // If author fetch fails, still return posts (PostCard will handle fallback)
-              console.warn('[listenToUserPosts] Could not fetch author info for userId:', userId);
-              callback(posts);
-            }
-          } catch (enrichErr: any) {
-            console.error('[listenToUserPosts] Error enriching posts with author data:', enrichErr);
-            // Fallback to unenriched posts
-            callback(posts);
-          }
-        } catch (err: any) {
-          console.error('[listenToUserPosts] Error processing snapshot:', err);
-          callback([]);
-        }
-      },
-      (error: any) => {
-        // Fallback query on error
-        if (error?.code === 'failed-precondition' || error?.message?.includes('index')) {
-          const fallbackQ = query(postsCol, where('createdBy', '==', userId));
-          return onSnapshot(
-            fallbackQ,
-            async (snapshot) => {
-              const posts: Post[] = [];
-              snapshot.forEach((docSnap) => {
-                try {
-                  const raw = { id: docSnap.id, ...docSnap.data() };
-                  const normalized = normalizePost(raw);
-                  if (normalized && normalized.id && normalized.createdBy) {
-                    posts.push(normalized);
-                  }
-                } catch (docErr: any) {
-                  console.warn('[listenToUserPosts] Error normalizing post:', docSnap.id, docErr);
-                }
-              });
-
-              posts.sort((a, b) => {
-                const aTime = a.createdAt?.toMillis?.() || a.createdAt?.seconds * 1000 || 0;
-                const bTime = b.createdAt?.toMillis?.() || b.createdAt?.seconds * 1000 || 0;
-                return bTime - aTime;
-              });
-
-              // CRITICAL FIX: Hydrate posts with author data in fallback path too
-              try {
-                const authorInfo = await getUserPublicInfo(userId);
-                if (authorInfo) {
-                  const enrichedPosts = posts.map(post => ({
-                    ...post,
-                    authorUsername: authorInfo.username,
-                    authorAvatar: authorInfo.photoURL,
-                    username: authorInfo.username,
-                  } as any));
-                  callback(enrichedPosts);
-                } else {
-                  callback(posts);
-                }
-              } catch (enrichErr: any) {
-                console.error('[listenToUserPosts] Fallback: Error enriching posts:', enrichErr);
-                callback(posts);
-              }
-            },
-            (fallbackError: any) => {
-              console.error('[listenToUserPosts] Fallback query also failed:', fallbackError);
-              callback([]);
-            }
-          );
-        }
-
-        console.error('[listenToUserPosts] Listener error:', error);
-        callback([]);
+    // Merge Global First
+    globalPosts.forEach(p => {
+      if (!seenIds.has(p.id)) {
+        allPosts.push(p);
+        seenIds.add(p.id);
       }
-    );
-  } catch (setupErr: any) {
-    console.error('[listenToUserPosts] Setup error:', setupErr);
-    callback([]);
-    return () => { };
+    });
+
+    // Merge Legacy
+    legacyPosts.forEach(p => {
+      if (!seenIds.has(p.id)) {
+        allPosts.push(p);
+        seenIds.add(p.id);
+      }
+    });
+
+    // Sort
+    allPosts.sort((a, b) => {
+      const aTime = a.createdAt?.toMillis?.() || a.createdAt?.seconds * 1000 || 0;
+      const bTime = b.createdAt?.toMillis?.() || b.createdAt?.seconds * 1000 || 0;
+      return bTime - aTime;
+    });
+
+    // Hydrate
+    try {
+      const authorInfo = await getUserPublicInfo(userId);
+      if (authorInfo) {
+        const hydrated = allPosts.map(post => ({
+          ...post,
+          authorUsername: authorInfo.username,
+          authorAvatar: authorInfo.photoURL,
+          username: authorInfo.username,
+        } as any));
+        callback(hydrated);
+        return;
+      }
+    } catch (e) { /* ignore */ }
+
+    callback(allPosts);
+  };
+
+  // 1. Global Listener
+  const globalQuery = query(
+    collection(db, 'posts'),
+    where('createdBy', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+
+  const unsubGlobal = onSnapshot(globalQuery, (snapshot) => {
+    globalPosts = [];
+    snapshot.forEach(doc => {
+      const raw = { id: doc.id, ...doc.data() };
+      const norm = normalizePost(raw);
+      if (norm) globalPosts.push(norm);
+    });
+    emitMerged();
+  }, (err) => {
+    console.warn('[listenToUserPosts] Global listener error:', err);
+    // On error, we still keep globalPosts as is or empty, and rely on legacy
+  });
+
+  // 2. Legacy Listener (Try/Catch wrapper not possible directly on onSnapshot, so we just attach error handler)
+  let unsubLegacy = () => { };
+  try {
+    const legacyRef = collection(db, 'users', userId, 'posts');
+    unsubLegacy = onSnapshot(legacyRef, (snapshot) => {
+      legacyPosts = [];
+      snapshot.forEach(doc => {
+        const raw = { id: doc.id, ...doc.data() };
+        // Ensure legacy posts have createdBy for consistency
+        if (!raw.createdBy) raw.createdBy = userId;
+        const norm = normalizePost(raw);
+        if (norm) legacyPosts.push(norm);
+      });
+      emitMerged();
+    }, (err) => {
+      // Expected for permissions error or non-existent collection
+      // console.debug('[listenToUserPosts] Legacy listener suppressed:', err.message);
+    });
+  } catch (e) {
+    // Setup failed (e.g. valid path check)
   }
+
+  return () => {
+    unsubGlobal();
+    unsubLegacy();
+  };
 }
 
 

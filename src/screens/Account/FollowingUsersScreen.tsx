@@ -230,7 +230,7 @@ export default function FollowingUsersScreen({ navigation, onUserPress, onPostPr
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: 20 }}
+        contentContainerStyle={{ paddingTop: headerHeight + 20, paddingBottom: 20 }}
         ListFooterComponent={
           <>
             {postsEnded && (

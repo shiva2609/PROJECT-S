@@ -87,7 +87,8 @@ export interface Post {
 	sharedBy?: string[]; // Track who shared the post
 	createdAt: number;
 	placeName?: string;
-	location?: string;
+	location?: string | { id: string; name: string; coords?: any };
+	hashtags?: string[];
 	profilePhoto?: string;
 	coverImage?: string;
 	details?: string; // Additional post details

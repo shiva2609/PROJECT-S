@@ -16,7 +16,7 @@ import { UserRelationProvider } from './UserRelationProvider';
 import { MessageProvider } from './MessageProvider';
 import { ThemeProvider } from './ThemeProvider';
 import { ErrorBoundary } from './ErrorBoundary';
-import { CreateFlowProvider } from '../store/stores/useCreateFlowStore';
+
 import { SuggestionsProvider } from '../store/stores/useSuggestionsStore';
 import { AppBootstrap } from '../app/AppBootstrap';
 
@@ -41,9 +41,7 @@ export function AppProviders({ children }: AppProvidersProps) {
                     <MessageProvider>
                       <ThemeProvider>
                         <SuggestionsProvider>
-                          <CreateFlowProvider>
-                            {children}
-                          </CreateFlowProvider>
+                          {children}
                         </SuggestionsProvider>
                       </ThemeProvider>
                     </MessageProvider>

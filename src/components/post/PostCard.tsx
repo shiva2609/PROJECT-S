@@ -329,7 +329,10 @@ function PostCard({
   const profilePhotoFromHook = useProfilePhoto(creatorId || '');
   const profilePhoto = authorAvatar || profilePhotoFromHook;
 
-  const location = post.location || post.placeName || '';
+  const location = typeof post.location === 'object' && post.location !== null
+    ? post.location.name
+    : (typeof post.location === 'string' ? post.location : (post as any).placeName || '');
+
   const username = authorUsername;
   const timestamp = formatTimestamp(post.createdAt || Date.now());
 
@@ -360,6 +363,10 @@ function PostCard({
     const postTags = (post as any).tags || [];
     const hasTags = Array.isArray(postTags) && postTags.length > 0;
 
+    // Check if we have hashtags (explicit from Create flow)
+    const hashtags = post.hashtags || [];
+    const hasHashtags = Array.isArray(hashtags) && hashtags.length > 0;
+
     // DEBUG: Log to verify data
     if (__DEV__) {
       console.log('🔍 [PostCard] Post ID:', post.id);
@@ -368,10 +375,11 @@ function PostCard({
       console.log('🔍 [PostCard] Post placeName:', (post as any).placeName);
       console.log('🔍 [PostCard] Tags:', postTags);
       console.log('🔍 [PostCard] Has tags:', hasTags);
+      console.log('🔍 [PostCard] Hashtags:', hashtags);
       console.log('🔍 [PostCard] All post keys:', Object.keys(post));
     }
 
-    if (!post.caption && !hasTags) return null;
+    if (!post.caption && !hasTags && !hasHashtags) return null;
 
     return (
       <View style={styles.contentContainer}>
@@ -392,7 +400,19 @@ function PostCard({
           </Text>
         ) : null}
 
-        {/* 2. Tags Block */}
+        {/* 2. Hashtags Block (New) */}
+        {hasHashtags && (
+          <View style={styles.hostTagsContainer}>
+            {hashtags.map((tag: string, index: number) => (
+              <Text key={`hash-${index}`} style={styles.hashtag}>
+                #{tag}
+                {index < hashtags.length - 1 ? ' ' : ''}
+              </Text>
+            ))}
+          </View>
+        )}
+
+        {/* 3. Tags Block (People) */}
         {hasTags && (
           <View style={styles.tagsContainer}>
             {postTags.map((tag: string, index: number) => (

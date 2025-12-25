@@ -72,6 +72,7 @@ export interface Post {
   metadata?: any;
   aspectRatio?: number;
   hashtags?: string[];
+  location?: string | { id: string; name: string; coords?: { lat: number; lng: number } } | null;
   [key: string]: any; // Allow additional fields
 }
 

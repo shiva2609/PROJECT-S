@@ -5,8 +5,7 @@
 
 import { Platform, Image } from 'react-native';
 import RNFS from 'react-native-fs';
-import { computeCropRect } from './cropMath';
-import type { CropParams } from '../store/stores/useCreateFlowStore';
+import { computeCropRect, CropParams } from './cropMath';
 
 // Profile photo box dimensions (Square for circular crop)
 export const PROFILE_PHOTO_WIDTH = 500;
