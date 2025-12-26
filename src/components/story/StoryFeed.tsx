@@ -3,6 +3,7 @@ import {
     View, FlatList, StyleSheet, Text, Modal, Image, TextInput, TouchableOpacity, ActivityIndicator, Alert, Platform
 } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
+import Icon from 'react-native-vector-icons/Ionicons';
 import { StoryAvatar } from './StoryAvatar';
 import { StoryViewer } from './StoryViewer';
 import { StoryService } from '../../services/story/story.service';
@@ -13,6 +14,7 @@ import { getUserProfilePhoto } from '../../services/users/userProfilePhotoServic
 
 export const StoryFeed = () => {
     const [stories, setStories] = useState<StoryUser[]>([]);
+    const [currentUserStory, setCurrentUserStory] = useState<StoryUser | null>(null);
     const [selectedUser, setSelectedUser] = useState<StoryUser | null>(null);
     const [uploadModalVisible, setUploadModalVisible] = useState(false);
     const [uploadMedia, setUploadMedia] = useState<{ uri: string, type: 'image' | 'video' } | null>(null);
@@ -21,9 +23,23 @@ export const StoryFeed = () => {
     const [currentUserAvatar, setCurrentUserAvatar] = useState<string>('');
     const [avatarError, setAvatarError] = useState(false);
 
+    const [viewedStoryIds, setViewedStoryIds] = useState<Set<string>>(new Set());
+
     const loadStories = useCallback(async () => {
         const feed = await StoryService.getStoryFeed();
-        setStories(feed);
+
+        // 🔐 FILTER: Exclude current user from feed, show separately in "Your Story"
+        const myUid = auth.currentUser?.uid;
+        if (myUid) {
+            const myStory = feed.find(s => s.userId === myUid);
+            const others = feed.filter(s => s.userId !== myUid);
+
+            setStories(others);
+            setCurrentUserStory(myStory || null);
+        } else {
+            setStories(feed);
+            setCurrentUserStory(null);
+        }
     }, []);
 
     useEffect(() => {
@@ -73,44 +89,120 @@ export const StoryFeed = () => {
         }
     };
 
-    const renderItem = ({ item }: { item: StoryUser }) => (
-        <StoryAvatar
-            user={item}
-            onPress={() => setSelectedUser(item)}
-        />
-    );
+    const handleStoryFinish = (finishedUserId?: string) => {
+        // Auto-advance logic (IMMEDIATE)
+        if (!finishedUserId) {
+            setSelectedUser(null);
+            return;
+        }
+
+        if (currentUserStory && currentUserStory.userId === finishedUserId) {
+            if (stories.length > 0) {
+                setSelectedUser(stories[0] || null);
+            } else {
+                setSelectedUser(null);
+            }
+        } else {
+            const currentIndex = stories.findIndex(s => s.userId === finishedUserId);
+            if (currentIndex !== -1 && currentIndex < stories.length - 1) {
+                setSelectedUser(stories[currentIndex + 1] || null);
+            } else {
+                setSelectedUser(null);
+            }
+        }
+    };
+
+    const handleStoryView = useCallback((storyId: string) => {
+        // ISSUE 2: Multi-Story Independent Tracking
+        // Add specific story to viewed set for precise computation
+        setViewedStoryIds(prev => {
+            if (prev.has(storyId)) return prev;
+            const next = new Set(prev);
+            next.add(storyId);
+            return next;
+        });
+    }, []);
+
+    const isUserFullyViewed = (user: StoryUser) => {
+        const uid = auth.currentUser?.uid;
+        if (!uid) return true;
+
+        // A user is fully viewed IF all their stories are either in the server 'views' or our local 'viewedStoryIds'
+        return user.stories.every(s => {
+            const serverViewed = Array.isArray(s.views) && s.views.includes(uid);
+            const localViewed = viewedStoryIds.has(s.id);
+            return serverViewed || localViewed;
+        });
+    };
+
+    const renderItem = ({ item }: { item: StoryUser }) => {
+        const effectiveHasUnseen = !isUserFullyViewed(item);
+        const displayItem = { ...item, hasUnseen: effectiveHasUnseen };
+
+        return (
+            <StoryAvatar
+                user={displayItem}
+                onPress={() => setSelectedUser(item)}
+            />
+        );
+    };
 
     const currentUser = auth.currentUser;
+    const myStoryHasUnseen = currentUserStory ? !isUserFullyViewed(currentUserStory) : false;
 
-    // Header component for list: Add Story Button
-    // Actually, standard is to put it as first item.
-    // We can inject a "My Story" placeholder if not present in list?
-    // Or purely button. Let's make it a button left of list.
+    // ... (rest of render logic)
 
     return (
         <View style={styles.container}>
             <View style={styles.listContainer}>
-                {/* Helper to add Add Button as first item nicely */}
-                <TouchableOpacity style={styles.addBtnContainer} onPress={handleAddStory}>
+                <View style={styles.addBtnContainer}>
                     <View style={styles.addBtnCircle}>
-                        {currentUserAvatar && !avatarError ? (
-                            <Image
-                                source={{ uri: currentUserAvatar }}
-                                style={styles.myAvatar}
-                                onError={() => setAvatarError(true)}
-                            />
-                        ) : (
-                            <View style={[styles.myAvatar, styles.fallbackMyAvatar]}>
-                                {/* If no image, show generic user icon or initials if we had name */}
-                                <Text style={{ fontSize: 20, color: '#888' }}>?</Text>
-                            </View>
-                        )}
-                        <View style={styles.plusBadge}>
+                        <TouchableOpacity
+                            activeOpacity={0.9}
+                            onPress={() => {
+                                if (currentUserStory) {
+                                    setSelectedUser(currentUserStory);
+                                } else {
+                                    handleAddStory();
+                                }
+                            }}
+                        >
+                            {currentUserAvatar && !avatarError ? (
+                                <Image
+                                    source={{ uri: currentUserAvatar }}
+                                    style={styles.myAvatar}
+                                    onError={() => setAvatarError(true)}
+                                />
+                            ) : (
+                                <View style={[styles.myAvatar, styles.fallbackMyAvatar]}>
+                                    {/* ISSUE 1: Proper fallback icon (👤) for Story Section - Never show text initials */}
+                                    <Icon name="person" size={32} color="#888" />
+                                </View>
+                            )}
+                        </TouchableOpacity>
+
+                        {/* Plus Badge */}
+                        <TouchableOpacity
+                            style={styles.plusBadge}
+                            onPress={handleAddStory}
+                        >
                             <Text style={styles.plusText}>+</Text>
-                        </View>
+                        </TouchableOpacity>
+
+                        {/* Ring for active story */}
+                        {currentUserStory && (
+                            <View style={{
+                                position: 'absolute',
+                                top: -2, left: -2, right: -2, bottom: -2,
+                                borderRadius: 36,
+                                borderWidth: 2,
+                                borderColor: myStoryHasUnseen ? colors.primary : '#E0E0E0',
+                                zIndex: -1
+                            }} />
+                        )}
                     </View>
                     <Text style={styles.username}>Your Story</Text>
-                </TouchableOpacity>
+                </View>
 
                 <FlatList
                     horizontal
@@ -128,10 +220,8 @@ export const StoryFeed = () => {
                     visible={!!selectedUser}
                     userStories={selectedUser}
                     onClose={() => setSelectedUser(null)}
-                    onFinish={() => {
-                        // Logic to move to next user could go here
-                        setSelectedUser(null);
-                    }}
+                    onFinish={handleStoryFinish}
+                    onViewStory={handleStoryView}
                 />
             )}
 
@@ -170,10 +260,12 @@ export const StoryFeed = () => {
 const styles = StyleSheet.create({
     container: {
         paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-        backgroundColor: colors.surface,
+        // BG Seamless Fix: No background highlight or border, matches parent
+        // borderBottomWidth: 1, 
+        // borderBottomColor: colors.border,
+        // backgroundColor: colors.surface,
     },
+    // ... existing listContainer ...
     listContainer: {
         flexDirection: 'row',
     },

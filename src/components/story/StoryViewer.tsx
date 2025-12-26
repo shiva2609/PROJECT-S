@@ -6,7 +6,7 @@ import Video from 'react-native-video';
 import LinearGradient from 'react-native-linear-gradient';
 import { StoryUser, Story } from '../../types/story';
 import { StoryService } from '../../services/story/story.service';
-// import Icon from 'react-native-vector-icons/Ionicons'; // Assuming installed
+import Icon from 'react-native-vector-icons/Ionicons';
 
 import { auth } from '../../core/firebase';
 
@@ -16,10 +16,11 @@ interface Props {
     userStories: StoryUser;
     visible: boolean;
     onClose: () => void;
-    onFinish?: () => void;
+    onFinish?: (userId?: string) => void;
+    onViewStory?: (storyId: string) => void;
 }
 
-export const StoryViewer = ({ userStories, visible, onClose, onFinish }: Props) => {
+export const StoryViewer = ({ userStories, visible, onClose, onFinish, onViewStory }: Props) => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [loading, setLoading] = useState(true);
     const currentStory = userStories.stories[currentIndex];
@@ -27,26 +28,47 @@ export const StoryViewer = ({ userStories, visible, onClose, onFinish }: Props) 
     const duration = 5000; // default 5s for image
     const [videoDuration, setVideoDuration] = useState(0);
     const [paused, setPaused] = useState(false);
+    const finishedRef = useRef(false);
 
     useEffect(() => {
         if (visible && userStories.stories.length > 0) {
-            setCurrentIndex(0);
+            // Start from first NEW story (Instagram behavior)
+            // If user has viewed all, start from 0 (though ring logic usually prevents opening if all viewed unless manually clicked)
+            const uid = auth.currentUser?.uid;
+            let startIndex = 0;
+            if (uid) {
+                // Find first story I haven't seen
+                const firstUnseen = userStories.stories.findIndex(s => {
+                    // Safe check: ensure views is an array
+                    const views = Array.isArray(s.views) ? s.views : [];
+                    return !views.includes(uid);
+                });
+                if (firstUnseen !== -1) {
+                    startIndex = firstUnseen;
+                }
+                // If all visited (firstUnseen === -1), startIndex remains 0 (restart)
+            }
+
+            setCurrentIndex(startIndex);
             setProgress(0);
             setVideoDuration(0);
             setLoading(true);
-            if (userStories.stories[0]) {
-                markViewed(userStories.stories[0]);
+            finishedRef.current = false; // Reset finish guard
+
+            // 🔐 SEEN LOGIC: Mark the STARTING story as seen immediately
+            const startStory = userStories.stories[startIndex];
+            if (startStory && onViewStory) {
+                onViewStory(startStory.id);
             }
         }
     }, [visible, userStories]);
 
     const markViewed = (story: Story) => {
-        // Optimistic or fire-and-forget
         StoryService.viewStory(story.id);
     };
 
     useEffect(() => {
-        if (!visible || paused || loading || !currentStory) return;
+        if (!visible || paused || loading || !currentStory || finishedRef.current) return;
 
         // For Image: Simple interval
         if (currentStory.mediaType === 'image' || currentStory.mediaType === 'text') {
@@ -56,7 +78,7 @@ export const StoryViewer = ({ userStories, visible, onClose, onFinish }: Props) 
                     const newP = p + (step / duration);
                     if (newP >= 1) {
                         clearInterval(interval);
-                        goNext();
+                        goNext(); // Auto-advance
                         return 1;
                     }
                     return newP;
@@ -67,43 +89,57 @@ export const StoryViewer = ({ userStories, visible, onClose, onFinish }: Props) 
     }, [visible, paused, loading, currentIndex, currentStory, duration]);
 
     const safeClose = () => {
-        // Schedule update to avoid "Cannot update while rendering" error
         setTimeout(() => {
             onClose();
         }, 0);
     };
 
     const safeFinish = () => {
+        if (finishedRef.current) return; // Prevent double trigger
+        finishedRef.current = true;
+
         setTimeout(() => {
-            if (onFinish) onFinish();
+            if (onFinish) onFinish(userStories.userId);
             else onClose();
         }, 0);
     };
 
     const goNext = () => {
+        if (loading || finishedRef.current) return; // Prevent jumping while loading or finished
+
+        // Mark current story as viewed when moving past it
+        if (currentStory) {
+            markViewed(currentStory);
+        }
+
         if (currentIndex < userStories.stories.length - 1) {
-            setCurrentIndex(i => {
-                const next = i + 1;
-                const nextStory = userStories.stories[next];
-                if (nextStory) markViewed(nextStory);
-                return next;
-            });
+            const nextIndex = currentIndex + 1;
+            setCurrentIndex(nextIndex);
             setProgress(0);
             setVideoDuration(0);
             setLoading(true);
+
+            // 🔐 SEEN LOGIC: Mark the NEXT story as seen immediately
+            const nextStory = userStories.stories[nextIndex];
+            if (nextStory && onViewStory) {
+                onViewStory(nextStory.id);
+            }
         } else {
+            // End of this user's stories - COMPLETION CONFIRMED
             safeFinish();
         }
     };
 
     const goPrev = () => {
+        if (loading || finishedRef.current) return;
+
         if (currentIndex > 0) {
             setCurrentIndex(i => i - 1);
             setProgress(0);
             setVideoDuration(0);
             setLoading(true);
         } else {
-            // Restart current? or nothing
+            // Restart current
             setProgress(0);
         }
     };
@@ -114,13 +150,15 @@ export const StoryViewer = ({ userStories, visible, onClose, onFinish }: Props) 
     };
 
     const handleVideoProgress = (data: any) => {
-        if (videoDuration > 0) {
+        if (videoDuration > 0 && !loading && !paused) {
             setProgress(data.currentTime / videoDuration);
         }
     };
 
     const handleVideoEnd = () => {
-        goNext();
+        if (!loading && !paused) {
+            goNext();
+        }
     };
 
     const handleImageLoad = () => {
@@ -128,6 +166,7 @@ export const StoryViewer = ({ userStories, visible, onClose, onFinish }: Props) 
     };
 
     const handleDelete = () => {
+        if (!currentStory) return;
         setPaused(true);
         Alert.alert(
             "Delete Story",
@@ -138,7 +177,10 @@ export const StoryViewer = ({ userStories, visible, onClose, onFinish }: Props) 
                     text: "Delete",
                     style: "destructive",
                     onPress: async () => {
+                        if (!currentStory) return;
                         try {
+                            // If we delete the last story, we might need to close?
+                            // For now simple delete and close is safest as index shifts.
                             await StoryService.deleteStory(currentStory.id, currentStory.mediaUrl);
                             safeClose();
                         } catch (e) {
@@ -180,7 +222,16 @@ export const StoryViewer = ({ userStories, visible, onClose, onFinish }: Props) 
 
                     {/* User Header */}
                     <View style={styles.header}>
-                        <Image source={{ uri: userStories.avatar }} style={styles.avatar} />
+                        {userStories.avatar ? (
+                            <Image
+                                source={{ uri: userStories.avatar }}
+                                style={styles.avatar}
+                            />
+                        ) : (
+                            <View style={[styles.avatar, { backgroundColor: '#E1E1E1', justifyContent: 'center', alignItems: 'center' }]}>
+                                <Icon name="person" size={16} color="#888" />
+                            </View>
+                        )}
                         <Text style={styles.username}>{userStories.username}</Text>
                         <Text style={styles.timeAgo}>
                             {Math.floor((Date.now() - currentStory.createdAt) / 3600000)}h

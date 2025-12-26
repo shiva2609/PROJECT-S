@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Image, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import Icon from 'react-native-vector-icons/Ionicons';
 import { StoryUser } from '../../types/story';
 import { colors } from '../../utils/colors';
 
@@ -19,14 +20,6 @@ export const StoryAvatar = ({ user, onPress, isMe }: Props) => {
         : ['#E0E0E0', '#BDBDBD'];
 
     const [imageError, setImageError] = React.useState(false);
-
-    // Helper to get initials
-    const getInitials = (name: string) => {
-        const parts = (name || 'User').trim().split(' ');
-        if (parts.length === 0) return '?';
-        if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-        return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    };
 
     return (
         <TouchableOpacity onPress={onPress} style={styles.container}>
@@ -47,7 +40,8 @@ export const StoryAvatar = ({ user, onPress, isMe }: Props) => {
                             />
                         ) : (
                             <View style={[styles.avatar, styles.fallbackAvatar]}>
-                                <Text style={styles.fallbackText}>{getInitials(user.username)}</Text>
+                                {/* ISSUE 1: Proper fallback icon (👤) for Story Section - Never show text initials */}
+                                <Icon name="person" size={32} color="#888" />
                             </View>
                         )}
                     </View>
@@ -94,11 +88,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#E1E1E1',
         justifyContent: 'center',
         alignItems: 'center',
-    },
-    fallbackText: {
-        fontSize: 22,
-        fontWeight: 'bold',
-        color: '#888',
     },
     username: {
         fontSize: 11,
