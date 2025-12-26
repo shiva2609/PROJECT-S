@@ -1,38 +1,25 @@
 rules_version = '2';
 
 service firebase.storage {
+  // -------------------------------------------------------------------------
+  // WRAPPER FOR BUCKET
+  // -------------------------------------------------------------------------
+  match /b/{bucket}/o {
+    
     // -------------------------------------------------------------------------
     // CANONICAL PATH ENFORCEMENT
     // Root: users/{userId}/...
-    // All user content MUST be stored under this root.
     // -------------------------------------------------------------------------
-
-    // 1. Matches ANY path under users/{userId}
-    // This allows granular control but enforces the root.
     match /users/{userId}/{allPaths=**} {
-      
-      // helper: owner or admin
       function isOwner(uid) {
         return request.auth != null && request.auth.uid == uid;
       }
-      function isSuperAdmin() {
-         return request.auth != null && 
-                firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.accountType == 'superAdmin';
-      }
-
-      // Public Read Paths:
-      // - posts/{postId}/{mediaId}
-      // - reels/{fileName}
-      // - profile_photos/{fileName}
-      // - courses/..., etc.
       
       match /posts/{postId}/{mediaId} {
-         allow read: if request.auth != null; // Registered users can view posts
+         allow read: if request.auth != null;
          allow write: if isOwner(userId)
                       && request.resource.size < 50 * 1024 * 1024
                       && request.resource.contentType.matches('image/.*|video/.*');
-         // CRITICAL FIX: Allow delete if owner, without Firestore lookup
-         // The isSuperAdmin() check was causing unauthorized errors due to Firestore permission issues
          allow delete: if request.auth != null && request.auth.uid == userId;
       }
 
@@ -44,7 +31,6 @@ service firebase.storage {
          allow delete: if request.auth != null && request.auth.uid == userId;
       }
       
-      // Profile photos - explicit rule for clarity
       match /profile_photos/{fileName} {
          allow read: if request.auth != null;
          allow write: if isOwner(userId)
@@ -53,11 +39,8 @@ service firebase.storage {
          allow delete: if request.auth != null && request.auth.uid == userId;
       }
       
-      // Generic fallback for other user folders (galleries, profile docs, etc)
-      // e.g. users/{uid}/stayPhotos/..., users/{uid}/verification_docs/...
       match /{folder}/{fileName} {
          allow read: if request.auth != null; 
-         // Additional checks could be added here per folder if needed
          allow write: if isOwner(userId) 
                       && request.resource.size < 20 * 1024 * 1024;
          allow delete: if request.auth != null && request.auth.uid == userId;
@@ -65,7 +48,7 @@ service firebase.storage {
     }
     
     // -------------------------------------------------------------------------
-    // LEGACY PROFILE PHOTOS PATH (without users/ prefix)
+    // LEGACY PROFILE PHOTOS PATH
     // -------------------------------------------------------------------------
     match /profilePhotos/{userId}/{fileName} {
       allow read: if request.auth != null;
@@ -77,6 +60,17 @@ service firebase.storage {
     }
     
     // -------------------------------------------------------------------------
+    // STORIES (Root Level)
+    // -------------------------------------------------------------------------
+    match /stories/{userId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null 
+                   && request.auth.uid == userId
+                   && request.resource.size < 50 * 1024 * 1024; 
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // -------------------------------------------------------------------------
     // EXPLICIT DENY ALL OTHER ROOTS
     // -------------------------------------------------------------------------
     match /{allPaths=**} {
@@ -84,4 +78,3 @@ service firebase.storage {
     }
   }
 }
-

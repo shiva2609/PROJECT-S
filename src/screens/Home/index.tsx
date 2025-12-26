@@ -36,6 +36,7 @@ import PostSkeleton from '../../components/post/PostSkeleton';
 import { useBlockedUsers } from '../../hooks/useBlockedUsers'; // V1 MODERATION
 import { useRefreshController, useRefreshListener } from '../../hooks/useRefreshController';
 import { RetryUI } from '../../components/common/RetryUI';
+import { StoryFeed } from '../../components/story/StoryFeed';
 import { ScreenLayout } from '../../components/layout/ScreenLayout';
 
 // Create animated FlatList for native driver support
@@ -402,6 +403,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
             }
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.5}
+            ListHeaderComponent={<StoryFeed />}
             ListEmptyComponent={renderEmptyComponent}
           />
         </View>
