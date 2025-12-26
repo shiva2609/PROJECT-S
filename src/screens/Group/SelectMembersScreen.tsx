@@ -43,7 +43,7 @@ export default function SelectMembersScreen({ navigation, route }: SelectMembers
   const { user } = useAuth();
   const groupId = route?.params?.groupId;
   const mode = route?.params?.mode || 'create';
-  
+
   const [searchQuery, setSearchQuery] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [followingUsers, setFollowingUsers] = useState<User[]>([]);
@@ -60,7 +60,8 @@ export default function SelectMembersScreen({ navigation, route }: SelectMembers
         try {
           const groupData = await getGroup(groupId);
           if (groupData) {
-            setExistingMemberIds(groupData.members.map(m => m.userId));
+            // Group members are now string[] (userIds)
+            setExistingMemberIds(groupData.members);
           }
         } catch (error) {
           if (__DEV__) console.error('Error loading group members:', error);
@@ -75,7 +76,7 @@ export default function SelectMembersScreen({ navigation, route }: SelectMembers
   useEffect(() => {
     const loadFollowing = async () => {
       if (!user?.uid) return;
-      
+
       setInitialLoading(true);
       try {
         const result = await getFollowing(user.uid, { limit: 50 });
@@ -110,7 +111,7 @@ export default function SelectMembersScreen({ navigation, route }: SelectMembers
 
   const toggleUserSelection = (user: User) => {
     const isSelected = selectedUsers.some((u) => u.id === user.id);
-    
+
     if (isSelected) {
       setSelectedUsers(selectedUsers.filter((u) => u.id !== user.id));
     } else {
@@ -130,16 +131,10 @@ export default function SelectMembersScreen({ navigation, route }: SelectMembers
       setAddingMembers(true);
       try {
         const memberIds = selectedUsers.map((u) => u.id);
-        const memberData = selectedUsers.reduce((acc, u) => {
-          acc[u.id] = {
-            username: u.username,
-            photoUrl: u.photoUrl,
-          };
-          return acc;
-        }, {} as { [userId: string]: { username: string; photoUrl?: string } });
-        
-        await addGroupMembers(groupId, memberIds, memberData);
-        
+        // Stripped memberData as per new backend requirement
+
+        await addGroupMembers(groupId, memberIds);
+
         // Navigate back to GroupInfo and refresh
         navigation.navigate('GroupInfo', { groupId });
       } catch (error) {

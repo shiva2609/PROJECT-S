@@ -52,32 +52,33 @@ export default function GroupDetailsScreen({ navigation, route }: GroupDetailsSc
 
     setCreating(true);
     try {
-      // Build member data map
-      const memberData: { [userId: string]: { username: string; photoUrl?: string } } = {};
-      selectedUsers.forEach((u) => {
-        memberData[u.userId] = {
-          username: u.username,
-          photoUrl: u.photoUrl,
-        };
-      });
+      // PART 1 Strict Requirement: createGroup(creatorId, name, image, members, admins, createdAt)
+      // Note: description is not part of the strict backend requirement so we don't pass it.
+      // We pass member IDs directly as required.
 
       const groupId = await createGroup(
         user.uid,
-        user.displayName || 'Unknown',
-        user.photoURL || '',
         groupName.trim(),
-        groupDescription.trim(),
-        groupImage,
-        selectedUsers.map((u) => u.userId),
-        memberData
+        groupImage || null,
+        selectedUsers.map((u) => u.userId)
+        // Description is dropped as per strict backend schema
       );
 
-      // Navigate to group chat
-      navigation.replace('GroupChat', {
-        groupId,
-        groupName: groupName.trim(),
-        groupPhotoUrl: groupImage,
-        memberCount: selectedUsers.length + 1, // +1 for creator
+      // Clear stack and navigate to GroupChat
+      navigation.reset({
+        index: 1,
+        routes: [
+          { name: 'Chats' }, // Go back to chats list root
+          {
+            name: 'GroupChat',
+            params: {
+              groupId,
+              groupName: groupName.trim(),
+              groupPhotoUrl: groupImage,
+              memberCount: selectedUsers.length + 1, // +1 for creator
+            },
+          },
+        ],
       });
     } catch (error) {
       if (__DEV__) console.error('Error creating group:', error);

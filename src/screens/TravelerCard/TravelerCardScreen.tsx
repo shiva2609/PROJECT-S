@@ -1,6 +1,6 @@
 
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Platform, ActivityIndicator, SafeAreaView, TouchableOpacity, Alert, Modal, TouchableWithoutFeedback } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, Platform, ActivityIndicator, SafeAreaView, TouchableOpacity, Alert, Modal, TouchableWithoutFeedback, Animated } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import dayjs from 'dayjs';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -12,6 +12,82 @@ import { getTravelerCard } from '../../global/services/travelerCard/travelerCard
 import { useAuth } from '../../providers/AuthProvider';
 
 type TravelerCardRouteProp = RouteProp<{ params: { userId: string } }, 'params'>;
+
+const SkeletonItem = ({ width, height, borderRadius = 4, style }: any) => {
+    const opacity = useRef(new Animated.Value(0.3)).current;
+
+    useEffect(() => {
+        const animation = Animated.loop(
+            Animated.sequence([
+                Animated.timing(opacity, { toValue: 0.7, duration: 800, useNativeDriver: true }),
+                Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+            ])
+        );
+        animation.start();
+        return () => animation.stop();
+    }, [opacity]);
+
+    return (
+        <Animated.View style={[{ width, height, borderRadius, backgroundColor: '#E5E7EB', opacity }, style]} />
+    );
+};
+
+const TravelerCardSkeleton = ({ navigation }: any) => (
+    <SafeAreaView style={styles.safeArea}>
+        <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                <Icon name="arrow-back" size={24} color="#111827" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Traveler Card</Text>
+            <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.centerContainer}>
+            {/* Skeleton Card Wrapper matching dimensions */}
+            <View style={[styles.cardWrapper, { backgroundColor: '#FFFFFF' }]}>
+                <View style={styles.cardInnerContent}>
+                    {/* Header */}
+                    <View style={styles.rowBetweenStart}>
+                        <View>
+                            <SkeletonItem width={100} height={28} style={{ marginBottom: 4 }} />
+                            <SkeletonItem width={80} height={10} />
+                        </View>
+                        <SkeletonItem width={34} height={34} borderRadius={8} />
+                    </View>
+                    {/* Body */}
+                    <View style={styles.bodyContent}>
+                        <View style={styles.mb6}>
+                            <SkeletonItem width={80} height={10} style={{ marginBottom: 6 }} />
+                            <SkeletonItem width={180} height={20} style={{ marginBottom: 6 }} />
+                            <SkeletonItem width={120} height={10} />
+                        </View>
+                        <View style={styles.mb6}>
+                            <SkeletonItem width={80} height={10} style={{ marginBottom: 6 }} />
+                            <SkeletonItem width={260} height={20} />
+                        </View>
+                        <View style={styles.grid2Col}>
+                            <View><SkeletonItem width={60} height={10} style={{ marginBottom: 6 }} /><SkeletonItem width={80} height={18} /></View>
+                            <View><SkeletonItem width={60} height={10} style={{ marginBottom: 6 }} /><SkeletonItem width={50} height={18} /></View>
+                        </View>
+                    </View>
+                    {/* Footer */}
+                    <View style={styles.footerRow}>
+                        <View style={styles.rowCenter}>
+                            <SkeletonItem width={44} height={44} borderRadius={22} />
+                            <View style={{ marginLeft: 10 }}>
+                                <SkeletonItem width={50} height={8} style={{ marginBottom: 4 }} />
+                                <SkeletonItem width={70} height={16} />
+                            </View>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                            <SkeletonItem width={70} height={8} style={{ marginBottom: 4 }} />
+                            <SkeletonItem width={50} height={16} />
+                        </View>
+                    </View>
+                </View>
+            </View>
+        </View>
+    </SafeAreaView>
+);
 
 export default function TravelerCardScreen() {
     const route = useRoute<TravelerCardRouteProp>();
@@ -56,11 +132,7 @@ export default function TravelerCardScreen() {
     }, [userId, user]);
 
     if (loading) {
-        return (
-            <View style={styles.centerContainer}>
-                <ActivityIndicator size="small" color="#E87A5D" />
-            </View>
-        );
+        return <TravelerCardSkeleton navigation={navigation} />;
     }
 
     // Fallback UI
@@ -117,8 +189,8 @@ export default function TravelerCardScreen() {
                     <LinearGradient
                         // iOS: Push start/end points OUTSIDE the card bounds (e.g. 1.2, -0.2) to soften the spread
                         // Android: Keep standard 1,0 -> 0,1 for visibility
-                        start={Platform.OS === 'ios' ? { x: 1.2, y: -0.2 } : { x: 1, y: 0 }}
-                        end={Platform.OS === 'ios' ? { x: -0.2, y: 1.2 } : { x: 0, y: 1 }}
+                        start={Platform.OS === 'ios' ? { x: 1.6, y: -0.6 } : { x: 1, y: 0 }}
+                        end={Platform.OS === 'ios' ? { x: -0.6, y: 1.6 } : { x: 0, y: 1 }}
                         locations={[0.0, 0.4, 0.6, 1.0]}
                         colors={[
                             Platform.OS === 'android' ? 'rgba(93, 154, 148, 0.22)' : 'rgba(93, 154, 148, 0.05)',  // Android needs higher alpha for same look

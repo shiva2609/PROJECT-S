@@ -190,7 +190,7 @@ export default function CustomDrawerContent(props: DrawerContentComponentProps) 
         <View style={styles.footer}>
           <View style={styles.footerContent}>
             <Text style={styles.footerText}>Made with ❤️ for Travelers</Text>
-            <Text style={styles.versionText}>v1.0.0 Beta</Text>
+            <Text style={styles.versionText}>v1.1.1 Beta</Text>
           </View>
         </View>
       </DrawerContentScrollView>

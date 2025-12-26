@@ -218,6 +218,13 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
     Alert.alert('Info', 'Video picker will be integrated with useMediaManager');
   }, []);
 
+  const handleMessageProfilePress = useCallback(() => {
+    navigation.navigate('ProfileScreen', { userId: otherUserId });
+  }, [navigation, otherUserId]);
+
+  // Display Name logic (moved up)
+  const displayName = otherUserData?.name || otherUserData?.username || 'User';
+
   const renderMessage = useCallback(({ item, index }: { item: Message; index: number }) => {
     // Robust check for current user
     const currentUserId = user?.uid;
@@ -232,35 +239,75 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
       timestamp = item.createdAt.toMillis();
     }
 
-    // Show profile image for incoming messages
-    // For inverted FlatList: index 0 is newest, so check next message (index + 1) for grouping
-    // Show profile image if:
-    // 1. It's an incoming message
-    // 2. It's the last message (index 0 in inverted list) OR
-    // 3. The next message (older) is from a different sender OR
-    // 4. There's a time gap > 5 minutes
-    const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
-    let showProfileImage = false;
-    
-    if (!isSent) {
-      if (!nextMessage || nextMessage.from !== item.from) {
-        // Different sender or last message in list
-        showProfileImage = true;
-      } else {
-        // Same sender - check time gap
-        let nextTimestamp = Date.now();
-        if (typeof nextMessage.createdAt === 'number') {
-          nextTimestamp = nextMessage.createdAt;
-        } else if (nextMessage.createdAt?.toMillis) {
-          nextTimestamp = nextMessage.createdAt.toMillis();
-        }
-        const timeDiff = timestamp - nextTimestamp;
-        // If time gap > 5 minutes, show profile image
-        if (timeDiff > 300000) {
-          showProfileImage = true;
-        }
+    // LIST IS INVERTED [Newest, ..., Oldest]
+    // index is current message.
+    // index + 1 is OLDER message.
+    // index - 1 is NEWER message.
+
+    // Grouping Logic:
+    // A "Block" is a sequence of messages from same sender.
+    // "First" in sequence = Chronologically Top = Visually Top = Oldest in block.
+    // In Inverted List, Oldest in block is the one where (index + 1) is Different Sender.
+
+    // "Last" in sequence = Chronologically Bottom = Visually Bottom = Newest in block.
+    // In Inverted List, Newest in block is the one where (index - 1) is Different Sender.
+
+    const nextMessage = index < messages.length - 1 ? messages[index + 1] : null; // Older
+    const prevMessage = index > 0 ? messages[index - 1] : null; // Newer
+
+    // Check if First In Sequence (Visual Top of block)
+    // If nextMessage (older) does NOT exist, we are the very first message -> we are First.
+    // If nextMessage exists but different sender -> we start a new block -> we are First.
+    // If nextMessage exists, same sender, but Time Gap > 5 min -> we start a new block -> we are First.
+
+    let isFirstInSequence = false;
+    if (!nextMessage || nextMessage.from !== item.from) {
+      isFirstInSequence = true;
+    } else {
+      // Check time gap
+      let nextTimestamp = Date.now();
+      if (typeof nextMessage.createdAt === 'number') {
+        nextTimestamp = nextMessage.createdAt;
+      } else if (nextMessage.createdAt?.toMillis) {
+        nextTimestamp = nextMessage.createdAt.toMillis();
+      }
+      const timeDiff = timestamp - nextTimestamp;
+      if (timeDiff > 300000) { // 5 min
+        isFirstInSequence = true;
       }
     }
+
+    // Check if Last In Sequence (Visual Bottom of block)
+    // If prevMessage (newer) does NOT exist, we are latest -> we are Last.
+    // If prevMessage exists but different sender -> we end the block -> we are Last.
+
+    let isLastInSequence = false;
+    if (!prevMessage || prevMessage.from !== item.from) {
+      isLastInSequence = true;
+    } else {
+      // Check time gap from Prev to Us?
+      // Usually time gap breaks the sequence at the Top.
+      // So if Prev (Newer) is > 5 min newer than Us, then Prev is First of HIS block.
+      // Which means WE are Last of OUR block.
+
+      let prevTimestamp = Date.now();
+      if (typeof prevMessage.createdAt === 'number') {
+        prevTimestamp = prevMessage.createdAt;
+      } else if (prevMessage.createdAt?.toMillis) {
+        prevTimestamp = prevMessage.createdAt.toMillis();
+      }
+      const timeDiff = prevTimestamp - timestamp;
+      if (timeDiff > 300000) {
+        isLastInSequence = true;
+      }
+    }
+
+    // Show Avatar: Only for First message in sequence
+    // User Requirement: "remove the profile photo for every message bubble in chat screen from incoming messages. no need of that"
+    // So we force showProfileImage to false ALWAYS.
+    const showProfileImage = false;
+
+    const formattedTimestamp = timestamp; // Pass number to component
 
     return (
       <MessageBubble
@@ -268,13 +315,16 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
         text={item.text}
         imageUri={item.mediaUrl}
         videoUri={item.type === 'video' ? item.mediaUrl : undefined}
-        timestamp={timestamp}
+        timestamp={formattedTimestamp}
         profileImageUri={!isSent ? avatarUri : undefined}
         showProfileImage={showProfileImage}
         onProfilePress={!isSent ? handleMessageProfilePress : undefined}
+        isFirstInSequence={isFirstInSequence}
+        isLastInSequence={isLastInSequence}
       />
     );
   }, [user?.uid, messages, avatarUri, handleMessageProfilePress]);
+
 
 
   const handleProfilePress = useCallback(() => {
@@ -285,79 +335,74 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
     });
   }, [navigation, otherUserId, displayName, avatarUri]);
 
-  const handleMessageProfilePress = useCallback(() => {
-    navigation.navigate('ProfileScreen', { userId: otherUserId });
-  }, [navigation, otherUserId]);
+  // handleMessageProfilePress and displayName moved up
 
-  const displayName = otherUserData?.name || otherUserData?.username || 'User';
   const lastSeen = 'Active 1h ago'; // TODO: Get actual last seen time
   const insets = useSafeAreaInsets();
   const BlurComponent = Platform.OS === 'ios' ? BlurView : View;
   const screenWidth = Dimensions.get('window').width;
   const headerWidth = screenWidth * 0.90; // 90% of screen width
-  
-  // Calculate header height: safe area + header content (compact ~44px) + margin
-  const headerHeight = insets.top + 44 + 8;
+
+
+  const headerHeight = insets.top + 56; // Fixed height header
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        {/* Custom Header with Glass Effect - Pill Shaped */}
-        <View style={[styles.headerContainer, { width: headerWidth, marginLeft: (screenWidth - headerWidth) / 2 }]}>
+        {/* Custom Header with Glass Effect - Rounded Bottom Only */}
+        <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
           <BlurComponent
             style={StyleSheet.absoluteFill}
             blurType="light"
-            blurAmount={10}
-            reducedTransparencyFallbackColor="rgba(255, 255, 255, 0.35)"
+            blurAmount={8} // Reduced blur
+            reducedTransparencyFallbackColor="rgba(255, 255, 255, 0.85)"
           />
-          <View style={[styles.header, { paddingTop: insets.top + 4, paddingBottom: 4 }]}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={styles.backButton}
-          >
-            <View style={styles.backButtonCircle}>
-              <Icon name="arrow-back" size={20} color="#F28C6B" />
-            </View>
-          </TouchableOpacity>
+          <View style={[styles.header, { height: 60 }]}>
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={styles.backButton}
+            >
+              <Icon name="arrow-back" size={24} color="#F28C6B" />
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={handleProfilePress}
-            style={styles.headerCenter}
-            activeOpacity={0.7}
-          >
-            {avatarUri ? (
-              <SmartImage
-                uri={avatarUri}
-                style={styles.headerAvatar}
-                resizeMode="cover"
-                borderRadius={20}
-                showPlaceholder={true}
-              />
-            ) : (
-              <View style={[styles.headerAvatar, styles.headerAvatarPlaceholder]}>
-                <Text style={styles.headerAvatarText}>
-                  {displayName.charAt(0).toUpperCase()}
-                </Text>
+            <TouchableOpacity
+              onPress={handleProfilePress}
+              style={styles.headerCenter}
+              activeOpacity={0.7}
+            >
+              {avatarUri ? (
+                <SmartImage
+                  uri={avatarUri}
+                  style={styles.headerAvatar}
+                  resizeMode="cover"
+                  borderRadius={18}
+                  showPlaceholder={true}
+                />
+              ) : (
+                <View style={[styles.headerAvatar, styles.headerAvatarPlaceholder]}>
+                  <Text style={styles.headerAvatarText}>
+                    {displayName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.headerTextContainer}>
+                <Text style={styles.headerTitle} numberOfLines={1}>{displayName}</Text>
+                <Text style={styles.headerStatus} numberOfLines={1}>{lastSeen}</Text>
               </View>
-            )}
-            <View style={styles.headerTextContainer}>
-              <Text style={styles.headerTitle}>{displayName}</Text>
-              <Text style={styles.headerStatus}>{lastSeen}</Text>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
 
-          <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.headerActionButton}>
-              <Icon name="call-outline" size={20} color="#FFFFFF" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.headerActionButton}>
-              <Icon name="videocam-outline" size={20} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.headerActionButton}>
+                <Icon name="call" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerActionButton}>
+                <Icon name="videocam" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -393,7 +438,13 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
               inverted={true}
               contentContainerStyle={[
                 styles.messagesList,
-                { paddingTop: headerHeight + 8 }
+                // Inverted List: 
+                // paddingTop = Visual Bottom (Space above Input Bar)
+                // paddingBottom = Visual Top (Space under Header)
+                {
+                  paddingTop: 4,
+                  paddingBottom: headerHeight + 16
+                }
               ]}
               showsVerticalScrollIndicator={false}
               onScrollToIndexFailed={(info) => {
@@ -455,7 +506,7 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
           </View>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -468,43 +519,41 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerContainer: {
-    marginTop: 6,
-    borderRadius: 999, // Pill shape
+    backgroundColor: 'rgba(255, 255, 255, 0.6)', // Slightly more opaque
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-    backgroundColor: 'rgba(255, 255, 255, 0.35)',
-    alignSelf: 'center',
+    borderWidth: 0, // Removed border
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.3)',
+    width: '100%',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
+    paddingHorizontal: 16, // Consistent padding (16-20dp)
   },
   backButton: {
-    padding: 2,
+    padding: 8,
+    marginRight: 4,
   },
   backButtonCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    // unused now
+    width: 0,
+    height: 0,
   },
   headerCenter: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    marginHorizontal: 6,
   },
   headerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#EAD3C5',
+    borderColor: 'rgba(255,255,255,0.5)',
   },
   headerAvatarPlaceholder: {
     backgroundColor: '#F28C6B',
@@ -513,26 +562,29 @@ const styles = StyleSheet.create({
   },
   headerAvatarText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
   },
   headerTextContainer: {
     flex: 1,
     marginLeft: 10,
+    justifyContent: 'center',
   },
   headerTitle: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#2B2B2B',
+    fontFamily: 'System',
   },
   headerStatus: {
     fontSize: 12,
-    color: '#7A7A7A',
-    marginTop: 2,
+    color: '#666666', // Lighter secondary
+    marginTop: 0,
   },
   headerActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 12, // Increased gap
+    paddingRight: 4,
   },
   headerActionButton: {
     width: 36,
@@ -569,25 +621,26 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   messagesList: {
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 12, // Reduced from 16
+    paddingBottom: 4,      // Reduced from 12 for minimal gap
   },
   inputContainer: {
-    marginHorizontal: 12,
-    marginBottom: Platform.OS === 'ios' ? 20 : 12,
-    borderRadius: 24,
+    marginHorizontal: 16, // Premium width
+    marginBottom: Platform.OS === 'ios' ? 10 : 12, // Reduced bottom margin
+    marginTop: 8, // Little padding above input as requested
+    borderRadius: 28, // More rounded
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.5)',
-    backgroundColor: 'rgba(255, 255, 255, 0.35)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.65)', // More opaque/premium
+    paddingHorizontal: 14,
+    paddingVertical: 12, // "Increase the bottom container" -> taller padding
   },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 4,
-    minHeight: 40,
+    paddingHorizontal: 0,
+    minHeight: 36, // Taller touch target
   },
   attachButton: {
     width: 36,

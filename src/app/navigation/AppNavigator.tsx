@@ -173,6 +173,7 @@ export default function AppNavigator() {
           <>
             {/* Main Tabs - wrapped with Drawer */}
             <Stack.Screen name="MainTabs" component={DrawerNavigator} />
+            <Stack.Screen name="UserProfileDetail" component={ProfileScreen} />
             <Stack.Screen name="Home" component={HomeScreen} />
             <Stack.Screen name="Dashboard" component={DashboardScreen} />
             <Stack.Screen name="Account" component={AccountScreen} />

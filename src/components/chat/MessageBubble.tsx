@@ -12,6 +12,8 @@ interface MessageBubbleProps {
   profileImageUri?: string;
   showProfileImage?: boolean;
   onProfilePress?: () => void;
+  isFirstInSequence?: boolean;
+  isLastInSequence?: boolean;
 }
 
 function MessageBubble({
@@ -23,16 +25,24 @@ function MessageBubble({
   profileImageUri,
   showProfileImage = false,
   onProfilePress,
+  isFirstInSequence = true,
+  isLastInSequence = true,
 }: MessageBubbleProps) {
   const isSent = type === 'sent';
 
+  // Inverted FlatList: marginTop adds space ABOVE (visual Top).
+  // First in sequence (Oldest) needs Top spacing.
+  // Subsequent in sequence (Newer) need Small Top spacing.
+  const containerStyle = {
+    marginTop: isFirstInSequence ? 12 : 2,
+    marginBottom: 0,
+    paddingHorizontal: 0, // Removed internal padding
+    flexDirection: 'row' as const,
+    alignItems: 'flex-end' as const,
+  };
+
   return (
-    <View
-      style={[
-        styles.container,
-        isSent ? styles.sentContainer : styles.receivedContainer,
-      ]}
-    >
+    <View style={[containerStyle, isSent ? styles.sentContainer : styles.receivedContainer]}>
       {/* Profile image for incoming messages */}
       {!isSent && (
         <View style={styles.profileImageContainer}>
@@ -62,16 +72,20 @@ function MessageBubble({
                 </View>
               </TouchableOpacity>
             )
-          ) : (
-            <View style={styles.profileImageSpacer} />
-          )}
+          ) : null}
         </View>
       )}
-      
+
       <View
         style={[
           styles.bubble,
           isSent ? styles.sentBubble : styles.receivedBubble,
+          // Visual grouping: Reduce corner radius for grouped messages
+          !isSent && !isFirstInSequence && { borderTopLeftRadius: 4 },
+          // !isSent && !isLastInSequence  && { borderBottomLeftRadius: 4 }, // Keep bubble tail logic if any
+
+          isSent && !isFirstInSequence && { borderTopRightRadius: 4 },
+          // isSent && !isLastInSequence  && { borderBottomRightRadius: 4 },
         ]}
       >
         {imageUri && (
@@ -113,10 +127,7 @@ export default memo(MessageBubble);
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 4,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+    // Removed marginVertical
   },
   sentContainer: {
     justifyContent: 'flex-end',
@@ -127,7 +138,6 @@ const styles = StyleSheet.create({
   profileImageContainer: {
     marginRight: 8,
     marginBottom: 4,
-    width: 36,
   },
   profileImage: {
     width: 36,
@@ -146,9 +156,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  // spacer removed
   profileImageSpacer: {
-    width: 36,
-    height: 36,
+    // Unused
+    width: 0,
+    height: 0,
   },
   bubble: {
     maxWidth: '75%',
