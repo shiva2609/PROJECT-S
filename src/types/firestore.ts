@@ -154,11 +154,29 @@ export interface Conversation {
 }
 
 /**
+ * Traveler Card Document Interface
+ * Collection: traveller_cards/{userId}
+ * Schema v1.0 (Phase 1)
+ */
+export interface TravelerCard {
+  userId: string;                    // Firebase Auth UID
+  travelerId: string;                // 16-char, alphanumeric, immutable
+  displayName: string;               // username (temporary)
+  verifiedName?: string;             // null for now
+  since: string;                     // MMM YYYY (account creation)
+  nationality?: string;              // optional
+  emergencyInfoStatus: "empty" | "completed";
+  trustTier: "UNPROVEN";
+  travelHistoryCount: number;         // default 0
+  verificationState: "COMING_SOON";
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+}
+
+/**
  * Follow State (not a Firestore document, but a computed state)
  */
 export interface FollowState {
   isFollowing: boolean;
   followId: string | null;
 }
-
-

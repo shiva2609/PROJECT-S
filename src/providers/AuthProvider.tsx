@@ -157,6 +157,39 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
   }, [user, validateSession]);
 
+  // 6. Proactive Traveller Card Creation (Phase 1 - Identity Infrastructure)
+  // Ensures every authenticated user has a Traveller Card, regardless of navigation
+  useEffect(() => {
+    let isMounted = true;
+
+    async function ensureCardForUser() {
+      if (!authReady || !user) {
+        return;
+      }
+
+      try {
+        // Import dynamically to avoid circular dependencies
+        const { ensureTravelerCardExists } = await import('../global/services/travelerCard/travelerCard.service');
+
+        console.log('[AuthProvider] 🎫 Ensuring Traveller Card exists for user:', user.uid);
+        await ensureTravelerCardExists(user.uid);
+        console.log('[AuthProvider] ✅ Traveller Card check complete');
+      } catch (error) {
+        // Non-blocking error - card creation will be retried on screen mount if needed
+        console.warn('[AuthProvider] ⚠️ Traveller Card creation failed (non-blocking):', error);
+      }
+    }
+
+    // Run once per session when auth becomes ready
+    if (authReady && user) {
+      ensureCardForUser();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authReady, user?.uid]); // Only re-run if authReady or user.uid changes
+
 
   return (
     <AuthContext.Provider value={{

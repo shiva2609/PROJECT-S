@@ -545,6 +545,17 @@ service cloud.firestore {
     }
     
     // ============================================
+    // Traveller Cards Collection
+    // ============================================
+    match /traveller_cards/{userId} {
+      // Users can read only their own Traveller Card
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Client writes are BLOCKED - only Cloud Functions (admin SDK) can write
+      allow write: if false;
+    }
+    
+    // ============================================
     // Default Deny (for any other collections)
     // ============================================
     match /{document=**} {
