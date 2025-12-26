@@ -139,7 +139,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
   const { visible: rewardVisible, claimed, points, claiming: rewardClaiming, error: rewardError, grantReward, dismiss: dismissReward, showReward } = useRewardOnboarding(user?.uid);
   const { showAlert: showTopicAlert, onClaimNow: handleTopicClaimNow, onRemindLater: handleTopicRemindLater } = useTopicClaimReminder(user?.uid, navigation);
 
-  const HEADER_HEIGHT = 110;
+  const HEADER_HEIGHT = 225; // Adjusted to accommodate StoryFeed (approx 115px) + TopBar + Tabs
   const lastScrollY = useRef(0);
   const headerTranslateY = useSharedValue(0);
   const isHeaderVisible = useRef(true);
@@ -372,6 +372,9 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
           </View>
         </View>
 
+        {/* REPOSITIONED: StoryFeed now lives in the sticky header, above tabs */}
+        <StoryFeed />
+
         <View style={styles.sharedHeader}>
           <SegmentedControl
             selectedTab={selectedTab}
@@ -403,7 +406,7 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
             }
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.5}
-            ListHeaderComponent={<StoryFeed />}
+            ListHeaderComponent={null} // StoryFeed moved to header
             ListEmptyComponent={renderEmptyComponent}
           />
         </View>
