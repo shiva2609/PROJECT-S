@@ -6,8 +6,22 @@
  * - Local: Uses .env file (via dotenv)
  * - Production: Uses Firebase Functions config
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.geminiHealthCheck = exports.buildItinerary = exports.autoVerifyStep = exports.onUpgradeRequestRejected = exports.onUpgradeRequestApproved = void 0;
+exports.createTravelerCardIfMissing = exports.onUserCreated = exports.buildItinerary = exports.autoVerifyStep = exports.onUpgradeRequestRejected = exports.onUpgradeRequestApproved = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 // Load environment variables for local development
@@ -213,8 +227,20 @@ exports.buildItinerary = functions.https.onCall(async (data, context) => {
     }
     // 3. Get API Key from Environment
     // Local: process.env.GEMINI_API_KEY (from .env file)
-    // Production: process.env.GEMINI_API_KEY (from environment variables)
-    const apiKey = process.env.GEMINI_API_KEY;
+    // Production: functions.config().gemini.api_key
+    let apiKey;
+    try {
+        // Try Firebase Functions config first (production)
+        apiKey = functions.config().gemini?.api_key;
+    }
+    catch (error) {
+        // Fallback to process.env for local development
+        apiKey = process.env.GEMINI_API_KEY;
+    }
+    // If still not found, try process.env directly (emulator)
+    if (!apiKey) {
+        apiKey = process.env.GEMINI_API_KEY;
+    }
     if (!apiKey) {
         console.error('GEMINI_API_KEY not configured in environment');
         throw new functions.https.HttpsError('failed-precondition', 'AI service is not properly configured. Please contact support.');
@@ -280,57 +306,122 @@ Format the response in a clear, structured manner with headings for each day.`;
         throw new functions.https.HttpsError('internal', 'Failed to generate itinerary. Please try again later.');
     }
 });
+// Story Features
+__exportStar(require("./stories"), exports);
+// ============================================================================
+// TRAVELER CARD PHASE 1 - AUTO CREATION & REPAIR
+// ============================================================================
 /**
- * TEMPORARY: diagnostic health check for Gemini API
+ * Generate a 16-char unique Traveler ID
+ * Format: 16 uppercase alphanumeric characters [A-Z0-9]
  */
-exports.geminiHealthCheck = functions.https.onRequest(async (req, res) => {
-    const rawKey = process.env.GEMINI_API_KEY;
-    const apiKey = rawKey?.trim();
-    if (!apiKey) {
-        res.status(500).send('Missing internal config: GEMINI_API_KEY is undefined');
+const generateTravelerId = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
+    for (let i = 0; i < 16; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+};
+/**
+ * onUserCreated
+ * Trigger: Auth Create
+ * Goal: Auto-create Traveler Card for new signups
+ */
+exports.onUserCreated = functions.auth.user().onCreate(async (user) => {
+    const { uid, displayName, metadata } = user;
+    const db = admin.firestore();
+    const cardRef = db.collection('traveller_cards').doc(uid);
+    const cardSnap = await cardRef.get();
+    if (cardSnap.exists) {
+        console.log(`Traveler Card already exists for ${uid}`);
         return;
     }
-    // Debug info (safe to return)
-    const keyInfo = {
-        length: apiKey.length,
-        firstFour: apiKey.substring(0, 4),
-        lastFour: apiKey.substring(apiKey.length - 4),
-        isClean: rawKey === apiKey,
-        nodeEnv: process.env.NODE_ENV
+    // Format "Member Since" date (MMM YYYY)
+    let sinceDate = 'Unknown';
+    if (metadata.creationTime) {
+        const date = new Date(metadata.creationTime);
+        if (!isNaN(date.getTime())) {
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            sinceDate = `${months[date.getMonth()]} ${date.getFullYear()}`;
+        }
+    }
+    const travelerId = generateTravelerId();
+    const newCard = {
+        userId: uid,
+        travelerId: travelerId,
+        displayName: displayName || 'Traveler',
+        verifiedName: null,
+        since: sinceDate,
+        nationality: 'India', // Legacy default or optional
+        emergencyInfoStatus: 'empty',
+        trustTier: 'UNPROVEN',
+        travelHistoryCount: 0, // travelHistoryCount matches schema
+        verificationState: 'COMING_SOON',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     try {
-        // Dynamic import to keep cold starts fast if not using this function
-        const { GoogleGenerativeAI } = await Promise.resolve().then(() => require('@google/generative-ai'));
-        const genAI = new GoogleGenerativeAI(apiKey);
-        // Try primary model, fallback to legacy pro if needed
-        const modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-pro'];
-        let lastError;
-        for (const modelName of modelsToTry) {
-            try {
-                console.log(`Attempting health check with model: ${modelName}`);
-                const model = genAI.getGenerativeModel({ model: modelName });
-                const result = await model.generateContent('Reply with the word OK');
-                const response = await result.response;
-                const text = response.text();
-                res.status(200).send(`SUCCESS: ${text} | Model: ${modelName} | Key used: ${keyInfo.firstFour}...${keyInfo.lastFour}`);
-                return; // Success, exit
-            }
-            catch (e) {
-                console.warn(`Model ${modelName} failed:`, e.message);
-                lastError = e;
-                // Continue to next model
-            }
-        }
-        // If we get here, all models failed
-        throw lastError;
+        await cardRef.set(newCard); // Create document
+        console.log(`✅ Traveler Card created for new user ${uid}: ${travelerId}`);
     }
     catch (error) {
-        console.error('Health check failed:', error);
-        res.status(500).send({
-            message: `Health check failed after trying all models. Last error: ${error.message}`,
-            debug: keyInfo,
-            errorDetails: JSON.stringify(error, Object.getOwnPropertyNames(error))
-        });
+        console.error(`❌ Error creating Traveler Card for ${uid}:`, error);
     }
+});
+/**
+ * createTravelerCardIfMissing
+ * Trigger: Callable
+ * Goal: Repair/Create card for existing users who pre-date the feature
+ */
+exports.createTravelerCardIfMissing = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+    }
+    const uid = context.auth.uid;
+    const db = admin.firestore();
+    const cardRef = db.collection('traveller_cards').doc(uid);
+    const cardSnap = await cardRef.get();
+    if (cardSnap.exists) {
+        // Idempotent success
+        return { success: true, message: 'Card already exists', card: cardSnap.data() };
+    }
+    // Fetch user record for metadata
+    let sinceDate = 'Unknown';
+    let displayName = 'Traveler';
+    try {
+        const userRecord = await admin.auth().getUser(uid);
+        displayName = userRecord.displayName || 'Traveler';
+        if (userRecord.metadata.creationTime) {
+            const date = new Date(userRecord.metadata.creationTime);
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            sinceDate = `${months[date.getMonth()]} ${date.getFullYear()}`;
+        }
+    }
+    catch (e) {
+        console.warn(`Could not fetch user record for ${uid}`, e);
+        // Fallback: Use current date
+        const now = new Date();
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        sinceDate = `${months[now.getMonth()]} ${now.getFullYear()}`;
+    }
+    const travelerId = generateTravelerId();
+    const newCard = {
+        userId: uid,
+        travelerId: travelerId,
+        displayName: displayName,
+        verifiedName: null,
+        since: sinceDate,
+        nationality: 'India', // Legacy default
+        emergencyInfoStatus: 'empty',
+        trustTier: 'UNPROVEN',
+        travelHistoryCount: 0,
+        verificationState: 'COMING_SOON',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    await cardRef.set(newCard);
+    console.log(`✅ Auto-repaired (Created) Traveler Card for existing user ${uid}`);
+    return { success: true, message: 'Card created successfully' };
 });
 //# sourceMappingURL=index.js.map

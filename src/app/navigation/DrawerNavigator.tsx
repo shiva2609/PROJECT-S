@@ -11,7 +11,7 @@ import { Tabs } from './AppNavigator';
 // Tools Screens
 import DashboardScreen from '../../screens/Tools/DashboardScreen';
 import HostToolsScreen from '../../screens/Tools/HostToolsScreen';
-import TravelerCardScreen from '../../screens/Tools/TravelerCardScreen';
+import TravelerCardScreen from '../../screens/TravelerCard/TravelerCardScreen';
 import NearYouScreen from '../../screens/Tools/NearYouScreen';
 import ItineraryBuilderScreen from '../../screens/Tools/ItineraryBuilderScreen';
 

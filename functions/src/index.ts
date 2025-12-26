@@ -404,3 +404,133 @@ Format the response in a clear, structured manner with headings for each day.`;
 // Story Features
 export * from './stories';
 
+// ============================================================================
+// TRAVELER CARD PHASE 1 - AUTO CREATION & REPAIR
+// ============================================================================
+
+/**
+ * Generate a 16-char unique Traveler ID
+ * Format: 16 uppercase alphanumeric characters [A-Z0-9]
+ */
+const generateTravelerId = (): string => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 16; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
+
+/**
+ * onUserCreated
+ * Trigger: Auth Create
+ * Goal: Auto-create Traveler Card for new signups
+ */
+export const onUserCreated = functions.auth.user().onCreate(async (user) => {
+  const { uid, displayName, metadata } = user;
+  const db = admin.firestore();
+
+  const cardRef = db.collection('traveller_cards').doc(uid);
+  const cardSnap = await cardRef.get();
+
+  if (cardSnap.exists) {
+    console.log(`Traveler Card already exists for ${uid}`);
+    return;
+  }
+
+  // Format "Member Since" date (MMM YYYY)
+  let sinceDate = 'Unknown';
+  if (metadata.creationTime) {
+    const date = new Date(metadata.creationTime);
+    if (!isNaN(date.getTime())) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      sinceDate = `${months[date.getMonth()]} ${date.getFullYear()}`;
+    }
+  }
+
+  const travelerId = generateTravelerId();
+
+  const newCard = {
+    userId: uid,
+    travelerId: travelerId,
+    displayName: displayName || 'Traveler',
+    verifiedName: null,
+    since: sinceDate,
+    nationality: 'India', // Legacy default or optional
+    emergencyInfoStatus: 'empty',
+    trustTier: 'UNPROVEN',
+    travelHistoryCount: 0, // travelHistoryCount matches schema
+    verificationState: 'COMING_SOON',
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  try {
+    await cardRef.set(newCard); // Create document
+    console.log(`✅ Traveler Card created for new user ${uid}: ${travelerId}`);
+  } catch (error) {
+    console.error(`❌ Error creating Traveler Card for ${uid}:`, error);
+  }
+});
+
+/**
+ * createTravelerCardIfMissing
+ * Trigger: Callable
+ * Goal: Repair/Create card for existing users who pre-date the feature
+ */
+export const createTravelerCardIfMissing = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+  }
+
+  const uid = context.auth.uid;
+  const db = admin.firestore();
+  const cardRef = db.collection('traveller_cards').doc(uid);
+
+  const cardSnap = await cardRef.get();
+  if (cardSnap.exists) {
+    // Idempotent success
+    return { success: true, message: 'Card already exists', card: cardSnap.data() };
+  }
+
+  // Fetch user record for metadata
+  let sinceDate = 'Unknown';
+  let displayName = 'Traveler';
+  try {
+    const userRecord = await admin.auth().getUser(uid);
+    displayName = userRecord.displayName || 'Traveler';
+    if (userRecord.metadata.creationTime) {
+      const date = new Date(userRecord.metadata.creationTime);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      sinceDate = `${months[date.getMonth()]} ${date.getFullYear()}`;
+    }
+  } catch (e) {
+    console.warn(`Could not fetch user record for ${uid}`, e);
+    // Fallback: Use current date
+    const now = new Date();
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    sinceDate = `${months[now.getMonth()]} ${now.getFullYear()}`;
+  }
+
+  const travelerId = generateTravelerId();
+
+  const newCard = {
+    userId: uid,
+    travelerId: travelerId,
+    displayName: displayName,
+    verifiedName: null,
+    since: sinceDate,
+    nationality: 'India', // Legacy default
+    emergencyInfoStatus: 'empty',
+    trustTier: 'UNPROVEN',
+    travelHistoryCount: 0,
+    verificationState: 'COMING_SOON',
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  await cardRef.set(newCard);
+  console.log(`✅ Auto-repaired (Created) Traveler Card for existing user ${uid}`);
+
+  return { success: true, message: 'Card created successfully' };
+});
