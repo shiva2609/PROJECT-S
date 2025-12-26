@@ -1,6 +1,6 @@
 
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Image, ActivityIndicator, SafeAreaView, TouchableOpacity, Alert, Modal, TouchableWithoutFeedback } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, Platform, ActivityIndicator, SafeAreaView, TouchableOpacity, Alert, Modal, TouchableWithoutFeedback, Animated } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import dayjs from 'dayjs';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -12,6 +12,82 @@ import { getTravelerCard } from '../../global/services/travelerCard/travelerCard
 import { useAuth } from '../../providers/AuthProvider';
 
 type TravelerCardRouteProp = RouteProp<{ params: { userId: string } }, 'params'>;
+
+const SkeletonItem = ({ width, height, borderRadius = 4, style }: any) => {
+    const opacity = useRef(new Animated.Value(0.3)).current;
+
+    useEffect(() => {
+        const animation = Animated.loop(
+            Animated.sequence([
+                Animated.timing(opacity, { toValue: 0.7, duration: 800, useNativeDriver: true }),
+                Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+            ])
+        );
+        animation.start();
+        return () => animation.stop();
+    }, [opacity]);
+
+    return (
+        <Animated.View style={[{ width, height, borderRadius, backgroundColor: '#E5E7EB', opacity }, style]} />
+    );
+};
+
+const TravelerCardSkeleton = ({ navigation }: any) => (
+    <SafeAreaView style={styles.safeArea}>
+        <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                <Icon name="arrow-back" size={24} color="#111827" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Traveler Card</Text>
+            <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.centerContainer}>
+            {/* Skeleton Card Wrapper matching dimensions */}
+            <View style={[styles.cardWrapper, { backgroundColor: '#FFFFFF' }]}>
+                <View style={styles.cardInnerContent}>
+                    {/* Header */}
+                    <View style={styles.rowBetweenStart}>
+                        <View>
+                            <SkeletonItem width={100} height={28} style={{ marginBottom: 4 }} />
+                            <SkeletonItem width={80} height={10} />
+                        </View>
+                        <SkeletonItem width={34} height={34} borderRadius={8} />
+                    </View>
+                    {/* Body */}
+                    <View style={styles.bodyContent}>
+                        <View style={styles.mb6}>
+                            <SkeletonItem width={80} height={10} style={{ marginBottom: 6 }} />
+                            <SkeletonItem width={180} height={20} style={{ marginBottom: 6 }} />
+                            <SkeletonItem width={120} height={10} />
+                        </View>
+                        <View style={styles.mb6}>
+                            <SkeletonItem width={80} height={10} style={{ marginBottom: 6 }} />
+                            <SkeletonItem width={260} height={20} />
+                        </View>
+                        <View style={styles.grid2Col}>
+                            <View><SkeletonItem width={60} height={10} style={{ marginBottom: 6 }} /><SkeletonItem width={80} height={18} /></View>
+                            <View><SkeletonItem width={60} height={10} style={{ marginBottom: 6 }} /><SkeletonItem width={50} height={18} /></View>
+                        </View>
+                    </View>
+                    {/* Footer */}
+                    <View style={styles.footerRow}>
+                        <View style={styles.rowCenter}>
+                            <SkeletonItem width={44} height={44} borderRadius={22} />
+                            <View style={{ marginLeft: 10 }}>
+                                <SkeletonItem width={50} height={8} style={{ marginBottom: 4 }} />
+                                <SkeletonItem width={70} height={16} />
+                            </View>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                            <SkeletonItem width={70} height={8} style={{ marginBottom: 4 }} />
+                            <SkeletonItem width={50} height={16} />
+                        </View>
+                    </View>
+                </View>
+            </View>
+        </View>
+    </SafeAreaView>
+);
 
 export default function TravelerCardScreen() {
     const route = useRoute<TravelerCardRouteProp>();
@@ -56,11 +132,7 @@ export default function TravelerCardScreen() {
     }, [userId, user]);
 
     if (loading) {
-        return (
-            <View style={styles.centerContainer}>
-                <ActivityIndicator size="small" color="#E87A5D" />
-            </View>
-        );
+        return <TravelerCardSkeleton navigation={navigation} />;
     }
 
     // Fallback UI
@@ -115,14 +187,16 @@ export default function TravelerCardScreen() {
                         Top-Right: Teal (Very Light) -> Bottom-Left: Coral (Very Light)
                     */}
                     <LinearGradient
-                        start={{ x: 1, y: 0 }} // Top Right
-                        end={{ x: 0, y: 1 }}   // Bottom Left
+                        // iOS: Push start/end points OUTSIDE the card bounds (e.g. 1.2, -0.2) to soften the spread
+                        // Android: Keep standard 1,0 -> 0,1 for visibility
+                        start={Platform.OS === 'ios' ? { x: 1.6, y: -0.6 } : { x: 1, y: 0 }}
+                        end={Platform.OS === 'ios' ? { x: -0.6, y: 1.6 } : { x: 0, y: 1 }}
                         locations={[0.0, 0.4, 0.6, 1.0]}
                         colors={[
-                            'rgba(93, 154, 148, 0.05)',  // Brand Teal @ 5% opacity
+                            Platform.OS === 'android' ? 'rgba(93, 154, 148, 0.22)' : 'rgba(93, 154, 148, 0.05)',  // Android needs higher alpha for same look
                             '#FFFFFF',                    // White
                             '#FFFFFF',                    // White
-                            'rgba(232, 122, 93, 0.05)'    // Brand Coral @ 5% opacity
+                            Platform.OS === 'android' ? 'rgba(232, 122, 93, 0.22)' : 'rgba(232, 122, 93, 0.05)'   // Android needs higher alpha for same look
                         ]}
                         style={styles.cardBackground}
                     />
@@ -209,13 +283,6 @@ export default function TravelerCardScreen() {
                         </View>
 
                     </View>
-
-                    {/* Bottom Gradient Border Stroke */}
-                    <LinearGradient
-                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                        colors={['#E87A5D', '#5D9A94', '#E87A5D']}
-                        style={styles.bottomBorderStroke}
-                    />
                 </View>
 
                 {/* QR POPOVER MODAL */}
@@ -261,13 +328,19 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         color: '#111827',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     centerContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
     },
-    errorText: { color: '#6B7280' },
+    errorText: {
+        color: '#6B7280',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
+    },
 
     screenContent: {
         flex: 1,
@@ -284,11 +357,16 @@ const styles = StyleSheet.create({
         aspectRatio: 1 / 1.6,
         borderRadius: 24,
         backgroundColor: '#FFFFFF',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 20 },
-        shadowOpacity: 0.1,
-        shadowRadius: 30,
-        elevation: 10,
+        // Shadow styling - platform specific
+        ...(Platform.OS === 'ios' ? {
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 20 },
+            shadowOpacity: 0.1,
+            shadowRadius: 30,
+        } : {
+            elevation: 5, // Softer shadow for Android (was 8)
+            shadowColor: '#000', // Applies to elevation on newer Android versions
+        }),
         overflow: 'hidden',
         position: 'relative',
     },
@@ -308,27 +386,33 @@ const styles = StyleSheet.create({
     rowBetweenStart: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center', // Center alignment
+        alignItems: 'center',
     },
     brandTitle: {
         fontSize: 26,
+        lineHeight: 32,
         fontWeight: '700',
         color: Colors.brand.primary,
-        letterSpacing: -0.5,
+        letterSpacing: Platform.select({ ios: -0.5, android: -0.5 }), // Strict match
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     officialTag: {
         fontSize: 10,
+        lineHeight: 14,
         fontWeight: '700',
         color: '#9CA3AF',
         textTransform: 'uppercase',
-        letterSpacing: 2,
+        letterSpacing: 2, // iOS tracking
         marginTop: 4,
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     qrContainer: {
         backgroundColor: '#EAF5F4', // teal-light
-        padding: 6, // Reduced Padding
-        borderRadius: 8, // Reduced Radius
-        borderWidth: 0.5, // Thinner border
+        padding: 6,
+        borderRadius: 8,
+        borderWidth: 0.5,
         borderColor: 'rgba(93, 154, 148, 0.3)',
     },
 
@@ -344,50 +428,66 @@ const styles = StyleSheet.create({
         alignItems: 'flex-end',
         marginBottom: 6,
     },
-    mb6: { marginBottom: 28 },
+    mb6: { marginBottom: 28 }, // Matches iOS spacing spacing
     labelSmall: {
         fontSize: 10,
+        lineHeight: 14,
         fontWeight: '700',
         color: '#9CA3AF', // gray-400
         textTransform: 'uppercase',
-        letterSpacing: 2, // tracking-widest
+        letterSpacing: 2, // iOS tracking
         marginBottom: 6,
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     sinceText: {
-        fontSize: 10, // Match Label Size
+        fontSize: 10,
+        lineHeight: 14,
         fontWeight: '600',
-        color: '#5D9A94', // teal
+        color: '#5D9A94',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     nameRow: {
         flexDirection: 'row',
         alignItems: 'center',
     },
     identityName: {
-        fontSize: 16, // Uniform Body Size
+        fontSize: 16,
+        lineHeight: 22,
         fontWeight: '800',
         color: '#111827',
-        letterSpacing: -0.5,
+        letterSpacing: -0.3,
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     verificationStatus: {
-        fontSize: 10, // Match Label Size
+        fontSize: 10,
+        lineHeight: 14,
         color: '#9CA3AF',
         fontStyle: 'italic',
         marginTop: 6,
         fontWeight: '500',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     comingSoon: {
         color: Colors.brand.primary,
         fontStyle: 'normal',
         fontWeight: '600',
+        includeFontPadding: false,
     },
 
     // ID
     travelerIdMono: {
-        fontSize: 16, // Uniform Body Size
-        fontFamily: 'Courier',
+        fontSize: 16,
+        lineHeight: 24,
+        fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
         fontWeight: '700',
         color: '#1F2937',
         letterSpacing: 0.5,
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
 
     // Grid
@@ -397,17 +497,23 @@ const styles = StyleSheet.create({
         gap: 24,
     },
     valueLarge: {
-        fontSize: 16, // Uniform Body Size
+        fontSize: 16,
+        lineHeight: 22,
         fontWeight: '700',
         color: '#111827',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     linkText: {
-        fontSize: 16, // Uniform Body Size
+        fontSize: 16,
+        lineHeight: 22,
         fontWeight: '600',
         color: '#1F2937',
         textDecorationLine: 'underline',
         textDecorationColor: Colors.brand.primary,
         textDecorationStyle: 'solid',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
 
     // Footer
@@ -434,16 +540,22 @@ const styles = StyleSheet.create({
     },
     labelMicro: {
         fontSize: 9,
+        lineHeight: 12,
         fontWeight: '800',
         textTransform: 'uppercase',
         color: '#9CA3AF',
         letterSpacing: 1.5,
         marginBottom: 2,
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     valueMedium: {
         fontSize: 14,
+        lineHeight: 20,
         fontWeight: '700',
         color: '#111827',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
     verticalDivider: {
         height: 32,
@@ -453,19 +565,14 @@ const styles = StyleSheet.create({
     },
     recordsText: {
         fontSize: 14,
+        lineHeight: 20,
         fontWeight: '700',
         color: '#111827',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     },
 
-    // Bottom Gradient Border Stroke
-    bottomBorderStroke: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: 4,
-        opacity: 0.3, // Lighter
-    },
+    // Bottom Gradient Border Stroke - REMOVED
 
     // POPOVER STYLES
     popoverOverlay: {
@@ -498,5 +605,7 @@ const styles = StyleSheet.create({
         color: '#4B5563',
         lineHeight: 18,
         fontWeight: '500',
+        includeFontPadding: false,
+        textAlignVertical: 'center',
     }
 });

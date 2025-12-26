@@ -177,6 +177,26 @@ export async function calculateUnreadMessageCount(userId: string): Promise<numbe
       console.log('⚠️ Could not fetch Copilot messages:', copilotError.message);
     }
 
+    // 3. Count unread messages from Groups (V2)
+    // Uses group.unreadCounts map
+    try {
+      const groupsRef = collection(db, 'groups');
+      const groupsQuery = query(groupsRef, where('members', 'array-contains', userId));
+      const groupsSnapshot = await getDocs(groupsQuery);
+
+      groupsSnapshot.forEach(doc => {
+        const groupData = doc.data();
+        const unreadMap = groupData.unreadCounts || {};
+        const myUnread = unreadMap[userId];
+        if (typeof myUnread === 'number' && myUnread > 0) {
+          // Count group as 1 unread conversation, regardless of message count
+          unreadCount += 1;
+        }
+      });
+    } catch (groupError) {
+      console.error('Error fetching group unread counts:', groupError);
+    }
+
     return unreadCount;
   } catch (error) {
     console.error('❌ Error calculating unread message count:', error);
@@ -302,6 +322,7 @@ export function listenToUnreadCounts(
   let unsubscribeNotifications: (() => void) | null = null;
   let unsubscribeMessages: (() => void) | null = null;
   let unsubscribeCopilot: (() => void) | null = null;
+  let unsubscribeGroups: (() => void) | null = null;
 
   const updateCounts = async () => {
     try {
@@ -393,6 +414,25 @@ export function listenToUnreadCounts(
     // Ignore
   }
 
+  // Also listen to Group changes (unreadCounts update)
+  try {
+    const groupsRef = collection(db, 'groups');
+    const groupsQuery = query(groupsRef, where('members', 'array-contains', userId));
+
+    // We can't easily subscribe to ALL groups if there are many, but standard query limits apply.
+    // Ideally we would listen to a user subcollection 'group_metas', but we are reading 'groups' directly.
+
+    // NOTE: This listener might be heavy if user is in MANY groups.
+    // Optimization would be to have a 'unreadGroups' map on the User document.
+    // But for now, we follow the direct approach.
+    unsubscribeGroups = onSnapshot(groupsQuery, () => updateCounts(), (error: any) => {
+      if (error?.message?.includes('INTERNAL ASSERTION FAILED')) return;
+      console.error('Error listening to groups for badges:', error);
+    });
+  } catch (err) {
+    console.error('Error setting up groups listener:', err);
+  }
+
   // Also listen to lastRead changes
   const lastReadRef = doc(db, 'users', userId, 'lastRead', 'notifications');
   const unsubscribeLastRead = onSnapshot(
@@ -426,6 +466,7 @@ export function listenToUnreadCounts(
     if (unsubscribeNotifications) unsubscribeNotifications();
     if (unsubscribeMessages) unsubscribeMessages();
     if (unsubscribeCopilot) unsubscribeCopilot();
+    if (unsubscribeGroups) unsubscribeGroups();
     if (unsubscribeLastReadCollection) unsubscribeLastReadCollection();
     unsubscribeLastRead();
     unsubscribeLastReadMessages();

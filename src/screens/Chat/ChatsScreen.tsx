@@ -24,12 +24,13 @@ const globalCachedChats: { [chatId: string]: ChatListItemData } = {};
 
 export default function ChatsScreen({ navigation }: any) {
   const { user } = useAuth();
-  
+
   // Tab state
   const [activeTab, setActiveTab] = useState<'chats' | 'groups'>('chats');
-  
+
   // Groups state
   const [groups, setGroups] = useState<Group[]>([]);
+  const [groupItems, setGroupItems] = useState<ChatListItemData[]>([]);
 
   // 1. Initialize from cache immediately for instant first-frame render
   const [chats, setChats] = useState<ChatListItemData[]>(() => {
@@ -58,13 +59,42 @@ export default function ChatsScreen({ navigation }: any) {
   // Listen to user's groups
   useEffect(() => {
     if (!user?.uid) return;
-    
+
     const unsubscribe = listenToUserGroups(user.uid, (userGroups) => {
       setGroups(userGroups);
     });
-    
+
     return () => unsubscribe();
   }, [user?.uid]);
+
+  // Process groups into ChatListItemData
+  useEffect(() => {
+    if (!user?.uid || !groups) return;
+
+    const processedGroups: ChatListItemData[] = groups.map(group => {
+      const lastMessageTime = group.lastMessageAt?.toMillis?.() || group.createdAt?.toMillis?.() || Date.now();
+
+      // Determine unread count from map: groups/{id}/unreadCounts/{userId}
+      // If unreadCounts exists, use it. Strict per-user count.
+      const rawCount = group.unreadCounts?.[user.uid];
+      const myUnreadCount = (typeof rawCount === 'number') ? rawCount : 0;
+
+      return {
+        id: group.id,
+        userId: group.id, // Using groupId as userId for unique key/navigation mapping
+        username: group.name,
+        profilePhoto: group.image || undefined,
+        lastMessage: group.lastMessage || 'No messages yet',
+        lastMessageTime,
+        unreadCount: myUnreadCount,
+        isTyping: false,
+        isUnread: myUnreadCount > 0,
+        memberCount: group.members.length, // Extra field for navigation
+      } as ChatListItemData & { memberCount: number };
+    }).sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+
+    setGroupItems(processedGroups);
+  }, [groups, user?.uid]); // Removed lastReads dependency for groups since we use unreadCounts logic
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -205,6 +235,29 @@ export default function ChatsScreen({ navigation }: any) {
     return () => { isMounted = false; };
   }, [user?.uid, rawConversations, lastReads, hasReceivedSync]);
 
+  // Total Unread Count Calculation
+  // This value combines unread 1-to-1 chats and group chats.
+  // Ideally, this should be lifted to a Context or Redux to drive a Tab Badge.
+  // For now, we compute it here as requested.
+  // Total Unread Count Calculation
+  // Groups should only count as 1 unread conversation irrespective of message count
+  // 1-to-1 chats typically count as 1 if unread, but if unreadCount is > 1 it usually sums up.
+  // HOWEVER: The user request "if any other group also has messages, then 1 + 1 = 2" implies counting conversations, not messages.
+  // Let's standardize on counting UNREAD CONVERSATIONS for the badge.
+  const totalUnreadCount = React.useMemo(() => {
+    // Count unread conversations (isUnread=true), not sum of messages.
+    const chatUnread = chats.filter(item => item.isUnread).length;
+    const groupUnread = groupItems.filter(item => item.isUnread).length;
+    return chatUnread + groupUnread;
+  }, [chats, groupItems]);
+
+  // Placeholder for triggering notification
+  useEffect(() => {
+    // If there was a setBadge function, we'd call it here:
+    // setAppBadge(totalUnreadCount);
+    // console.log("[ChatsScreen] Total Unread:", totalUnreadCount);
+  }, [totalUnreadCount]);
+
   const handleChatPress = useCallback((item: ChatListItemData) => {
     if (item.userId === 'sanchari-copilot') {
       navigation.navigate('Messaging', {
@@ -227,32 +280,19 @@ export default function ChatsScreen({ navigation }: any) {
     <ChatListItem item={item} onPress={handleChatPress} />
   ), [handleChatPress]);
 
-  const renderGroupItem = useCallback(({ item }: { item: Group }) => (
-    <TouchableOpacity
-      onPress={() => {
-        navigation.navigate('GroupChat', {
-          groupId: item.id,
-          groupName: item.name,
-          groupPhotoUrl: item.photoUrl,
-          memberCount: item.memberCount,
-        });
-      }}
-      style={styles.groupItem}
-    >
-      <SmartImage uri={item.photoUrl} style={styles.groupAvatar} />
-      <View style={styles.groupInfo}>
-        <Text style={styles.groupName} numberOfLines={1}>{item.name}</Text>
-        <Text style={styles.groupLastMessage} numberOfLines={1}>
-          {item.lastMessage?.text || 'No messages yet'}
-        </Text>
-      </View>
-      <View style={styles.groupMeta}>
-        <Text style={styles.groupMemberCount}>
-          {item.memberCount} {item.memberCount === 1 ? 'member' : 'members'}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  ), [navigation]);
+  const handleGroupPress = useCallback((item: ChatListItemData) => {
+    const groupItem = item as ChatListItemData & { memberCount: number };
+    navigation.navigate('GroupChat', {
+      groupId: item.id,
+      groupName: item.username,
+      groupPhotoUrl: item.profilePhoto,
+      memberCount: groupItem.memberCount || 0,
+    });
+  }, [navigation]);
+
+  const renderGroupItem = useCallback(({ item }: { item: ChatListItemData }) => (
+    <ChatListItem item={item} onPress={handleGroupPress} />
+  ), [handleGroupPress]);
 
   const keyExtractor = useCallback((item: ChatListItemData) => item.id, []);
 
@@ -268,7 +308,13 @@ export default function ChatsScreen({ navigation }: any) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => navigation.goBack()}
+          onPress={() => {
+            if (navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              navigation.navigate('MainTabs');
+            }
+          }}
           style={styles.backButton}
         >
           <View style={styles.backButtonCircle}>
@@ -339,8 +385,8 @@ export default function ChatsScreen({ navigation }: any) {
           </View>
         ) : (
           <FlatList
-            data={groups}
-            keyExtractor={(item) => item.id}
+            data={groupItems}
+            keyExtractor={keyExtractor}
             renderItem={renderGroupItem}
             contentContainerStyle={styles.chatList}
             showsVerticalScrollIndicator={false}
@@ -459,46 +505,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     fontFamily: 'System',
-  },
-  groupItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  groupAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-  },
-  groupInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  groupName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1C1C1C',
-    marginBottom: 4,
-  },
-  groupLastMessage: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  groupMeta: {
-    alignItems: 'flex-end',
-  },
-  groupMemberCount: {
-    fontSize: 12,
-    color: '#4CAF50',
-    fontWeight: '600',
   },
   fab: {
     position: 'absolute',

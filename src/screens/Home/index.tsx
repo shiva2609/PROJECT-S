@@ -290,13 +290,24 @@ export default function HomeScreen({ navigation: navProp, route }: any) {
 
   const keyExtractor = useCallback((item: PostWithAuthor) => item.id, []);
 
-  const renderEmptyComponent = useMemo(() => (
-    !forYouPosts || forYouPosts.length === 0 ? (
-      <View style={{ paddingVertical: 100, alignItems: 'center' }}>
-        <Text style={{ color: Colors.black.qua, fontFamily: Fonts.regular }}>No posts yet</Text>
-      </View>
-    ) : null
-  ), [forYouPosts]);
+  const renderEmptyComponent = useMemo(() => {
+    if (forYouFeed.loading && forYouPosts.length === 0) {
+      return (
+        <View style={{ paddingTop: 20 }}>
+          <PostSkeleton />
+          <PostSkeleton />
+        </View>
+      );
+    }
+
+    return (
+      !forYouPosts || forYouPosts.length === 0 ? (
+        <View style={{ paddingVertical: 100, alignItems: 'center' }}>
+          <Text style={{ color: Colors.black.qua, fontFamily: Fonts.regular }}>No posts yet</Text>
+        </View>
+      ) : null
+    );
+  }, [forYouPosts, forYouFeed.loading]);
 
   const handleLoadMore = useCallback(() => {
     if (forYouFeed.hasMore && !forYouFeed.loading) {

@@ -1,7 +1,3 @@
-/**
- * MemberListItem - List item for selecting/viewing members
- */
-
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SmartImage } from '../common/SmartImage';
@@ -32,6 +28,10 @@ export default function MemberListItem({
   showRole = false,
   disabled = false,
 }: MemberListItemProps) {
+  // Logic to determine initials for placeholder
+  const displayName = name || username || 'User';
+  const initial = displayName.charAt(0).toUpperCase();
+
   return (
     <TouchableOpacity
       style={[styles.container, disabled && styles.containerDisabled]}
@@ -39,11 +39,17 @@ export default function MemberListItem({
       activeOpacity={disabled ? 1 : 0.7}
       disabled={disabled}
     >
-      <SmartImage uri={photoUrl} style={styles.avatar} />
-      
+      {photoUrl ? (
+        <SmartImage uri={photoUrl} style={styles.avatar} />
+      ) : (
+        <View style={styles.avatarPlaceholder}>
+          <Text style={styles.avatarPlaceholderText}>{initial}</Text>
+        </View>
+      )}
+
       <View style={styles.info}>
         <Text style={styles.username} numberOfLines={1}>
-          {name || username}
+          {displayName}
         </Text>
         {name && (
           <Text style={styles.handle} numberOfLines={1}>
@@ -80,6 +86,24 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#EAEAEA',
+  },
+  avatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#E87A5D', // Brand Orange
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#EAEAEA',
+  },
+  avatarPlaceholderText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: 'System',
   },
   info: {
     flex: 1,
@@ -89,17 +113,20 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#1C1C1C',
+    fontFamily: 'System',
   },
   handle: {
     fontSize: 13,
     color: '#666666',
     marginTop: 2,
+    fontFamily: 'System',
   },
   roleLabel: {
     fontSize: 11,
     color: '#E87A5D',
     fontWeight: '600',
     marginTop: 2,
+    fontFamily: 'System',
   },
   checkbox: {
     width: 24,
