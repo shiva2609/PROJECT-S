@@ -17,11 +17,19 @@ import { getCachedProfilePhoto } from '../../services/users/userProfilePhotoServ
 import { collection, onSnapshot } from '../../core/firebase/compat';
 import { db } from '../../core/firebase';
 import ChatListItem, { ChatListItemData } from '../../components/chat/ChatListItem';
+import { listenToUserGroups, Group } from '../../services/groups/groupService';
+import { SmartImage } from '../../components/common/SmartImage';
 
 const globalCachedChats: { [chatId: string]: ChatListItemData } = {};
 
 export default function ChatsScreen({ navigation }: any) {
   const { user } = useAuth();
+  
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'chats' | 'groups'>('chats');
+  
+  // Groups state
+  const [groups, setGroups] = useState<Group[]>([]);
 
   // 1. Initialize from cache immediately for instant first-frame render
   const [chats, setChats] = useState<ChatListItemData[]>(() => {
@@ -34,6 +42,7 @@ export default function ChatsScreen({ navigation }: any) {
   const [lastReads, setLastReads] = useState<{ [chatId: string]: number }>({});
   const [hasReceivedSync, setHasReceivedSync] = useState(false);
 
+  // Listen to user's conversations
   useEffect(() => {
     if (!user?.uid) {
       setInitialized(true);
@@ -43,6 +52,17 @@ export default function ChatsScreen({ navigation }: any) {
       setRawConversations(conversations);
       setHasReceivedSync(true);
     });
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  // Listen to user's groups
+  useEffect(() => {
+    if (!user?.uid) return;
+    
+    const unsubscribe = listenToUserGroups(user.uid, (userGroups) => {
+      setGroups(userGroups);
+    });
+    
     return () => unsubscribe();
   }, [user?.uid]);
 
@@ -207,6 +227,33 @@ export default function ChatsScreen({ navigation }: any) {
     <ChatListItem item={item} onPress={handleChatPress} />
   ), [handleChatPress]);
 
+  const renderGroupItem = useCallback(({ item }: { item: Group }) => (
+    <TouchableOpacity
+      onPress={() => {
+        navigation.navigate('GroupChat', {
+          groupId: item.id,
+          groupName: item.name,
+          groupPhotoUrl: item.photoUrl,
+          memberCount: item.memberCount,
+        });
+      }}
+      style={styles.groupItem}
+    >
+      <SmartImage uri={item.photoUrl} style={styles.groupAvatar} />
+      <View style={styles.groupInfo}>
+        <Text style={styles.groupName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.groupLastMessage} numberOfLines={1}>
+          {item.lastMessage?.text || 'No messages yet'}
+        </Text>
+      </View>
+      <View style={styles.groupMeta}>
+        <Text style={styles.groupMemberCount}>
+          {item.memberCount} {item.memberCount === 1 ? 'member' : 'members'}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  ), [navigation]);
+
   const keyExtractor = useCallback((item: ChatListItemData) => item.id, []);
 
   // Item height: 84px (76 inner height + 8 margin bottom)
@@ -234,30 +281,82 @@ export default function ChatsScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      {/* Chat List */}
-      {!initialized && chats.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#E87A5D" />
-        </View>
-      ) : chats.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Icon name="chatbubbles-outline" size={64} color="#757574" />
-          <Text style={styles.emptyText}>No chats yet</Text>
-          <Text style={styles.emptySubtext}>Start a conversation with a traveler!</Text>
-        </View>
+      {/* Tabs */}
+      <View style={styles.tabsContainer}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'chats' && styles.tabActive]}
+          onPress={() => setActiveTab('chats')}
+        >
+          <Text style={[styles.tabText, activeTab === 'chats' && styles.tabTextActive]}>
+            Chats
+          </Text>
+          {activeTab === 'chats' && <View style={styles.tabIndicator} />}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'groups' && styles.tabActive]}
+          onPress={() => setActiveTab('groups')}
+        >
+          <Text style={[styles.tabText, activeTab === 'groups' && styles.tabTextActive]}>
+            Groups
+          </Text>
+          {activeTab === 'groups' && <View style={styles.tabIndicator} />}
+        </TouchableOpacity>
+      </View>
+
+      {/* Chat/Group List */}
+      {activeTab === 'chats' ? (
+        !initialized && chats.length === 0 ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#E87A5D" />
+          </View>
+        ) : chats.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Icon name="chatbubbles-outline" size={64} color="#757574" />
+            <Text style={styles.emptyText}>No chats yet</Text>
+            <Text style={styles.emptySubtext}>Start a conversation with a traveler!</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={chats}
+            keyExtractor={keyExtractor}
+            renderItem={renderChatItem}
+            contentContainerStyle={styles.chatList}
+            showsVerticalScrollIndicator={false}
+            getItemLayout={getItemLayout}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            removeClippedSubviews={true}
+          />
+        )
       ) : (
-        <FlatList
-          data={chats}
-          keyExtractor={keyExtractor}
-          renderItem={renderChatItem}
-          contentContainerStyle={styles.chatList}
-          showsVerticalScrollIndicator={false}
-          getItemLayout={getItemLayout}
-          initialNumToRender={10}
-          maxToRenderPerBatch={10}
-          windowSize={5}
-          removeClippedSubviews={true}
-        />
+        groups.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Icon name="people-outline" size={64} color="#757574" />
+            <Text style={styles.emptyText}>No groups yet</Text>
+            <Text style={styles.emptySubtext}>Create a group to start chatting!</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={groups}
+            keyExtractor={(item) => item.id}
+            renderItem={renderGroupItem}
+            contentContainerStyle={styles.chatList}
+            showsVerticalScrollIndicator={false}
+          />
+        )
+      )}
+
+      {/* Floating Action Button - Only show in Groups tab */}
+      {activeTab === 'groups' && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => navigation.navigate('SelectMembers')}
+          activeOpacity={0.8}
+        >
+          <Icon name="add" size={28} color="#FFFFFF" />
+        </TouchableOpacity>
       )}
     </SafeAreaView>
   );
@@ -298,6 +397,37 @@ const styles = StyleSheet.create({
   settingsButton: {
     padding: 4,
   },
+  tabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EAEAEA',
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  tabActive: {
+    // Active tab has indicator
+  },
+  tabText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#999999',
+  },
+  tabTextActive: {
+    color: '#E87A5D',
+  },
+  tabIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: '#E87A5D',
+  },
   chatList: {
     paddingHorizontal: 16,
     paddingBottom: 20,
@@ -329,5 +459,61 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     fontFamily: 'System',
+  },
+  groupItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  groupAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+  },
+  groupInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  groupName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1C1C1C',
+    marginBottom: 4,
+  },
+  groupLastMessage: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  groupMeta: {
+    alignItems: 'flex-end',
+  },
+  groupMemberCount: {
+    fontSize: 12,
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#E87A5D',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
 });

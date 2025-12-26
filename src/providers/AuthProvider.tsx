@@ -7,7 +7,7 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, ReactNode, useRef, useCallback } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState } from 'react-native';
 import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import { AppError, ErrorType } from '../utils/AppError';
 

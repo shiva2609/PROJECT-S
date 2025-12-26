@@ -46,6 +46,11 @@ import AccountChangeFlowScreen from '../../screens/kyc/AccountChangeFlowScreen';
 import MessagingScreen from '../../screens/Chat/MessagingScreen';
 import ChatsScreen from '../../screens/Chat/ChatsScreen';
 import ChatRoomScreen from '../../screens/Chat/ChatRoom';
+import ProfileOptionsScreen from '../../screens/Chat/ProfileOptionsScreen';
+import SelectMembersScreen from '../../screens/Group/SelectMembersScreen';
+import GroupDetailsScreen from '../../screens/Group/GroupDetailsScreen';
+import GroupChatScreen from '../../screens/Group/GroupChatScreen';
+import GroupInfoScreen from '../../screens/Group/GroupInfoScreen';
 import NotificationsScreen from '../../screens/Notifications/index';
 import PostDetailScreen from '../../screens/Post/PostDetails/index';
 import CommentsScreen from '../../screens/Post/CommentsScreen';
@@ -261,6 +266,48 @@ export default function AppNavigator() {
               options={{
                 headerShown: false,
                 gestureEnabled: true,
+              }}
+            />
+            <Stack.Screen
+              name="ProfileOptions"
+              component={ProfileOptionsScreen}
+              options={{
+                headerShown: false,
+                gestureEnabled: true,
+                presentation: 'modal',
+              }}
+            />
+            <Stack.Screen
+              name="SelectMembers"
+              component={SelectMembersScreen}
+              options={{
+                presentation: 'modal',
+                headerShown: false,
+                gestureEnabled: true,
+              }}
+            />
+            <Stack.Screen
+              name="GroupDetails"
+              component={GroupDetailsScreen}
+              options={{
+                headerShown: false,
+                gestureEnabled: true,
+              }}
+            />
+            <Stack.Screen
+              name="GroupChat"
+              component={GroupChatScreen}
+              options={{
+                headerShown: false,
+                gestureEnabled: true,
+              }}
+            />
+            <Stack.Screen
+              name="GroupInfo"
+              component={GroupInfoScreen}
+              options={{
+                presentation: 'modal',
+                headerShown: false,
               }}
             />
             <Stack.Screen
