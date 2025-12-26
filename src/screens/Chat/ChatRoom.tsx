@@ -10,18 +10,15 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'react-native-linear-gradient';
+import { BlurView } from '@react-native-community/blur';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../../providers/AuthProvider';
-// Removed unused imports
 import MessageBubble from '../../components/chat/MessageBubble';
-
-import GlassHeader from '../../components/layout/GlassHeader';
-import UserAvatar from '../../components/user/UserAvatar';
-import { Colors } from '../../theme/colors';
-// Removed unused MessagesAPI import
-// Replaced V1 imports with V2 MessagesAPI
+import { SmartImage } from '../../components/common/SmartImage';
 import { sendMessage, listenToMessages, setReadReceipt, Message } from '../../services/chat/MessagesAPI';
 import { markChatAsRead } from '../../services/notifications/notificationService';
 import { useProfilePhoto } from '../../hooks/useProfilePhoto';
@@ -49,10 +46,10 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.emptyState}>
-          <Icon name="alert-circle-outline" size={64} color={Colors.black.qua} />
+          <Icon name="alert-circle-outline" size={64} color="#7A7A7A" />
           <Text style={styles.emptyText}>Invalid Chat</Text>
           <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 20 }}>
-            <Text style={{ color: Colors.brand.primary }}>Go Back</Text>
+            <Text style={{ color: '#F28C6B' }}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -221,7 +218,7 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
     Alert.alert('Info', 'Video picker will be integrated with useMediaManager');
   }, []);
 
-  const renderMessage = useCallback(({ item }: { item: Message }) => {
+  const renderMessage = useCallback(({ item, index }: { item: Message; index: number }) => {
     // Robust check for current user
     const currentUserId = user?.uid;
     const isSent = currentUserId ? item.from === currentUserId : false;
@@ -235,6 +232,36 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
       timestamp = item.createdAt.toMillis();
     }
 
+    // Show profile image for incoming messages
+    // For inverted FlatList: index 0 is newest, so check next message (index + 1) for grouping
+    // Show profile image if:
+    // 1. It's an incoming message
+    // 2. It's the last message (index 0 in inverted list) OR
+    // 3. The next message (older) is from a different sender OR
+    // 4. There's a time gap > 5 minutes
+    const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
+    let showProfileImage = false;
+    
+    if (!isSent) {
+      if (!nextMessage || nextMessage.from !== item.from) {
+        // Different sender or last message in list
+        showProfileImage = true;
+      } else {
+        // Same sender - check time gap
+        let nextTimestamp = Date.now();
+        if (typeof nextMessage.createdAt === 'number') {
+          nextTimestamp = nextMessage.createdAt;
+        } else if (nextMessage.createdAt?.toMillis) {
+          nextTimestamp = nextMessage.createdAt.toMillis();
+        }
+        const timeDiff = timestamp - nextTimestamp;
+        // If time gap > 5 minutes, show profile image
+        if (timeDiff > 300000) {
+          showProfileImage = true;
+        }
+      }
+    }
+
     return (
       <MessageBubble
         type={type}
@@ -242,88 +269,190 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
         imageUri={item.mediaUrl}
         videoUri={item.type === 'video' ? item.mediaUrl : undefined}
         timestamp={timestamp}
+        profileImageUri={!isSent ? avatarUri : undefined}
+        showProfileImage={showProfileImage}
+        onProfilePress={!isSent ? handleMessageProfilePress : undefined}
       />
     );
-  }, [user?.uid]);
+  }, [user?.uid, messages, avatarUri, handleMessageProfilePress]);
 
+
+  const handleProfilePress = useCallback(() => {
+    navigation.navigate('ProfileOptions', {
+      userId: otherUserId,
+      username: displayName,
+      profilePhoto: avatarUri,
+    });
+  }, [navigation, otherUserId, displayName, avatarUri]);
+
+  const handleMessageProfilePress = useCallback(() => {
+    navigation.navigate('ProfileScreen', { userId: otherUserId });
+  }, [navigation, otherUserId]);
+
+  const displayName = otherUserData?.name || otherUserData?.username || 'User';
+  const lastSeen = 'Active 1h ago'; // TODO: Get actual last seen time
+  const insets = useSafeAreaInsets();
+  const BlurComponent = Platform.OS === 'ios' ? BlurView : View;
+  const screenWidth = Dimensions.get('window').width;
+  const headerWidth = screenWidth * 0.90; // 90% of screen width
+  
+  // Calculate header height: safe area + header content (compact ~44px) + margin
+  const headerHeight = insets.top + 44 + 8;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <GlassHeader
-        title={otherUserData?.name || otherUserData?.username || 'User'}
-        showBack={true}
-        onBack={() => navigation.goBack()}
-        avatarUri={avatarUri}
-        // V1: No call/video icons - calling not supported
-        actions={[]}
-      />
-
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={Colors.brand.primary} />
-          </View>
-        ) : messages.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Icon name="chatbubbles-outline" size={64} color={Colors.black.qua} />
-            <Text style={styles.emptyText}>No messages yet</Text>
-            <Text style={styles.emptySubtext}>Start your first conversation with {otherUserData?.name || otherUserData?.username || 'User'}.</Text>
-          </View>
-        ) : (
-          <FlatList
-            ref={flatListRef}
-            data={messages}
-            keyExtractor={(item) => item.id}
-            renderItem={renderMessage}
-            windowSize={10}
-            initialNumToRender={15}
-            maxToRenderPerBatch={10}
-            removeClippedSubviews
-            inverted={true}
-            contentContainerStyle={styles.messagesList}
-            showsVerticalScrollIndicator={false}
-            onScrollToIndexFailed={(info) => {
-              console.log('[ChatRoom] scrollToIndex failed, info:', info);
-              // Fallback to scrollToOffset
-              setTimeout(() => {
-                flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-              }, 100);
-            }}
+        {/* Custom Header with Glass Effect - Pill Shaped */}
+        <View style={[styles.headerContainer, { width: headerWidth, marginLeft: (screenWidth - headerWidth) / 2 }]}>
+          <BlurComponent
+            style={StyleSheet.absoluteFill}
+            blurType="light"
+            blurAmount={10}
+            reducedTransparencyFallbackColor="rgba(255, 255, 255, 0.35)"
           />
-        )}
-
-        <View style={styles.inputContainer}>
-          <TouchableOpacity style={styles.attachButton} onPress={() => { }}>
-            <Icon name="add" size={24} color={Colors.black.primary} />
+          <View style={[styles.header, { paddingTop: insets.top + 4, paddingBottom: 4 }]}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.backButton}
+          >
+            <View style={styles.backButtonCircle}>
+              <Icon name="arrow-back" size={20} color="#F28C6B" />
+            </View>
           </TouchableOpacity>
 
-          <TextInput
-            style={styles.textInput}
-            placeholder="Type your message here"
-            placeholderTextColor="#999"
-            value={messageText}
-            onChangeText={(text) => setMessageText(text)}
-            multiline
-            maxLength={1000}
-          />
-
-          {/* Send Button Logic: If text is present, show Send. Else Mic. */}
           <TouchableOpacity
-            style={styles.sendButton}
-            onPress={messageText.trim().length > 0 ? handleSendText : undefined}
-            disabled={messageText.trim().length === 0}
+            onPress={handleProfilePress}
+            style={styles.headerCenter}
             activeOpacity={0.7}
           >
-            <Icon
-              name={messageText.trim().length > 0 ? "send" : "mic-outline"}
-              size={22}
-              color={messageText.trim().length > 0 ? Colors.brand.primary : Colors.black.qua}
-            />
+            {avatarUri ? (
+              <SmartImage
+                uri={avatarUri}
+                style={styles.headerAvatar}
+                resizeMode="cover"
+                borderRadius={20}
+                showPlaceholder={true}
+              />
+            ) : (
+              <View style={[styles.headerAvatar, styles.headerAvatarPlaceholder]}>
+                <Text style={styles.headerAvatarText}>
+                  {displayName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle}>{displayName}</Text>
+              <Text style={styles.headerStatus}>{lastSeen}</Text>
+            </View>
           </TouchableOpacity>
+
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.headerActionButton}>
+              <Icon name="call-outline" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerActionButton}>
+              <Icon name="videocam-outline" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+          </View>
+        </View>
+
+        {/* Chat Area with Gradient Background */}
+        <LinearGradient
+          colors={['#FBE4D8', '#F6C1A5']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={styles.chatGradient}
+        >
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#F28C6B" />
+            </View>
+          ) : messages.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Icon name="chatbubbles-outline" size={64} color="#7A7A7A" />
+              <Text style={styles.emptyText}>No messages yet</Text>
+              <Text style={styles.emptySubtext}>
+                Start your first conversation with {displayName}.
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              keyExtractor={(item) => item.id}
+              renderItem={renderMessage}
+              windowSize={10}
+              initialNumToRender={15}
+              maxToRenderPerBatch={10}
+              removeClippedSubviews
+              inverted={true}
+              contentContainerStyle={[
+                styles.messagesList,
+                { paddingTop: headerHeight + 8 }
+              ]}
+              showsVerticalScrollIndicator={false}
+              onScrollToIndexFailed={(info) => {
+                console.log('[ChatRoom] scrollToIndex failed, info:', info);
+                setTimeout(() => {
+                  flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                }, 100);
+              }}
+            />
+          )}
+        </LinearGradient>
+
+        {/* Message Input Bar with Glass Effect */}
+        <View style={styles.inputContainer}>
+          <BlurComponent
+            style={StyleSheet.absoluteFill}
+            blurType="light"
+            blurAmount={10}
+            reducedTransparencyFallbackColor="rgba(255, 255, 255, 0.35)"
+          />
+          <View style={styles.inputBar}>
+            <TouchableOpacity style={styles.attachButton} onPress={() => { }}>
+              <Icon name="add" size={24} color="#F28C6B" />
+            </TouchableOpacity>
+
+            <TextInput
+              style={styles.textInput}
+              placeholder="Type your message here"
+              placeholderTextColor="#7A7A7A"
+              value={messageText}
+              onChangeText={(text) => setMessageText(text)}
+              multiline
+              maxLength={1000}
+            />
+
+            {messageText.trim().length > 0 ? (
+              <TouchableOpacity
+                style={[styles.sendButton, styles.sendButtonActive]}
+                onPress={handleSendText}
+                activeOpacity={0.7}
+              >
+                <Icon name="send" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.sendButton, styles.micButton]}
+                activeOpacity={0.7}
+              >
+                <LinearGradient
+                  colors={['#2E3A59', '#3F4C6B']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.micButtonGradient}
+                >
+                  <Icon name="mic-outline" size={20} color="#FFFFFF" />
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -333,9 +462,87 @@ export default function ChatRoomScreen({ navigation, route }: ChatRoomScreenProp
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F7', // Explicit light gray background for contrast
+    backgroundColor: '#FBE4D8',
   },
   keyboardView: {
+    flex: 1,
+  },
+  headerContainer: {
+    marginTop: 6,
+    borderRadius: 999, // Pill shape
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    alignSelf: 'center',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+  },
+  backButton: {
+    padding: 2,
+  },
+  backButtonCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginHorizontal: 6,
+  },
+  headerAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#EAD3C5',
+  },
+  headerAvatarPlaceholder: {
+    backgroundColor: '#F28C6B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  headerTextContainer: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#2B2B2B',
+  },
+  headerStatus: {
+    fontSize: 12,
+    color: '#7A7A7A',
+    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  headerActionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F28C6B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chatGradient: {
     flex: 1,
   },
   loadingContainer: {
@@ -352,61 +559,40 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 20,
     fontWeight: '700',
-    color: Colors.black.primary,
+    color: '#2B2B2B',
     marginTop: 16,
   },
   emptySubtext: {
     fontSize: 15,
-    color: Colors.black.secondary,
+    color: '#7A7A7A',
     marginTop: 8,
     textAlign: 'center',
   },
   messagesList: {
     paddingHorizontal: 16,
-    paddingBottom: HEADER_HEIGHT + 12, // For inverted list: paddingBottom creates space at visual TOP
-    paddingTop: 16, // Space at visual bottom (older messages)
-  },
-  typingContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    alignItems: 'flex-start',
-  },
-  typingBubble: {
-    flexDirection: 'row',
-    backgroundColor: Colors.white.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 24,
-    gap: 4,
-    alignItems: 'center',
-  },
-  typingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.black.qua,
-  },
-  typingDotDelay1: {
-    // Animation delay handled by animation library if needed
-  },
-  typingDotDelay2: {
-    // Animation delay handled by animation library if needed
+    paddingBottom: 12,
   },
   inputContainer: {
+    marginHorizontal: 12,
+    marginBottom: Platform.OS === 'ios' ? 20 : 12,
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inputBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF', // Explicit white input background
-    paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 12,
-    paddingHorizontal: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#EAEAEA',
+    paddingHorizontal: 4,
+    minHeight: 40,
   },
   attachButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#F5F5F5',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,
@@ -414,21 +600,33 @@ const styles = StyleSheet.create({
   textInput: {
     flex: 1,
     fontSize: 15,
-    color: '#000000', // Explicit black text
+    color: '#2B2B2B',
     maxHeight: 100,
-    paddingVertical: 8,
+    paddingVertical: 4,
     paddingHorizontal: 12,
-    backgroundColor: '#F5F5F5', // Light gray input field
-    borderRadius: 20,
+    backgroundColor: 'transparent',
   },
   sendButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
+  },
+  sendButtonActive: {
+    backgroundColor: '#F28C6B',
+  },
+  micButton: {
+    overflow: 'hidden',
+  },
+  micButtonGradient: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 
