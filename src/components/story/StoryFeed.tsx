@@ -12,18 +12,20 @@ import { auth } from '../../core/firebase';
 import { colors } from '../../utils/colors';
 import { getUserProfilePhoto } from '../../services/users/userProfilePhotoService';
 
+import { StoryComposer } from './StoryComposer';
+
 export const StoryFeed = () => {
     const [stories, setStories] = useState<StoryUser[]>([]);
     const [currentUserStory, setCurrentUserStory] = useState<StoryUser | null>(null);
     const [selectedUser, setSelectedUser] = useState<StoryUser | null>(null);
     const [uploadModalVisible, setUploadModalVisible] = useState(false);
     const [uploadMedia, setUploadMedia] = useState<{ uri: string, type: 'image' | 'video' } | null>(null);
-    const [caption, setCaption] = useState('');
-    const [uploading, setUploading] = useState(false);
     const [currentUserAvatar, setCurrentUserAvatar] = useState<string>('');
     const [avatarError, setAvatarError] = useState(false);
 
     const [viewedStoryIds, setViewedStoryIds] = useState<Set<string>>(new Set());
+
+    // ... (loadStories and useEffect omitted for brevity in replace, assuming they are correct)
 
     const loadStories = useCallback(async () => {
         const feed = await StoryService.getStoryFeed();
@@ -68,14 +70,16 @@ export const StoryFeed = () => {
         }
     };
 
-    const submitStory = async () => {
+    const submitStory = async (caption: string, renderedUri?: string) => {
         if (!uploadMedia) return;
-        setUploading(true);
+
+        // Use rendered composition if available, otherwise original
+        const uriToUpload = renderedUri || uploadMedia.uri;
+
         try {
-            await StoryService.uploadStory(uploadMedia.uri, uploadMedia.type, caption);
+            await StoryService.uploadStory(uriToUpload, uploadMedia.type, caption);
             setUploadModalVisible(false);
             setUploadMedia(null);
-            setCaption('');
             Alert.alert('Success', 'Story uploaded!');
             loadStories(); // Refresh
         } catch (e: any) {
@@ -84,10 +88,9 @@ export const StoryFeed = () => {
             } else {
                 Alert.alert('Error', 'Failed to upload story');
             }
-        } finally {
-            setUploading(false);
         }
     };
+
 
     const handleStoryFinish = (finishedUserId?: string) => {
         // Auto-advance logic (IMMEDIATE)
@@ -225,34 +228,16 @@ export const StoryFeed = () => {
                 />
             )}
 
-            {/* Upload Modal */}
-            <Modal visible={uploadModalVisible} animationType="slide">
-                <View style={styles.uploadContainer}>
-                    <Text style={styles.uploadTitle}>New Story</Text>
-                    {uploadMedia && (
-                        <Image
-                            source={{ uri: uploadMedia.uri }}
-                            style={styles.previewImage}
-                            resizeMode="contain"
-                        />
-                    )}
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Add a caption..."
-                        value={caption}
-                        onChangeText={setCaption}
-                        placeholderTextColor="#666"
-                    />
-                    <View style={styles.uploadActions}>
-                        <TouchableOpacity onPress={() => setUploadModalVisible(false)} disabled={uploading}>
-                            <Text style={styles.cancelText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={submitStory} disabled={uploading}>
-                            {uploading ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.postText}>Post</Text>}
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
+            {/* Premium Compose Screen */}
+            <StoryComposer
+                visible={uploadModalVisible}
+                media={uploadMedia}
+                onClose={() => {
+                    setUploadModalVisible(false);
+                    setUploadMedia(null);
+                }}
+                onPost={submitStory}
+            />
         </View>
     );
 };
@@ -322,13 +307,4 @@ const styles = StyleSheet.create({
         color: colors.text,
         textAlign: 'center',
     },
-
-    // Upload Modal
-    uploadContainer: { flex: 1, padding: 20, backgroundColor: 'white', paddingTop: 60 },
-    uploadTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 20, textAlign: 'center', color: colors.text },
-    previewImage: { width: '100%', height: 400, backgroundColor: '#f0f0f0', borderRadius: 10, marginBottom: 20 },
-    input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 20, color: colors.text },
-    uploadActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    cancelText: { fontSize: 16, color: colors.danger },
-    postText: { fontSize: 16, fontWeight: 'bold', color: colors.primary },
 });

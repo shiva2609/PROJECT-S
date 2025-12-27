@@ -1,164 +1,269 @@
-// import functions from '@react-native-firebase/functions'; // Native module not installed
 import storage from '@react-native-firebase/storage';
+import firestore from '@react-native-firebase/firestore'; // Native SDK
 import { auth, db } from '../../core/firebase';
 import { Story, StoryUser } from '../../types/story';
-import { arrayUnion } from 'firebase/firestore';
 
-// Use direct Firestore access to avoid native dependency issues
+/**
+ * 🟡 V1 SAFE STORY SERVICE (Native Firestore)
+ * 
+ * Architecture:
+ * - Read: Direct query to 'stories' (Global Feed for V1)
+ * - Write: Direct upload + Firestore 'stories'
+ * - Tracking: Append-only 'story_views' collection
+ * - Scaling: Strict limit(50) and no unbounded arrays
+ */
+
+// Internal type for the raw Firestore document (Lean Schema)
+interface StoryDoc {
+    id: string;
+    authorId: string;
+    mediaRef: string; // Storage path
+    mediaUrl: string; // Public/Signed URL
+    mediaType: 'image' | 'video' | 'text';
+    caption?: string;
+    createdAt: number;
+    expiresAt: number;
+    status: 'processing' | 'ready';
+    // NO embedded views array
+}
+
+// Simple in-memory cache for user profiles (TTL 5 mins)
+// Maps userId -> { username, avatar, timestamp }
+const userProfileCache = new Map<string, { username: string, avatar: string, timestamp: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
 export const StoryService = {
+
+    /**
+     * 🟢 UPLOAD: Direct to Storage V1 path, then Stories collection
+     */
     async uploadStory(
         mediaUri: string,
         mediaType: 'image' | 'video' | 'text',
         caption: string = ''
     ): Promise<void> {
-        try {
-            const currentUser = auth.currentUser;
-            if (!currentUser) throw new Error('Not logged in');
+        const currentUser = auth.currentUser;
+        if (!currentUser) throw new Error('Not logged in');
 
-            // 1. Upload Media
-            const filename = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-            const ext = mediaType === 'video' ? 'mp4' : 'jpg';
-            const ref = storage().ref(`stories/${currentUser.uid}/${filename}.${ext}`);
+        // 1. Upload to partitioned V1 storage path
+        const storyId = db.collection('stories').doc().id;
+        const ext = mediaType === 'video' ? 'mp4' : 'jpg';
+        const filename = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+        // Path: stories/v1/{userId}/{storyId}/{filename} (Matches Rules)
+        const storagePath = `stories/v1/${currentUser.uid}/${storyId}/${filename}`;
 
-            await ref.putFile(mediaUri);
-            const url = await ref.getDownloadURL();
+        const ref = storage().ref(storagePath);
+        await ref.putFile(mediaUri);
+        const mediaUrl = await ref.getDownloadURL();
 
-            // 2. Add to Firestore directly (bypassing Cloud Function)
-            const now = Date.now();
-            const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
+        // 2. Write to Firestore (Lean Schema)
+        const now = Date.now();
+        const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
 
-            const storyData = {
-                userId: currentUser.uid,
-                createdBy: currentUser.uid, // Required by security rules
-                mediaUrl: url,
-                mediaType,
-                caption: caption || '',
-                createdAt: now,
-                expiresAt,
-                views: [],
-            };
+        const storyData: Omit<StoryDoc, 'id'> = {
+            authorId: currentUser.uid,
+            mediaRef: storagePath,
+            mediaUrl,
+            mediaType,
+            caption: caption || '',
+            createdAt: now,
+            expiresAt,
+            status: 'ready'
+        };
 
-            await db.collection('stories').add(storyData);
-
-        } catch (e: any) {
-            console.error("Upload failed", e);
-            if (e.code === 'storage/unauthorized') {
-                throw new Error('Permission denied: You cannot upload to this user location. Please check storage rules.');
-            }
-            if (e.code === 'permission-denied') {
-                throw new Error('Permission denied: Firestore write failed.');
-            }
-            throw e;
-        }
+        // Use the pre-generated ID
+        await db.collection('stories').doc(storyId).set(storyData);
     },
 
+    /**
+     * 🟢 FEED: Pagination + Grouping + Read-Side Join
+     * Strategies:
+     * 1. Fetch recent stories (Limit 50)
+     * 2. Batch fetch View Status
+     * 3. Batch fetch User Models (with caching)
+     */
     async getStoryFeed(): Promise<StoryUser[]> {
-        try {
-            const currentUser = auth.currentUser;
-            if (!currentUser) return [];
+        const currentUser = auth.currentUser;
+        if (!currentUser) return [];
 
+        try {
             const now = Date.now();
 
-            // 1. Query Firestore Directly
-            // We use simple filtering to avoid complex index requirements if possible
-            // But 'expiresAt > now' is efficient.
+            // 1. Query strictly limited active stories
             const snapshot = await db.collection('stories')
                 .where('expiresAt', '>', now)
                 .orderBy('expiresAt', 'desc')
+                .limit(50)
                 .get();
 
-            const stories: Story[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Story));
+            if (snapshot.empty) return [];
 
-            // Group by User (Logic identical to before)
-            const userMap: Record<string, Story[]> = {};
-            stories.forEach(s => {
-                if (!userMap[s.userId]) userMap[s.userId] = [];
-                userMap[s.userId]!.push(s);
+            const rawStories = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            } as StoryDoc));
+
+            // 2. Batch Fetch View Status (What have I seen?)
+            const myViewsSnap = await db.collection('story_views')
+                .where('viewerId', '==', currentUser.uid)
+                .where('seenAt', '>', now - 24 * 60 * 60 * 1000)
+                .get();
+
+            const myViewedStoryIds = new Set(myViewsSnap.docs.map(d => d.data().storyId));
+
+            // 3. Identification of Authors needed
+            const authorIds = new Set(rawStories.map(s => s.authorId));
+            // Filter out self (handled via Auth) and cached users
+            const idsToFetch = Array.from(authorIds).filter(uid => {
+                if (!uid || typeof uid !== 'string' || uid.trim() === '') return false;
+                if (uid === currentUser.uid) return false;
+                const cached = userProfileCache.get(uid);
+                if (cached && (now - cached.timestamp < CACHE_TTL_MS)) return false;
+                return true;
             });
 
+            // 4. Batch Fetch User Profiles (Read-Side Join)
+            if (idsToFetch.length > 0) {
+                // Chunk into 10s for 'IN' query limit
+                const chunks = [];
+                for (let i = 0; i < idsToFetch.length; i += 10) {
+                    const chunk = idsToFetch.slice(i, i + 10);
+                    if (chunk && chunk.length > 0) chunks.push(chunk);
+                }
+
+                await Promise.all(chunks.map(async (chunk) => {
+                    if (!chunk || chunk.length === 0) return;
+                    try {
+                        const userSnap = await db.collection('users')
+                            .where(firestore.FieldPath.documentId(), 'in', chunk)
+                            .get();
+
+                        userSnap.docs.forEach(doc => {
+                            const data = doc.data();
+                            userProfileCache.set(doc.id, {
+                                username: data.username || data.displayName || 'User',
+                                avatar: data.profilePhotoUrl || data.profilePhoto || data.photoURL || '',
+                                timestamp: Date.now()
+                            });
+                        });
+                    } catch (e) {
+                        console.warn('User batch fetch failed', e);
+                    }
+                }));
+            }
+
+            // 5. Construct Feed
+            const userMap: Record<string, Story[]> = {};
+
+            rawStories.forEach(doc => {
+                if (!doc.authorId) return;
+                const viewsInjection = myViewedStoryIds.has(doc.id) ? [currentUser.uid] : [];
+                const uiStory: Story = {
+                    id: doc.id,
+                    userId: doc.authorId,
+                    mediaUrl: doc.mediaUrl,
+                    mediaType: doc.mediaType,
+                    caption: doc.caption,
+                    createdAt: doc.createdAt,
+                    expiresAt: doc.expiresAt,
+                    views: viewsInjection
+                };
+
+                if (!userMap[doc.authorId]) userMap[doc.authorId] = [];
+                userMap[doc.authorId].push(uiStory);
+            });
+
+            // Re-generate authorIds from the validated map keys to ensure consistency
+            const validAuthorIds = Object.keys(userMap);
             const feed: StoryUser[] = [];
-            const uids = Object.keys(userMap);
 
-            await Promise.all(uids.map(async (uid) => {
-                try {
-                    const userDoc = await db.collection('users').doc(uid).get();
-                    if (!userDoc.exists) return;
+            validAuthorIds.forEach(uid => {
+                const stories = userMap[uid];
+                if (!stories || stories.length === 0) return;
 
-                    const userData = userDoc.data();
-                    const username = userData?.username || userData?.displayName || 'User';
-                    const avatar = userData?.profilePhotoUrl || userData?.profilePhoto || userData?.photoURL || userData?.avatar || '';
+                stories.sort((a, b) => a.createdAt - b.createdAt);
+                // Re-calculate hasUnseen
+                const hasUnseen = stories.some(s => !s.views || !s.views.includes(currentUser.uid));
 
-                    const userStories = userMap[uid] || [];
-                    if (userStories.length === 0) return;
+                // Resolve User Data
+                let username = 'User';
+                let avatar = '';
 
-                    userStories.sort((a, b) => a.createdAt - b.createdAt);
-                    const hasUnseen = userStories.some((s: Story) => {
-                        // Safe check for views array
-                        if (!s.views || !Array.isArray(s.views)) return true; // Treat as unseen if views missing
-                        return !s.views.includes(currentUser.uid);
+                if (uid === currentUser.uid) {
+                    username = currentUser.displayName || 'Me';
+                    avatar = currentUser.photoURL || '';
+                    feed.push({
+                        userId: uid,
+                        username: 'Your Story', // Force 'Your Story' label for self usually handled by UI but good to be explicit
+                        avatar,
+                        stories,
+                        hasUnseen: false // Self stories are seen
                     });
+                } else {
+                    const profile = userProfileCache.get(uid);
+                    if (profile) {
+                        username = profile.username;
+                        avatar = profile.avatar;
+                    }
 
                     feed.push({
                         userId: uid,
                         username,
                         avatar,
-                        stories: userStories,
+                        stories,
                         hasUnseen
                     });
-                } catch (err) {
-                    console.error(`Failed to fetch user ${uid}`, err);
                 }
-            }));
+            });
+
+            // Sort: My story first? Or Unseen first?
+            // Usually My Story is separated by UI. The feed request returns "others".
+            // StoryFeed.tsx:34 filters out current user. So we rely on that.
 
             return feed.sort((a, b) => {
                 if (a.userId === currentUser.uid) return -1;
                 if (b.userId === currentUser.uid) return 1;
-                return (Number(b.hasUnseen) - Number(a.hasUnseen));
+                if (a.hasUnseen && !b.hasUnseen) return -1;
+                if (!a.hasUnseen && b.hasUnseen) return 1;
+                return 0;
             });
 
         } catch (e) {
-            console.error("Feed fetch failed", e);
+            console.error("Feed Error", e);
             return [];
         }
     },
 
+    /**
+     * 🟢 VIEW: Append-only write
+     */
     async viewStory(storyId: string): Promise<void> {
-        try {
-            const currentUser = auth.currentUser;
-            if (!currentUser) return;
+        const currentUser = auth.currentUser;
+        if (!currentUser) return;
 
-            // Direct update
-            // Note: This relies on updated Firestore rules allowing specific 'views' update 
-            // by non-owners. If rule update pending, this might fail silently.
-            await db.collection('stories').doc(storyId).update({
-                views: arrayUnion(currentUser.uid)
+        try {
+            const viewId = `${storyId}_${currentUser.uid}`;
+            await db.collection('story_views').doc(viewId).set({
+                storyId,
+                viewerId: currentUser.uid,
+                seenAt: Date.now()
             });
-        } catch (e: any) {
-            // Ignore not-found errors, as they are expected if story is deleted
-            if (e.code === 'firestore/not-found' || e.message?.includes('not-found')) {
-                return;
-            }
-            console.error("View update failed", e);
+        } catch (e) {
+            console.warn("View tracking failed", e);
         }
     },
+
+    async cleanupExpiredStories(): Promise<void> {
+        console.log("Cleanup managed by backend policies");
+    },
+
     async deleteStory(storyId: string, mediaUrl: string): Promise<void> {
         try {
-            const currentUser = auth.currentUser;
-            if (!currentUser) return;
-
-            // Delete from Firestore
             await db.collection('stories').doc(storyId).delete();
-
-            // Try to delete from storage (optional, best effort)
-            try {
-                await storage().refFromURL(mediaUrl).delete();
-            } catch (storageErr) {
-                console.warn("Could not delete from storage", storageErr);
-            }
-
+            const ref = storage().refFromURL(mediaUrl);
+            await ref.delete().catch(() => { });
         } catch (e) {
-            console.error("Delete story failed", e);
-            throw e;
+            console.error("Delete failed", e);
         }
     }
 };

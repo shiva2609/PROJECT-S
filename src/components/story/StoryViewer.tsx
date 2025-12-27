@@ -58,7 +58,8 @@ export const StoryViewer = ({ userStories, visible, onClose, onFinish, onViewSto
             // 🔐 SEEN LOGIC: Mark the STARTING story as seen immediately
             const startStory = userStories.stories[startIndex];
             if (startStory && onViewStory) {
-                onViewStory(startStory.id);
+                // Wrap in timeout to prevent "Cannot update component while rendering" error
+                setTimeout(() => onViewStory(startStory.id), 0);
             }
         }
     }, [visible, userStories]);
