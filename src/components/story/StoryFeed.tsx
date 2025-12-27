@@ -126,6 +126,26 @@ export const StoryFeed = () => {
         });
     }, []);
 
+    const handleStoryDelete = useCallback((storyId: string) => {
+        // Optimistic update for UI responsiveness
+
+        // 1. Update Current User Story (My Story)
+        if (currentUserStory) {
+            const updatedStories = currentUserStory.stories.filter(s => s.id !== storyId);
+            if (updatedStories.length === 0) {
+                setCurrentUserStory(null);
+            } else {
+                setCurrentUserStory({
+                    ...currentUserStory,
+                    stories: updatedStories
+                });
+            }
+        }
+
+        // 2. Also refetch to ensure backend sync
+        loadStories();
+    }, [currentUserStory, loadStories]);
+
     const isUserFullyViewed = (user: StoryUser) => {
         const uid = auth.currentUser?.uid;
         if (!uid) return true;
@@ -153,18 +173,22 @@ export const StoryFeed = () => {
     const currentUser = auth.currentUser;
     const myStoryHasUnseen = currentUserStory ? !isUserFullyViewed(currentUserStory) : false;
 
-    // ... (rest of render logic)
-
     return (
         <View style={styles.container}>
+            {/* ... listContainer ... */}
             <View style={styles.listContainer}>
+                {/* ... (omitted for brevity, assume unchanged inside listContainer) ... */}
                 <View style={styles.addBtnContainer}>
                     <View style={styles.addBtnCircle}>
                         <TouchableOpacity
                             activeOpacity={0.9}
                             onPress={() => {
                                 if (currentUserStory) {
-                                    setSelectedUser(currentUserStory);
+                                    // 🚀 FIX: Inject fresh avatar into story viewer for self
+                                    setSelectedUser({
+                                        ...currentUserStory,
+                                        avatar: currentUserAvatar || currentUserStory.avatar
+                                    });
                                 } else {
                                     handleAddStory();
                                 }
@@ -178,7 +202,6 @@ export const StoryFeed = () => {
                                 />
                             ) : (
                                 <View style={[styles.myAvatar, styles.fallbackMyAvatar]}>
-                                    {/* ISSUE 1: Proper fallback icon (👤) for Story Section - Never show text initials */}
                                     <Icon name="person" size={32} color="#888" />
                                 </View>
                             )}
@@ -225,6 +248,7 @@ export const StoryFeed = () => {
                     onClose={() => setSelectedUser(null)}
                     onFinish={handleStoryFinish}
                     onViewStory={handleStoryView}
+                    onDelete={handleStoryDelete}
                 />
             )}
 
